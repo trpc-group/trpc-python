@@ -1,8 +1,8 @@
-# Tencent is pleased to support the open source community by making tRPC-Agent-Python available.
+# Tencent is pleased to support the open source community by making tRPC-Python available.
 #
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
-# tRPC-Agent-Python is licensed under Apache-2.0.
+# tRPC-Python is licensed under Apache-2.0.
 
 """Logging extension interfaces and shared configuration models.
 
@@ -115,6 +115,16 @@ class OutputConfig:
     writer_config: WriterConfig = None
     format_config: FormatConfig = None
     remote_config: dict = None
+    capture_third_party: bool = False
+    third_party_level: str = ""
+
+    def effective_third_party_level(self) -> str:
+        """Return the level name third-party logs must reach on this output.
+
+        Each backend maps the name onto its own level table, but the fallback
+        chain is the same everywhere.
+        """
+        return (self.third_party_level or self.level or "debug").lower()
 
 
 @dataclass
