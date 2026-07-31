@@ -1,0 +1,12 @@
+# proxy pypi
+--index-url https://mirrors.cloud.tencent.com/pypi/simple/
+# private pypi
+--extra-index-url https://mirrors.tencent.com/repository/pypi/tencent_pypi/simple/
+
+pytest-mock
+pytest-asyncio
+pyparsing==2.2.0
+pytest>=6.1.0
+pytest-cov
+xmlrunner
+# unittest-xml-reporting
