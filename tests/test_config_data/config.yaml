@@ -1,0 +1,7 @@
+Server:
+  Selector:
+    Name: direct
+    IP: 123.122.11.1
+    Port: 3312
+    Filter:
+    Desc: 加一句来测试中文

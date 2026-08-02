@@ -1,0 +1,20 @@
+global: #全局配置
+  namespace: Development #环境类型，分正式production和非正式development两种类型
+  env_name: test #环境名称，非正式环境下多环境的名称
+  save_bind_info:
+    enable: true #默认false关闭
+
+client: #客户端调用的后端配置
+  timeout: 1000 #针对所有后端的请求最长处理时间
+  namespace: Development #针对所有后端的环境
+  service: #针对单个后端的配置
+    - name: trpc.test.helloworld.Greeter #后端服务的service name
+      callee: trpc.test.Helloworld.Greeter
+      network: tcp #后端服务的网络类型 tcp udp 配置优先
+      protocol: trpc #应用层协议 trpc http
+      timeout: 800 #请求最长处理时间
+      set_name: aa
+      env_name: pre
+      filter:
+        - m007
+
