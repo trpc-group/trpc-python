@@ -91,7 +91,7 @@ class BaseConfig(ABC):
 
 
 class BaseDataProvider(ABC):
-    """Define configuration data source access and change watching."""
+    """Define configuration data source access and hot-reload."""
 
     @abstractmethod
     def load(self, file_path: str, options: Optional[Dict] = None) -> bytes:
@@ -107,13 +107,13 @@ class BaseDataProvider(ABC):
         ...
 
     @abstractmethod
-    def watch(self, key: str, callback: Callable, options: Optional[Dict] = None) -> None:
-        """Watch the data source and invoke a callback on changes.
+    def hot_reload(self, key: str, callback: Callable, options: Optional[Dict] = None) -> None:
+        """Hot-reload the data source and invoke a callback on changes.
 
         Args:
-            key: Key of the configuration to watch.
+            key: Key of the configuration to hot-reload.
             callback: Callable invoked when the configuration changes.
-            options: Optional provider-specific watch options.
+            options: Optional provider-specific hot-reload options.
         """
         ...
 
