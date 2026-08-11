@@ -1,47 +1,81 @@
 [build-system]
 requires = [
+    "hatchling",
+    "hatch-cython",
     "setuptools>=40.8.0",
-    "wheel",
     "Cython>=0.29.21,<3.1; python_version < '3.8'",
     "Cython>=3.1.0; python_version >= '3.8'",
 ]
-build-backend = "setuptools.build_meta"
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "trpc_sdk/version.py"
+
+# Used by the temporary setuptools build that hatch-cython invokes for
+# build_ext. Keep discovery limited to trpc_sdk so sibling directories are ignored.
+[tool.setuptools.packages.find]
+include = ["trpc_sdk", "trpc_sdk.*"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["trpc_sdk"]
+
+# Keep Cython declaration/stub files in the wheel for cimport and typing.
+[tool.hatch.build]
+include = [
+    "trpc_sdk/**/*.py",
+    "trpc_sdk/**/*.pyi",
+    "trpc_sdk/**/*.pxd",
+    "trpc_sdk/**/*.pyx",
+]
+
+# Apply to wheel and editable installs.
+[tool.hatch.build.hooks.cython]
+dependencies = ["hatch-cython"]
+
+[tool.hatch.build.hooks.cython.options]
+# Project name is trpc-python, but the import package is trpc_sdk.
+src = "trpc_sdk"
+# Do not compile plain Python modules as extensions.
+compile_py = false
+directives = { language_level = "3", boundscheck = false, wraparound = false }
+
+[tool.hatch.build.hooks.cython.options.files]
+# hatch-cython matches with re.match() from the path start.
+exclude = [
+    "*/filters/*",
+    # Keep package __init__ as pure Python re-exports; compiling it drops imports.
+    ".*/_cython/__init__\\.(py|pxd)$",
+]
 
 [project]
-name = "trpc-python-sdk"
+name = "trpc-python"
 dynamic = ["version"]
-description = "A pluggable, high-performance RPC framework written in python"
+description = "Python LLM agent framework with multi-model support (OpenAI, Anthropic, Gemini, DeepSeek), tool calling, session management, A2A/MCP/AGUI protocols, and FastAPI server integration"
 readme = "README.md"
-requires-python = ">=3.6"
-authors = [{ name = "tRPC Group" }]
+requires-python = ">=3.8"
+license = {text = "Apache-2.0"}
+authors = [{ name = "Tencent", email = "raylchen@tencent.com" }]
+keywords = ["trpc", "agent", "llm", "ai", "langchain", "langgraph", "mcp", "a2a", "fastapi", "multi-agent", "tool-calling"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
 dependencies = [
-    # PyYAML 6.x requires Python >= 3.8
-    "PyYAML>=5.1.0,<6.0; python_version < '3.8'",
-    "PyYAML>=6.0.2; python_version >= '3.8'",
-    "aiohttp>=3.6.2",
-    "netifaces>=0.10.9",
-    "uvloop==0.14.0; python_version < '3.7'",
-    "uvloop>=0.15.0; python_version >= '3.7'",
-    "portalocker>=1.4.0",
-    "automaxprocs>=2.0.0",
-    "Cython>=0.29.21,<3.1; python_version < '3.8'",
-    "Cython>=3.1.0; python_version >= '3.8'",
-    "six>=1.15.0",
-    # replace.sh: Python >= 3.12 pin aiocron==2.1
-    "aiocron>=1.6; python_version < '3.12'",
-    "aiocron>=2.1; python_version >= '3.12'",
-    "psutil>=5.9.0",
-    "py-spy>=0.3.14",
-    "trpc-pb>=0.3.0",
-    "python_gflags>=3.1.2",
-    "backports.zoneinfo; python_version < '3.9' and sys_platform == 'darwin'",
+    "protobuf >=3.19.4",
+    "packaging",
     "dataclasses>=0.8; python_version < '3.7'",
 ]
 
 [project.urls]
-Documentation = "https://git.woa.com/trpc-python/trpc-python/wikis/home"
-Code = "https://git.woa.com/trpc-python/trpc-python"
-"Issue tracker" = "https://git.woa.com/trpc-python/trpc-python/issues"
+Homepage = "https://github.com/trpc-group/trpc-python"
+Documentation = "https://github.com/trpc-group/trpc-python"
+Repository = "https://github.com/trpc-group/trpc-python"
+"Issue tracker" = "https://github.com/trpc-group/trpc-python/issues"
 
 [project.optional-dependencies]
 snappy = ["python-snappy>=0.5.4"]
@@ -65,29 +99,42 @@ test = [
     "unittest-xml-reporting; python_version >= '3.12'",
 ]
 
-[tool.setuptools]
-zip-safe = false
-include-package-data = true
-
-[tool.setuptools.dynamic]
-version = { attr = "trpc.__version__" }
-
-[tool.setuptools.packages.find]
-include = ["trpc", "trpc.*"]
-
-[tool.setuptools.package-data]
-trpc = ["lib/*.so*"]
-
+# uv project configuration. Defaults to the public PyPI index; the project is
+# installed as an editable package.
 [tool.uv]
 package = true
-default-groups = ["test"]
+# Keep uv aligned with the package-level Python support. Optional dependencies
+# that require a newer interpreter use dependency-level markers above.
 
-# 使用腾讯云镜像（与 requirements.txt 一致）
-[[tool.uv.index]]
-name = "tencent"
-url = "https://mirrors.cloud.tencent.com/pypi/simple/"
-default = true
+# 可选：添加工具配置
+[tool.black]
+line-length = 120
+target-version = ['py310']
+exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+  | venv
+  | env
+  | node_modules
+)/
+'''
 
-[[tool.uv.index]]
-name = "tencent-private"
-url = "https://mirrors.tencent.com/repository/pypi/tencent_pypi/simple/"
+[tool.yapf]
+based_on_style = "pep8"
+column_limit = 120
+indent_width = 4
+split_before_logical_operator = true
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = ["tests"]
+asyncio_mode = "auto"
