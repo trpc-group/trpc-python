@@ -1,0 +1,133 @@
+# Tencent is pleased to support the open source community by making tRPC-Agent-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Agent-Python is licensed under Apache-2.0.
+"""Plugin abstract base class"""
+
+from __future__ import annotations
+
+from abc import ABC 
+from enum import IntEnum
+from enum import unique
+
+
+class PluginInitPos(IntEnum):
+    """Plugin start position"""
+
+    WORKER = 2
+    TASK = 3
+
+@unique
+class PluginType(IntEnum):
+    """Plugin type"""
+    UNKNOWN = 0
+
+    SERVER_TRANSPORT = 1
+
+    SERVER_CODEC = 2
+
+    SERVER_CHECKER = 3
+
+    CLIENT_TRANSPORT = 4
+
+    CLIENT_CODEC = 5
+
+    CLIENT_CHECKER = 6
+
+    CONFIG_DATA_SOURCE = 7
+
+    CONFIG_DECODER = 8
+
+    SERIALIZATION = 9
+
+    COMPRESS = 10
+
+    SERVER_FILTER_COMPONENT = 11
+
+    CLIENT_FILTER_COMPONENT = 12
+
+    # plugin - log
+    LOG_LISTENER = 50
+
+    LOG_WRITER = 51
+
+    LOG_COMPONENT = 52
+
+    # plugin - trace
+    TRACE = 60
+
+    # plugin - naming
+    NAMING = 70
+
+    NAMING_REGISTRY = 71
+
+    NAMING_SELECTOR = 72
+
+    NAMING_LOADBALANCE = 73
+
+    NAMING_DISCOVERY = 74
+
+    NAMING_CIRCUIT_BREAKER = 75
+
+    NAMING_SERVICE_ROUTER = 76
+
+    # plugin - metrics
+    METRICS = 80
+
+    # plugin - admin
+    ADMIN = 90
+
+    # plugin - task
+    TASK = 100
+
+    # plugin - user-defined
+    USER_DEFINED = 1000
+
+
+class BasePlugin(ABC):
+    """Plugin abstract base class"""
+
+    def __init__(self):
+        """Initialize plugin"""
+        self._name = ""
+        self._version = ""
+        self._type = PluginType.UNKNOWN
+        self._init_pos = PluginInitPos.WORKER
+    
+    @property
+    def name(self) -> str:
+        """Get plugin name"""
+        return self._name
+    
+    @property
+    def version(self) -> str:
+        """Get plugin version"""
+        return self._version
+    
+    @property
+    def type(self) -> PluginType:
+        """Get plugin type"""
+        return self._type
+    
+    @property
+    def type_name(self) -> str:
+        """Get plugin type name"""
+        return self._type.name
+
+    @property
+    def init_pos(self) -> PluginInitPos:
+        """Get plugin init position"""
+        return self._init_pos
+    
+    def init(self):
+        """Initialize plugin"""
+        return
+
+    def start(self):
+        """Start plugin"""
+        return
+    
+    def stop(self):
+        """Stop plugin"""
+        return

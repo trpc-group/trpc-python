@@ -39,6 +39,9 @@ from ._metrics import ReportStatus
 from ._metrics import StatPolicy
 from ._metrics import StatValue
 from ._node import Node
+from ._plugin import BasePlugin
+from ._plugin import PluginInitPos
+from ._plugin import PluginType
 from ._selector import BaseSelector
 from ._selector import SelectorOption
 from ._selector import ServerRouterOption
@@ -91,6 +94,9 @@ __all__ = [
     "LogLevelType",
     "Method",
     "Node",
+    "BasePlugin",
+    "PluginInitPos",
+    "PluginType",
     "OutputConfig",
     "PassiveData",
     "ProcessType",

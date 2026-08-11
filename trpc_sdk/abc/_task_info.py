@@ -43,7 +43,7 @@ class TaskInfo:
             ``use_c_task`` is forced to ``False``.
     """
 
-    name: str = ""
+    name: str
     handler: Callable[[List[Any]], List[Any]]
     initializer: Optional[Callable[[None], None]] = None
     batch_size: int = 0

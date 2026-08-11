@@ -1,7 +1,3 @@
-# proxy pypi
---index-url https://mirrors.cloud.tencent.com/pypi/simple/
-# private pypi
---extra-index-url https://mirrors.tencent.com/repository/pypi/tencent_pypi/simple/
 
 pytest-mock
 pytest-asyncio
