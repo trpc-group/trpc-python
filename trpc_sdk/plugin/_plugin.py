@@ -153,3 +153,5 @@ class _PluginManager:
         return [instance for instance in self._plugin_instances[plugin_type].values()]
 
 
+
+DEFAULT_PLUGIN_MANAGER = _PluginManager()

@@ -71,7 +71,7 @@ class BaseConfig(ABC):
         ...
 
     @abstractmethod
-    def deserialize(self, object_dict: Dict) -> None:
+    def parse(self, object_dict: Dict) -> None:
         """Hydrate nested objects from decoded configuration.
 
         Args:

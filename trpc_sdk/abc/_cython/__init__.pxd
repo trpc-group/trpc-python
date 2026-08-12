@@ -6,32 +6,19 @@
 
 # cython: language_level=3
 
-from ._codec cimport BaseClientProtocolChecker
-from ._codec cimport BaseCodec
-from ._codec cimport BaseServerProtocolChecker
-from ._context cimport RpczData
-from ._context cimport TrpcContext
-from ._message cimport TrpcFrameHead
-from ._message cimport TrpcMessage
-from ._message_builder cimport new_frame_head
-from ._message_builder cimport parse_frame_head
-from ._message_builder cimport create_new_context
-from ._message_builder cimport create_new_message_for_context
-from ._message_builder cimport create_client_context_from_server
-from ._message_builder cimport get_or_create_message
+# Relative cimports inside a package __init__.pxd resolve against the parent
+# package, so absolute module paths are required here. Only Cython-level
+# symbols may be re-exported; pure-Python classes such as BaseCodec and
+# BaseClientProtocolChecker must be imported with a regular Python import.
 
-__all__ = [
-    "BaseClientProtocolChecker",
-    "BaseCodec",
-    "BaseServerProtocolChecker",
-    "RpczData",
-    "TrpcContext",
-    "TrpcFrameHead",
-    "TrpcMessage",
-    "new_frame_head",
-    "parse_frame_head",
-    "create_new_context",
-    "create_new_message_for_context",
-    "create_client_context_from_server",
-    "get_or_create_message",
-]
+from trpc_sdk.abc._cython._codec cimport BaseServerProtocolChecker
+from trpc_sdk.abc._cython._context cimport RpczData
+from trpc_sdk.abc._cython._context cimport TrpcContext
+from trpc_sdk.abc._cython._message cimport TrpcFrameHead
+from trpc_sdk.abc._cython._message cimport TrpcMessage
+from trpc_sdk.abc._cython._message_builder cimport create_client_context_from_server
+from trpc_sdk.abc._cython._message_builder cimport create_new_context
+from trpc_sdk.abc._cython._message_builder cimport create_new_message_for_context
+from trpc_sdk.abc._cython._message_builder cimport get_or_create_message
+from trpc_sdk.abc._cython._message_builder cimport new_frame_head
+from trpc_sdk.abc._cython._message_builder cimport parse_frame_head

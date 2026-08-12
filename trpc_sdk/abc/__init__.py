@@ -22,6 +22,11 @@ from ._cython import TrpcFrameHead  # pyright: ignore[reportMissingModuleSource]
 from ._cython import TrpcMessage  # pyright: ignore[reportMissingModuleSource]
 from ._discovery import BaseDiscovery
 from ._filter import BaseFilter
+from ._filter import FilterHandleType
+from ._filter import FilterAsyncGenHandleType
+from ._filter import FilterAsyncGenReturnType
+from ._filter import FilterReturnType
+from ._filter import FilterStreamResultType
 from ._loadbalance import BaseLoadBalance
 from ._log import LOG_LEVEL_NAMES
 from ._log import BaseLogger
@@ -76,6 +81,11 @@ __all__ = [
     "BaseDecoder",
     "BaseDiscovery",
     "BaseFilter",
+    "FilterHandleType",
+    "FilterAsyncGenHandleType",
+    "FilterAsyncGenReturnType",
+    "FilterReturnType",
+    "FilterStreamResultType",
     "BaseLoadBalance",
     "BaseLogger",
     "BaseMetrics",
