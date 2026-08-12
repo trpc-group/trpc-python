@@ -146,7 +146,3 @@ class ClientPoolConnClosedError(TrpcException):
             msg: Description of the closed connection access attempt
         """
         super().__init__(TrpcErrorType.FRAMEWORK, TrpcErrorCode.TRPC_CLIENT_POOL_CONN_CLOSED, msg)
-
-
-
-c

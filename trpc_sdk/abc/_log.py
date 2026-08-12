@@ -12,12 +12,16 @@ abstract logger contract used by pluggable logging backends.
 
 from __future__ import annotations
 
-from abc import ABC
+import logging
 from abc import abstractmethod
 from dataclasses import dataclass
 from enum import IntEnum
 from enum import unique
 from typing import Any
+from typing import Optional
+
+from ._plugin import BasePlugin
+from ._plugin import PluginType
 
 
 @unique
@@ -127,8 +131,7 @@ class OutputConfig:
         return (self.third_party_level or self.level or "debug").lower()
 
 
-@dataclass
-class BaseWriter:
+class BaseWriter(BasePlugin):
     """Hold runtime state for one concrete log writer.
 
     Attributes:
@@ -139,18 +142,55 @@ class BaseWriter:
         level: Effective severity threshold for this writer.
     """
 
-    output_config: OutputConfig
-    fmt: str = (
-        "[%(asctime)s][%(levelname)s][%(filename)s:%(lineno)s]"
-        "[%(process)d][%(message)s]"
-    )
-    time_fmt: str = "%Y-%m-%d %H:%M:%S"
-    handler: Any = None
-    level: Any = None
+    def __init__(self):
+        """Initialize the writer plugin."""
+        super().__init__()
+        self._type = PluginType.LOG_WRITER
+        self._name = ""
+        self._version = ""
 
+        self._output_config: OutputConfig = None
+        self._fmt: str = (
+            "[%(asctime)s][%(levelname)s][%(filename)s:%(lineno)s]"
+            "[%(process)d][%(message)s]"
+        )
+        self._time_fmt: str = "%Y-%m-%d %H:%M:%S"
+        self._handler: Optional[logging.Handler] = None
+        self._level: Optional[int] = None
+    
+    @property
+    def output_config(self) -> OutputConfig:
+        """Get the output configuration."""
+        return self._output_config
+    
+    @property
+    def fmt(self) -> str:
+        """Get the message format template."""
+        return self._fmt
+    
+    @property
+    def time_fmt(self) -> str:
+        """Get the timestamp format string."""
+        return self._time_fmt
+    
+    @property
+    def handler(self) -> Optional[logging.Handler]:
+        """Get the backend-specific handler instance."""
+        return self._handler
+    
+    @property
+    def level(self) -> Optional[int]:
+        """Get the effective severity threshold for this writer."""
+        return self._level
 
-class BaseLogger(ABC):
+class BaseLogger(BasePlugin):
     """Define the pluggable logger API used by the framework."""
+
+    def __init__(self):
+        """Initialize the logger plugin."""
+        super().__init__()
+        self._type = PluginType.LOG_COMPONENT
+        self._name = "default"
 
     @abstractmethod
     def debug(self, format_str: str, *args, **kwargs):

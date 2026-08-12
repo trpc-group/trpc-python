@@ -1,17 +1,25 @@
-# -*- coding: utf-8 -*-
-"""
-    trpc metrics output interface
-"""
-from trpc.plugin import PluginType
-from trpc.plugin import get_plugin
-from trpc.trpc_abc.metrics import ActiveData
-from trpc.trpc_abc.metrics import BaseMetrics
-from trpc.trpc_abc.metrics import CallResult
-from trpc.trpc_abc.metrics import CustomData
-from trpc.trpc_abc.metrics import PassiveData
-from trpc.trpc_abc.metrics import StatPolicy
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
 
-DEFAULT_METRICS = None
+"""Telemetry metrics API for tRPC-Python."""
+
+from __future__ import annotations
+
+from typing import Optional
+
+from trpc_sdk.abc import PluginType
+from trpc_sdk.abc import ActiveData
+from trpc_sdk.abc import BaseMetrics
+from trpc_sdk.abc import CallResult
+from trpc_sdk.abc import CustomData
+from trpc_sdk.abc import PassiveData
+from trpc_sdk.abc import StatPolicy
+from trpc_sdk.plugin import get_plugin
+
+DEFAULT_METRICS: Optional[BaseMetrics] = None
 
 
 def set_default_metrics(metrics: BaseMetrics):

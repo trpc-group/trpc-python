@@ -38,6 +38,10 @@ def init_plugins(pos:Optional[PluginInitPos] = None, without_user_define:bool = 
                 try:
                     plugin_instance = plugin_info.cls()
                     plugin_instance.init()
+                    if not plugin_instance.name:
+                        plugin_instance._name = plugin_info.plugin_name
+                    if plugin_instance.type == PluginType.UNKNOWN:
+                        plugin_instance._type= plugin_info.plugin_type
                     plugin_instance.start()
                     DEFAULT_PLUGIN_MANAGER.set_instance(plugin_instance)
                 except PluginInitError:

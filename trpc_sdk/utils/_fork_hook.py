@@ -1,14 +1,24 @@
-# -*- coding: utf-8 -*-
-"""Hook list"""
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
+
+"""Fork hook list"""
+
+from __future__ import annotations
+
 from enum import Enum
 from enum import unique
 
-from typing import Callable, List, Dict, Union
+from typing import Callable
+from typing import Dict
+from typing import List
+from typing import Union
 
-from .utils import ProcessType
-from .utils import is_task_process
-from .utils import is_worker_process
-from .utils import is_dispatcher_process
+from ._multi_process_helper import ProcessType
+from ._multi_process_helper import is_task_process
+from ._multi_process_helper import is_worker_process
 
 HookType = Callable[[], None]
 
@@ -85,11 +95,7 @@ def execute_after_in_child():
     """Execute fork child"""
     _execute_hook(ForkHookType.AFTER_FORK_IN_CHILD)
     global _child_cbs
-    if is_dispatcher_process():
-        cbs = _child_cbs.get(ProcessType.DISPATCHER, [])
-        for cb in cbs:
-            cb()
-    elif is_task_process():
+    if is_task_process():
         cbs = _child_cbs.get(ProcessType.TASK, [])
         for cb in cbs:
             cb()

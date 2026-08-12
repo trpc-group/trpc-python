@@ -3,49 +3,71 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
+"""Formatter registry and context-aware logging formatters."""
 
-"""Logger format"""
+from __future__ import annotations
+
 import json
 import logging
-
+from typing import Any
 from typing import Dict
+from typing import Type
 
-__all__ = ("get_logger_formatter", "register_logger_formatter", "CTX_FIELDS_IN_EXTRA_KEY", "TRPCFormatterWithCtx",
-           "NoopFormatterWithCtx", "TRPCJsonFormatterWithCtx")
+from ._constants import CTX_FIELDS_IN_EXTRA_KEY
 
-_formatter_map: Dict[str, logging.Formatter] = {}
+_formatter_map: Dict[str, Type[logging.Formatter]] = {}
 
 
-def get_logger_formatter(name: str = "json"):
-    """Get logger formatter"""
-    return _formatter_map.get(name, _formatter_map.get("json"))
+def get_logger_formatter(name: str = "json") -> Type[logging.Formatter]:
+    """Return a registered formatter class.
+
+    Args:
+        name: Formatter name.
+
+    Returns:
+        The requested formatter class, or the default JSON formatter class.
+    """
+    return _formatter_map.get(name, _formatter_map["json"])
 
 
 def register_logger_formatter(name: str):
-    """Register format"""
+    """Create a decorator that registers a formatter class.
+
+    Args:
+        name: Formatter name.
+
+    Returns:
+        A class decorator that registers and returns the formatter class.
+    """
 
     def decorator(cls):
-
+        """Register and return a formatter class."""
         _formatter_map[name] = cls
         return cls
 
     return decorator
 
 
-# 在log extra中保存context fields 的key
-CTX_FIELDS_IN_EXTRA_KEY = "trpc_ctx_fields"
-
-
 @register_logger_formatter("json")
-class TRPCFormatterWithCtx(logging.Formatter):
-    """Trpc format with ctx"""
+class TrpcFormatterWithCtx(logging.Formatter):
+    """Append context fields as JSON to a standard formatted log line."""
+
     __LOG_WITH_FIELDS_FORMAT = "{}[{}]"
 
     @staticmethod
-    def _get_attributes(record):
+    def _get_attributes(record: logging.LogRecord) -> Dict[str, Any]:
+        """Return context fields attached to a log record."""
         return vars(record).get(CTX_FIELDS_IN_EXTRA_KEY, {})
 
-    def format(self, record):
+    def format(self, record: logging.LogRecord) -> str:
+        """Format a record and append its context fields.
+
+        Args:
+            record: Record to format.
+
+        Returns:
+            The formatted log line.
+        """
         msg = super().format(record)
         ctx_attrs = self._get_attributes(record)
         if ctx_attrs:
@@ -55,10 +77,18 @@ class TRPCFormatterWithCtx(logging.Formatter):
 
 
 @register_logger_formatter("noop")
-class NoopFormatterWithCtx(TRPCFormatterWithCtx):
-    """Noop format"""
+class NoopFormatterWithCtx(TrpcFormatterWithCtx):
+    """Render only context fields when they are present."""
 
-    def format(self, record):
+    def format(self, record: logging.LogRecord) -> str:
+        """Format a record without the standard prefix when context exists.
+
+        Args:
+            record: Record to format.
+
+        Returns:
+            The formatted message or serialized context fields.
+        """
         msg = super().format(record)
         ctx_attrs = self._get_attributes(record)
         if ctx_attrs:
@@ -68,25 +98,31 @@ class NoopFormatterWithCtx(TRPCFormatterWithCtx):
 
 
 @register_logger_formatter("full_json")
-class TRPCJsonFormatterWithCtx(logging.Formatter):
-    """Trpc format with ctx, full json format"""
-    NORMALDATEFORMAT = '%Y-%m-%d %H:%M:%S'
+class TrpcJsonFormatterWithCtx(logging.Formatter):
+    """Render a complete log record as a JSON object."""
+
+    NORMAL_DATE_FORMAT: str = "%Y-%m-%d %H:%M:%S"
 
     @staticmethod
-    def _get_attributes(record):
+    def _get_attributes(record: logging.LogRecord) -> Dict[str, Any]:
+        """Return context fields attached to a log record."""
         return vars(record).get(CTX_FIELDS_IN_EXTRA_KEY, {})
 
-    def _add_with_newline(self, msg, content):
+    @staticmethod
+    def _add_with_newline(msg: str, content: str) -> str:
+        """Append content to a message on a new line."""
         if msg[-1:] != "\n":
-            msg = msg + "\n"
-        msg = msg + content
-        return msg
+            msg += "\n"
+        return msg + content
 
-    def format(self, record):
-        """Format log message in full json form.
+    def format(self, record: logging.LogRecord) -> str:
+        """Format a log record as JSON.
 
-        :param record: log record.
-        :return: log record in json form.
+        Args:
+            record: Record to format.
+
+        Returns:
+            A JSON-encoded log line.
         """
         record.message = record.getMessage()
         msg = record.message
@@ -99,12 +135,12 @@ class TRPCJsonFormatterWithCtx(logging.Formatter):
         if record.stack_info:
             msg = self._add_with_newline(msg, self.formatStack(record.stack_info))
 
-        datefmt = self.datefmt or self.NORMALDATEFORMAT
+        datefmt = self.datefmt or self.NORMAL_DATE_FORMAT
         record.asctime = self.formatTime(record, datefmt)
 
         log_fields = {
-            "Level": record.levelname,
-            "Timestamp": '%s.%03d' % (record.asctime, record.msecs),
+            "Level": record.levelname,  # cSpell:ignore levelname
+            "Timestamp": "%s.%03d" % (record.asctime, record.msecs),  # cSpell:ignore msecs
             "Line": f"{record.filename}: {record.lineno}",
             "Process": record.process,
             "Message": msg,
@@ -112,6 +148,5 @@ class TRPCJsonFormatterWithCtx(logging.Formatter):
 
         ctx_attrs = self._get_attributes(record)
         if ctx_attrs:
-            for k, v in ctx_attrs.items():
-                log_fields[k] = v
+            log_fields.update(ctx_attrs)
         return json.dumps(log_fields, ensure_ascii=False)

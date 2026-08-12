@@ -1,3 +1,7 @@
+# cSpell:ignore addopts agui asyncio boundscheck cimport cython dataclasses deepseek fastapi hatchling
+# cSpell:ignore langchain langgraph llm mcp mypy pxd pyi pyparsing pytest pyyaml raylchen setuptools
+# cSpell:ignore snappy testpaths trpc unittest uvloop venv wraparound xmlrunner yapf
+
 [build-system]
 requires = [
     "hatchling",
@@ -42,7 +46,6 @@ directives = { language_level = "3", boundscheck = false, wraparound = false }
 [tool.hatch.build.hooks.cython.options.files]
 # hatch-cython matches with re.match() from the path start.
 exclude = [
-    "*/filters/*",
     # Keep package __init__ as pure Python re-exports; compiling it drops imports.
     ".*/_cython/__init__\\.(py|pxd)$",
 ]
@@ -66,6 +69,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
+    "loguru",
     "protobuf >=3.19.4",
     "packaging",
     "dataclasses>=0.8; python_version < '3.7'",

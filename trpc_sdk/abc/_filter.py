@@ -68,14 +68,14 @@ class BaseFilter(ABC):
         self,
         ctx: TrpcContext,
         req: Any,
-        handle: FilterHandleType,
+        next_handle: FilterHandleType,
     ) -> FilterReturnType:
         """Intercept one unary RPC through the filter chain.
 
         Args:
             ctx: Request-scoped RPC context.
             req: Application request object being processed.
-            handle: Next unary handler or filter in the chain.
+            next_handle: Next unary handler or filter in the chain.
 
         Returns:
             Tuple of ``(response, error)`` produced by this filter stage.
@@ -87,7 +87,7 @@ class BaseFilter(ABC):
         self,
         ctx: TrpcContext,
         req: Any,
-        handle: FilterAsyncGenHandleType,
+        next_handle: FilterAsyncGenHandleType,
     ) -> FilterAsyncGenReturnType:
         """Intercept one streaming RPC through the filter chain.
 
@@ -98,7 +98,7 @@ class BaseFilter(ABC):
         Args:
             ctx: Request-scoped RPC context.
             req: Application request object being processed.
-            handle: Next streaming handler or filter in the chain.
+            next_handle: Next streaming handler or filter in the chain.
 
         Returns:
             Asynchronous generator that yields streaming filter results.

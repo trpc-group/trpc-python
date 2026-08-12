@@ -18,11 +18,9 @@ from trpc_sdk.abc import PluginInitPos
 from trpc_sdk.abc import PluginType
 from trpc_sdk.abc import TaskInfo
 
-from ._plugin import _PluginManager
+from ._plugin import DEFAULT_PLUGIN_MANAGER
 from ._plugin import PluginSpec
 
-
-DEFAULT_PLUGIN_MANAGER = _PluginManager()
 
 
 def register_plugin(plugin_type: PluginType,
@@ -82,8 +80,12 @@ def get_plugin(plugin_type: PluginType, plugin_name: str)->Optional[BasePlugin]:
             return None
         plugin_instance = plugin_spec.cls()
         plugin_instance.init()
+        if not plugin_instance.name:
+            plugin_instance._name = plugin_name
+        if plugin_instance.type == PluginType.UNKNOWN:
+            plugin_instance._type= plugin_type
         plugin_instance.start()
-        DEFAULT_PLUGIN_MANAGER.set_instance(plugin_type, plugin_name, plugin_instance)
+        DEFAULT_PLUGIN_MANAGER.set_instance(plugin_instance)
 
     return DEFAULT_PLUGIN_MANAGER.get_instance(plugin_type, plugin_name)
 

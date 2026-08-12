@@ -15,8 +15,10 @@ from enum import unique
 class PluginInitPos(IntEnum):
     """Plugin start position"""
 
-    WORKER = 2
-    TASK = 3
+    UNKNOWN = 0
+    WORKER = 1
+    TASK = 2
+    TIMER = 3
 
 @unique
 class PluginType(IntEnum):
@@ -48,11 +50,14 @@ class PluginType(IntEnum):
     CLIENT_FILTER_COMPONENT = 12
 
     # plugin - log
-    LOG_LISTENER = 50
+    LOG = 50
 
-    LOG_WRITER = 51
+    LOG_LISTENER = 51
 
-    LOG_COMPONENT = 52
+    LOG_WRITER = 52
+
+    LOG_COMPONENT = 53
+
 
     # plugin - trace
     TRACE = 60

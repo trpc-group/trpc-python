@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """TRPC log module.
 
 This module provides logging functionality for the TRPC framework, including:
@@ -13,82 +12,153 @@ This module provides logging functionality for the TRPC framework, including:
 - Plugin-based writer components (console, file)
 - Fork-safe logging support
 """
+
 import json
 import logging
 import os
 import sys
 import warnings
-from typing import Dict, List, Optional
+from typing import Dict
+from typing import List
+from typing import Optional
 
-from trpc_sdk import context
-from trpc_sdk import fork_hook
-from trpc_sdk.config import config
-from trpc_sdk.config import TRPCConfig
-from trpc_sdk.plugin import PluginInitPos
-from trpc_sdk.plugin import PluginType
+from trpc_sdk.abc import BaseLogger
+from trpc_sdk.abc import BasePlugin
+from trpc_sdk.abc import OutputConfig
+from trpc_sdk.abc import PluginType
+from trpc_sdk.abc import TrpcContext
 from trpc_sdk.plugin import get_plugin
 from trpc_sdk.plugin import register_plugin
-from trpc_sdk.abc import BaseLogger
-from trpc_sdk.abc import LogLevelType
-from trpc_sdk.abc import OutputConfig
+from trpc_sdk.utils import register_at_fork
 
-from ._loguru_logger import new_bootstrap_logger
-from ._loguru_logger import new_loguru_logger
-from ._format import CTX_FIELDS_IN_EXTRA_KEY
+from ._config import get_log_backend_config
+from ._config import get_log_config
+from ._config import parse_output_configs
+from ._constants import CTX_FIELDS_IN_EXTRA_KEY
+from ._constants import DEFAULT_LOG_BACKEND_NAME
+from ._constants import DEFAULT_LOG_NAME
+from ._constants import LEVEL_NAME_TO_LOGGING_LEVEL
+from ._constants import META_DATA_KEY_LOG_FIELDS
+from ._constants import TRPC_LOG_BACKEND
+from ._loguru import LoguruFactoryPlugin
+from ._loguru import create_bootstrap_logger
+from ._loguru import create_loguru_logger
 
-
-# Name of the logger the module-level debug()/info()/... helpers write to.
-DEFAULT_LOG_NAME = "default"
-
-DEFAULT_WRITER_CONFIG = None
-DEFAULT_FILE_WRITER = None
-DEFAULT_CONSOLE_WRITER = None
-
-# Logger registry, reached through register() / get_logger().
-_GLOBAL_LOGGER: Dict[str, BaseLogger] = {}
-_DEFAULT_LOGGER = new_bootstrap_logger()
-
-# Flag to track logger initialization
-_LOGGER_ALREADY_INIT = False
-
-# Loguru is the only runtime backend.
-_DEFAULT_LOG_BACKEND_NAME = "loguru"
-
-# Key of the log backend section in the global plugins config.
-_LOG_BACKEND_CONFIG_KEY = "log_backend"
-
-# Backend selected by _register_logger(). Used to dispatch the fork hook.
-_ACTIVE_BACKEND_NAME: str = _DEFAULT_LOG_BACKEND_NAME
-_ACTIVE_BACKEND_OPTIONS: Dict = {}
-
-# Public backend-neutral level maps formerly exported by ``_logging_logger``.
-LEVELS = {
-    "trace": logging.DEBUG,
-    "debug": logging.DEBUG,
-    "info": logging.INFO,
-    "warning": logging.WARNING,
-    "error": logging.ERROR,
-    "fatal": logging.CRITICAL,
-}
-LEVEL_TO_LOGGING_LEVEL = {
-    LogLevelType.TRACE: logging.DEBUG,
-    LogLevelType.DEBUG: logging.DEBUG,
-    LogLevelType.INFO: logging.INFO,
-    LogLevelType.WARNING: logging.WARNING,
-    LogLevelType.ERROR: logging.ERROR,
-    LogLevelType.FATAL: logging.CRITICAL,
-}
+# cSpell: ignore trpc
 
 
-def register(name: str, logger: BaseLogger) -> None:
+class _LoggerManager:
+    """Own mutable logger state and private initialization operations."""
+
+    _loggers: Dict[str, BaseLogger] = {}
+    _default_logger = create_bootstrap_logger()
+    _already_initialized = False
+    _active_backend_name = DEFAULT_LOG_BACKEND_NAME
+    _stack_level = 2
+
+    @staticmethod
+    def _resolve_backend_name() -> str:
+        """Resolve the single runtime backend.
+
+        Legacy selectors are accepted for one transition release. Any value other
+        than ``loguru`` is ignored with a deprecation warning.
+
+        Returns:
+            Name of the log backend plugin.
+        """
+        env_backend = os.environ.get(TRPC_LOG_BACKEND, "").strip().lower()
+        configured = env_backend or next(iter(get_log_backend_config()), "")
+        if configured and configured != DEFAULT_LOG_BACKEND_NAME:
+            warnings.warn(
+                f"log backend '{configured}' is no longer available; using loguru",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return DEFAULT_LOG_BACKEND_NAME
+
+    @classmethod
+    def _select_log_factory(cls) -> LoguruFactoryPlugin:
+        """Return the mandatory Loguru backend."""
+        name = cls._resolve_backend_name()
+        log_factory = get_log_factory(name)
+        is_available = (log_factory is not None and isinstance(log_factory, LoguruFactoryPlugin)
+                        and log_factory.available())
+        if not is_available:
+            raise RuntimeError("the mandatory log factory is not available")
+        return log_factory
+
+    @staticmethod
+    def _third_party_capture_forced() -> Optional[bool]:
+        """Return the value forced by ``TRPC_LOG_INTERCEPT``, if set."""
+        env_switch = os.environ.get("TRPC_LOG_INTERCEPT", "").strip().lower()
+        if not env_switch:
+            return None
+        return env_switch not in ("0", "false", "no")
+
+    @staticmethod
+    def _third_party_root_level(output_config_list: List[OutputConfig]) -> Optional[int]:
+        """Return the minimum root level needed for third-party capture."""
+        levels = [
+            LEVEL_NAME_TO_LOGGING_LEVEL.get(output_config.effective_third_party_level(), logging.DEBUG)
+            for output_config in output_config_list if output_config.capture_third_party
+        ]
+        return min(levels) if levels else None
+
+    @classmethod
+    def _setup_third_party_capture(
+        cls,
+        backend,
+        output_configs_by_logger: Dict[str, List[OutputConfig]],
+    ) -> None:
+        """Ask the backend to route third-party logs into marked outputs."""
+        if not hasattr(backend, "install_third_party_capture"):
+            return
+
+        all_outputs = [config_item for configs in output_configs_by_logger.values() for config_item in configs]
+        root_level = cls._third_party_root_level(all_outputs)
+        forced = cls._third_party_capture_forced()
+        if forced is False or (forced is None and root_level is None):
+            return
+
+        if root_level is None:
+            backend.capture_all_outputs(DEFAULT_LOG_NAME)
+            root_level = logging.NOTSET
+        backend.install_third_party_capture(root_level)
+
+    @classmethod
+    def _register_logger(cls, log_plugin_config_dict: Dict) -> None:
+        """Register loggers from a plugin configuration dictionary."""
+        log_factory = cls._select_log_factory()
+        cls._active_backend_name = log_factory.name
+        output_configs_by_logger = {}
+        for name, log_plugin_config in log_plugin_config_dict.items():
+            output_configs_by_logger[name] = parse_output_configs(log_plugin_config)
+            logger = log_factory.create_logger(name, output_configs_by_logger[name])
+            if name == DEFAULT_LOG_NAME:
+                cls._default_logger = logger
+            cls._loggers[name] = logger
+
+        cls._setup_third_party_capture(log_factory, output_configs_by_logger)
+
+    @staticmethod
+    def _recreate_logging_locks() -> None:
+        """Recreate every registered logging handler lock after a fork."""
+        logger_keys = list(logging.Logger.manager.loggerDict.keys())
+        logger_keys.insert(0, "")
+        for logger_name in logger_keys:
+            logger = logging.getLogger(logger_name)
+            for handler in logger.handlers:
+                handler.createLock()
+
+
+def register_logger(name: str, logger: BaseLogger) -> None:
     """Register a logger with the given name.
 
     Args:
         name: Logger name for registration.
         logger: Logger instance to register.
     """
-    global _GLOBAL_LOGGER
-    _GLOBAL_LOGGER[name] = logger
+    _LoggerManager._loggers[name] = logger
 
 
 def set_default_logger(logger: BaseLogger) -> None:
@@ -97,13 +167,11 @@ def set_default_logger(logger: BaseLogger) -> None:
     Args:
         logger: Logger instance to set as default.
     """
-    global _DEFAULT_LOGGER
-    _DEFAULT_LOGGER = logger
-    trpc_sdk.plugin.set_logger(logger)
-    register(DEFAULT_LOG_NAME, logger)
+    _LoggerManager._default_logger = logger
+    register_logger(DEFAULT_LOG_NAME, logger)
 
 
-set_default_logger(_DEFAULT_LOGGER)
+set_default_logger(_LoggerManager._default_logger)
 
 
 def get_logger(name: str) -> BaseLogger:
@@ -117,19 +185,16 @@ def get_logger(name: str) -> BaseLogger:
     Returns:
         Logger instance associated with the name, or default logger if not found.
     """
-    global _GLOBAL_LOGGER
-
-    if name not in _GLOBAL_LOGGER:
-        global _DEFAULT_LOGGER
-        log_instance = _DEFAULT_LOGGER
+    if name not in _LoggerManager._loggers:
+        log_instance = _LoggerManager._default_logger
         warning(f"Cannot find log: {name}")
     else:
-        log_instance = _GLOBAL_LOGGER[name]
+        log_instance = _LoggerManager._loggers[name]
 
     return log_instance
 
 
-def new_logging_logger(plugin_config: List) -> BaseLogger:
+def create_logging_logger(plugin_config: List[Dict]) -> BaseLogger:
     """Deprecated compatibility factory returning a Loguru-backed logger.
 
     Args:
@@ -139,336 +204,54 @@ def new_logging_logger(plugin_config: List) -> BaseLogger:
         A LoguruLogger instance.
     """
     warnings.warn(
-        "new_logging_logger() is deprecated; Loguru is now the only runtime backend",
+        "create_logging_logger() is deprecated; Loguru is now the only runtime backend",
         DeprecationWarning,
         stacklevel=2,
     )
-    return new_loguru_logger("legacy", parse_output_configs(plugin_config))
+    return create_loguru_logger("legacy", parse_output_configs(plugin_config))
 
 
-def new_logger(output_config_list: List[OutputConfig]) -> BaseLogger:
-    """Deprecated compatibility factory returning a Loguru-backed logger.
-
-    Args:
-        output_config_list: List of output configurations for different writers.
-
-    Returns:
-        A LoguruLogger instance.
-    """
-    warnings.warn(
-        "new_logger() is deprecated; use new_loguru_logger()",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return new_loguru_logger("legacy", output_config_list)
-
-
-def recreate_logging_locks() -> None:
-    """Recreate the lock of every registered logging handler.
-
-    Called after fork so that a lock held by another thread at fork time cannot
-    deadlock the child process.
-    """
-    logger_keys = list(logging.Logger.manager.loggerDict.keys())
-    logger_keys.insert(0, '')
-
-    for logger_name in logger_keys:
-        logger = logging.getLogger(logger_name)
-        for handler in logger.handlers:
-            handler.createLock()
-
-
-def logging_after_fork() -> None:
-    """Reset logging locks after fork in child process.
-
-    This function is called after fork to recreate locks in the child process,
-    ensuring thread-safe logging in the forked process. The actual work is
-    delegated to the active log backend plugin, so a backend can replace the
-    stdlib queue machinery with its own (loguru inherits the owner queue and
-    must not rebuild the listeners).
-    """
-    from ._loguru_logger import after_fork_in_child
-
-    after_fork_in_child()
-
-
-# Register fork hook for logging. Reset lock in child process.
-fork_hook.register_at_fork(before=None, after_in_parent=None, after_in_child=logging_after_fork)
-
-
-def parse_output_configs(plugin_config: List) -> List[OutputConfig]:
-    """Convert a raw plugin config list into OutputConfig objects.
+def get_log_factory(name: Optional[str] = None):
+    """Get a log factory plugin instance by name.
 
     Args:
-        plugin_config: List of output configuration dictionaries.
+        name: Factory plugin name. Defaults to the factory selected at startup.
 
     Returns:
-        List of OutputConfig instances.
+        The factory plugin instance, or None if it is not registered.
     """
-    output_config_list = [OutputConfig() for _ in range(len(plugin_config))]
-    TRPCConfig.unmarshal_spec(plugin_config, output_config_list)
-    return output_config_list
+    return get_plugin(PluginType.LOG, name or _LoggerManager._active_backend_name)
 
 
-def _backend_config() -> Dict:
-    """Return the ``plugins.log_backend`` section of the global config."""
-    return config.global_plugins_config.get(_LOG_BACKEND_CONFIG_KEY) or {}
-
-
-def resolve_backend_name() -> str:
-    """Resolve the single runtime backend.
-
-    Legacy selectors are accepted for one transition release. Any value other
-    than ``loguru`` is ignored with a deprecation warning.
-
-    Returns:
-        Name of the log backend plugin.
-    """
-    env_backend = os.environ.get("TRPC_LOG_BACKEND", "").strip().lower()
-    configured = env_backend or next(iter(_backend_config()), "")
-    if configured and configured != _DEFAULT_LOG_BACKEND_NAME:
-        warnings.warn(
-            f"log backend '{configured}' is no longer available; using loguru",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-    return _DEFAULT_LOG_BACKEND_NAME
-
-
-def get_log_backend(name: str = None):
-    """Get a log backend plugin instance by name.
-
-    Args:
-        name: Backend plugin name. Defaults to the backend selected at startup.
-
-    Returns:
-        The backend plugin instance, or None if it is not registered.
-    """
-    return get_plugin(PluginType.LOG_BACKEND, name or _ACTIVE_BACKEND_NAME)
-
-
-def _select_backend():
-    """Return the mandatory Loguru backend.
-
-    Returns:
-        Tuple of (backend name, backend plugin instance, backend options dict).
-    """
-    name = resolve_backend_name()
-    backend = get_log_backend(name)
-    if backend is None or (hasattr(backend, "available") and not backend.available()):
-        raise RuntimeError("the mandatory loguru backend is not available")
-    return name, backend, _backend_config().get(name) or {}
-
-
-def _third_party_capture_forced() -> Optional[bool]:
-    """Return the value TRPC_LOG_INTERCEPT forces, or None if it is not set.
-
-    The environment variable overrides the yaml configuration either way, so
-    that a running service can be switched without editing its config.
-    """
-    env_switch = os.environ.get("TRPC_LOG_INTERCEPT", "").strip().lower()
-    if not env_switch:
-        return None
-    return env_switch not in ("0", "false", "no")
-
-
-def _third_party_root_level(output_config_list: List[OutputConfig]) -> Optional[int]:
-    """Return the root level the outputs asking for third-party logs need.
-
-    The most permissive of their levels: root only has to let the records
-    through, each output filters them at its own threshold afterwards.
-
-    Args:
-        output_config_list: Every output of every registered logger.
-
-    Returns:
-        A stdlib level number, or None if no output asks for third-party logs.
-    """
-    levels = [LEVELS.get(output_config.effective_third_party_level(), logging.DEBUG)
-              for output_config in output_config_list if output_config.capture_third_party]
-    return min(levels) if levels else None
-
-
-def _setup_third_party_capture(backend, output_configs_by_logger: Dict[str, List[OutputConfig]]) -> None:
-    """Ask the backend to route third-party logs into the marked outputs.
-
-    Backends which cannot do it simply do not expose the entry point, in which
-    case the capture is silently unavailable and root is left untouched.
-
-    Args:
-        backend: The active log backend plugin.
-        output_configs_by_logger: The parsed outputs of every registered logger.
-    """
-    if not hasattr(backend, "install_third_party_capture"):
-        return
-
-    all_outputs = [c for configs in output_configs_by_logger.values() for c in configs]
-    root_level = _third_party_root_level(all_outputs)
-    forced = _third_party_capture_forced()
-
-    if forced is False or (forced is None and root_level is None):
-        return
-
-    if root_level is None:
-        # Forced on without a target: fall back to the default logger's outputs.
-        backend.capture_all_outputs(DEFAULT_LOG_NAME)
-        root_level = logging.NOTSET
-
-    backend.install_third_party_capture(root_level)
-
-
-def _register_logger(log_plugin_config_dict: Dict) -> None:
-    """Register loggers from plugin configuration dictionary.
-
-    Args:
-        log_plugin_config_dict: Dictionary mapping logger names to their configurations.
-    """
-    global _ACTIVE_BACKEND_NAME, _ACTIVE_BACKEND_OPTIONS
-    _ACTIVE_BACKEND_NAME, backend, _ACTIVE_BACKEND_OPTIONS = _select_backend()
-
-    output_configs_by_logger = {}
-    for name, log_plugin_config in log_plugin_config_dict.items():
-        output_configs_by_logger[name] = parse_output_configs(log_plugin_config)
-        logger = backend.setup(name, output_configs_by_logger[name])
-
-        if name == DEFAULT_LOG_NAME:
-            set_default_logger(logger)
-        else:
-            register(name, logger)
-
-    _setup_third_party_capture(backend, output_configs_by_logger)
-
-
-@register_plugin(plugin_type=PluginType.LOG_COMPONENT, plugin_name="default", init_pos=PluginInitPos.MASTER)
-class DefaultLoggerPlugin:
-    """Default logger plugin for TRPC framework.
+@register_plugin(plugin_type=PluginType.LOG, plugin_name=DEFAULT_LOG_NAME)
+class DefaultLoggerInitPlugin(BasePlugin):
+    """Default logger initialization plugin for TRPC framework.
 
     This plugin initializes loggers from the global configuration.
     It ensures loggers are only initialized once.
     """
 
     def __init__(self):
-        """Initialize the default logger plugin."""
-        global _LOGGER_ALREADY_INIT
-        if _LOGGER_ALREADY_INIT:
+        """Initialize the default logger initialization plugin."""
+        super().__init__()
+        self._type = PluginType.LOG
+        self._name = DEFAULT_LOG_NAME
+
+    def init(self) -> None:
+        """Initialize the default logger initialization plugin."""
+        if _LoggerManager._already_initialized:
             return
 
-        log_plugin_config_dict = config.global_plugins_config.get("log")
+        log_plugin_config_dict = get_log_config()
 
         if log_plugin_config_dict:
-            _register_logger(log_plugin_config_dict)
+            self._register_logger(log_plugin_config_dict)
+        _LoggerManager._already_initialized = True
 
-        _LOGGER_ALREADY_INIT = True
-
-
-@register_plugin(PluginType.LOG_BACKEND, _DEFAULT_LOG_BACKEND_NAME)
-class LoguruBackendPlugin:
-    """The framework's runtime log backend.
-
-    Imports remain local to avoid circular imports during bootstrap.
-    """
-
-    def available(self) -> bool:
-        """Return True if the loguru dependency is importable."""
-        from ._loguru_logger import loguru_available  # local import: optional dependency
-
-        return loguru_available()
-
-    def setup(self, name: str, output_config_list: List[OutputConfig]) -> BaseLogger:
-        """Create a loguru-backed logger for the given trpc logger name.
-
-        Args:
-            name: The trpc logger name, used to route records to its own sinks.
-            output_config_list: List of output configurations.
-
-        Returns:
-            A LoguruLogger instance.
-        """
-        from ._loguru_logger import new_loguru_logger  # local import: optional dependency
-
-        return new_loguru_logger(name, output_config_list)
-
-    def after_fork_in_child(self) -> None:
-        """Reset locks in the child, keeping the inherited owner queue intact."""
-        from ._loguru_logger import after_fork_in_child  # local import: optional dependency
-
-        after_fork_in_child()
-
-    def install_third_party_capture(self, root_level: int) -> None:
-        """Route stdlib and third-party library logs into the marked sinks.
-
-        Args:
-            root_level: Level to set on the root logger.
-        """
-        from ._loguru_logger import install_third_party_capture  # local import: optional dependency
-
-        install_third_party_capture(root_level)
-
-    def capture_all_outputs(self, name: str) -> None:
-        """Make every output of a trpc logger receive third-party logs.
-
-        Args:
-            name: The trpc logger name whose outputs take the third-party records.
-        """
-        from ._loguru_logger import capture_all_outputs  # local import: optional dependency
-
-        capture_all_outputs(name)
-
-
-@register_plugin(PluginType.WRITER_COMPONENT, "console")
-class ConsoleWriterPluginFactory:
-    """Console writer plugin factory.
-
-    Creates console writer instances for logging to stdout/stderr.
-    """
-    def setup_loguru_sink(self, output_config: OutputConfig) -> Dict:
-        """Build ``loguru.logger.add()`` arguments for console output.
-
-        Args:
-            output_config: Output configuration for the console writer.
-
-        Returns:
-            Keyword arguments for a native loguru sink.
-        """
-        from ._loguru_logger import build_console_sink_kwargs  # local import: optional dependency
-
-        return build_console_sink_kwargs(output_config)
-
-
-@register_plugin(PluginType.WRITER_COMPONENT, "file")
-class FileWriterPlugin:
-    """File writer plugin factory.
-
-    Creates file writer instances for logging to rotating files.
-    """
-    def setup_loguru_sink(self, output_config: OutputConfig) -> Dict:
-        """Build ``loguru.logger.add()`` arguments for rotating file output.
-
-        Args:
-            output_config: Output configuration for the file writer.
-
-        Returns:
-            Keyword arguments for a native loguru sink, keeping loguru's own
-            rotation/retention/compression and single-owner enqueue machinery.
-        """
-        from ._loguru_logger import build_file_sink_kwargs
-
-        return build_file_sink_kwargs(output_config)
-
-
-def set_log_name(log_name: str) -> BaseLogger:
-    """Get logger by name (alias for get_logger).
-
-    Args:
-        log_name: Logger name to retrieve.
-
-    Returns:
-        Logger instance associated with the name.
-    """
-    return get_logger(log_name)
-
-
-_STACK_LEVEL: int = 2  # default stack level
+    @staticmethod
+    def _register_logger(log_plugin_config_dict: Dict) -> None:
+        """Compatibility entry point for logger plugin initialization."""
+        _LoggerManager._register_logger(log_plugin_config_dict)
 
 
 def set_stack_level(level: int) -> None:
@@ -477,8 +260,7 @@ def set_stack_level(level: int) -> None:
     Args:
         level: Stack level to set.
     """
-    global _STACK_LEVEL
-    _STACK_LEVEL = level
+    _LoggerManager._stack_level = level
 
 
 def ensure_filepath_and_lineno(**kwargs) -> dict:
@@ -492,13 +274,14 @@ def ensure_filepath_and_lineno(**kwargs) -> dict:
     Returns:
         Updated kwargs with 'extra' containing 'filename' and 'lineno'.
     """
-    global _STACK_LEVEL
-    if 'extra' not in kwargs:
-        kwargs['extra'] = {}
-    if 'filename' not in kwargs['extra']:
-        kwargs['extra']['filename'] = os.path.split(sys._getframe(_STACK_LEVEL).f_code.co_filename)[1]
-    if 'lineno' not in kwargs['extra']:
-        kwargs['extra']['lineno'] = sys._getframe(_STACK_LEVEL).f_lineno
+    if "extra" not in kwargs:
+        kwargs["extra"] = {}
+    if "filename" not in kwargs["extra"]:
+        kwargs["extra"]["filename"] = os.path.split(
+            sys._getframe(_LoggerManager._stack_level).f_code.co_filename  # cSpell: ignore _getframe
+        )[1]
+    if "lineno" not in kwargs["extra"]:
+        kwargs["extra"]["lineno"] = sys._getframe(_LoggerManager._stack_level).f_lineno
     return kwargs
 
 
@@ -512,7 +295,7 @@ def debug(format_str: str, *args, **kwargs) -> None:
     """
     try:
         kwargs = ensure_filepath_and_lineno(**kwargs)
-        set_log_name(DEFAULT_LOG_NAME).debug(format_str, *args, **kwargs)
+        get_logger(DEFAULT_LOG_NAME).debug(format_str, *args, **kwargs)
     except Exception as err:  # pylint: disable=broad-except
         error(f"log err! format_str: {format_str}; args: {json.dumps(args)}; err: {err!r}")
 
@@ -527,7 +310,7 @@ def info(format_str: str, *args, **kwargs) -> None:
     """
     try:
         kwargs = ensure_filepath_and_lineno(**kwargs)
-        set_log_name(DEFAULT_LOG_NAME).info(format_str, *args, **kwargs)
+        get_logger(DEFAULT_LOG_NAME).info(format_str, *args, **kwargs)
     except Exception as err:  # pylint: disable=broad-except
         error(f"log err! format_str: {format_str}; args: {json.dumps(args)}; err: {err!r}")
 
@@ -542,7 +325,7 @@ def warning(format_str: str, *args, **kwargs) -> None:
     """
     try:
         kwargs = ensure_filepath_and_lineno(**kwargs)
-        set_log_name(DEFAULT_LOG_NAME).warning(format_str, *args, **kwargs)
+        get_logger(DEFAULT_LOG_NAME).warning(format_str, *args, **kwargs)
     except Exception as err:  # pylint: disable=broad-except
         error(f"log err! format_str: {format_str}; args: {json.dumps(args)}; err: {err!r}")
 
@@ -557,9 +340,14 @@ def error(format_str: str, *args, **kwargs) -> None:
     """
     try:
         kwargs = ensure_filepath_and_lineno(**kwargs)
-        set_log_name(DEFAULT_LOG_NAME).error(format_str, *args, **kwargs)
+        get_logger(DEFAULT_LOG_NAME).error(format_str, *args, **kwargs)
     except Exception as err:  # pylint: disable=broad-except
-        logging.error("log err! format_str: %s; args: %s; err: %s", format_str, json.dumps(args), repr(err))
+        logging.error(
+            "log err! format_str: %s; args: %s; err: %s",
+            format_str,
+            json.dumps(args),
+            repr(err),
+        )
 
 
 def fatal(format_str: str, *args, **kwargs) -> None:
@@ -572,12 +360,17 @@ def fatal(format_str: str, *args, **kwargs) -> None:
     """
     try:
         kwargs = ensure_filepath_and_lineno(**kwargs)
-        set_log_name(DEFAULT_LOG_NAME).fatal(format_str, *args, **kwargs)
+        get_logger(DEFAULT_LOG_NAME).fatal(format_str, *args, **kwargs)
     except Exception as err:  # pylint: disable=broad-except
-        logging.fatal("log err! format_str: %s; args: %s; err: %s", format_str, json.dumps(args), repr(err))
+        logging.fatal(
+            "log err! format_str: %s; args: %s; err: %s",
+            format_str,
+            json.dumps(args),
+            repr(err),
+        )
 
 
-def with_context_fields(ctx: context.Context, fields: dict) -> None:
+def with_context_fields(ctx: TrpcContext, fields: dict) -> None:
     """Add custom fields to the context for logging.
 
     Args:
@@ -585,17 +378,17 @@ def with_context_fields(ctx: context.Context, fields: dict) -> None:
         fields: Dictionary of field names and values to add to context.
 
     Raises:
-        Exception: If fields is not a dictionary.
+        TypeError: If fields is not a dictionary.
     """
     if not isinstance(fields, dict):
         raise TypeError("with_context_fields param fields must be type of dict")
-    ctx_fields = ctx.get_meta_data(context.META_DATA_KEY_LOG_FIELDS, {})
+    ctx_fields = ctx.get_meta_data(META_DATA_KEY_LOG_FIELDS, {})
     for key, val in fields.items():
         ctx_fields[key] = val
-    ctx.with_meta_data(context.META_DATA_KEY_LOG_FIELDS, ctx_fields)
+    ctx.with_meta_data(META_DATA_KEY_LOG_FIELDS, ctx_fields)
 
 
-def get_ctx_fields(ctx: context.Context) -> dict:
+def get_ctx_fields(ctx: TrpcContext) -> dict:
     """Get custom log fields from the context.
 
     Args:
@@ -604,10 +397,10 @@ def get_ctx_fields(ctx: context.Context) -> dict:
     Returns:
         Dictionary of custom log fields stored in the context.
     """
-    return ctx.get_meta_data(context.META_DATA_KEY_LOG_FIELDS, dict())
+    return ctx.get_meta_data(META_DATA_KEY_LOG_FIELDS, dict())
 
 
-def debug_context(ctx: context.Context, format_str: str, *args, **kwargs) -> None:
+def debug_context(ctx: TrpcContext, format_str: str, *args, **kwargs) -> None:
     """Log a debug level message with context fields.
 
     Args:
@@ -617,14 +410,15 @@ def debug_context(ctx: context.Context, format_str: str, *args, **kwargs) -> Non
         **kwargs: Additional keyword arguments including 'extra'.
     """
     kwargs = ensure_filepath_and_lineno(**kwargs)
-    if hasattr(set_log_name(DEFAULT_LOG_NAME), "debug_context"):
-        set_log_name(DEFAULT_LOG_NAME).debug_context(ctx, format_str, *args, **kwargs)
+    default_logger = get_logger(DEFAULT_LOG_NAME)
+    if hasattr(default_logger, "debug_context"):
+        default_logger.debug_context(ctx, format_str, *args, **kwargs)
         return
     kwargs["extra"][CTX_FIELDS_IN_EXTRA_KEY] = get_ctx_fields(ctx)
     debug(format_str, *args, **kwargs)
 
 
-def info_context(ctx: context.Context, format_str: str, *args, **kwargs) -> None:
+def info_context(ctx: TrpcContext, format_str: str, *args, **kwargs) -> None:
     """Log an info level message with context fields.
 
     Args:
@@ -634,14 +428,15 @@ def info_context(ctx: context.Context, format_str: str, *args, **kwargs) -> None
         **kwargs: Additional keyword arguments including 'extra'.
     """
     kwargs = ensure_filepath_and_lineno(**kwargs)
-    if hasattr(set_log_name(DEFAULT_LOG_NAME), "info_context"):
-        set_log_name(DEFAULT_LOG_NAME).info_context(ctx, format_str, *args, **kwargs)
+    default_logger = get_logger(DEFAULT_LOG_NAME)
+    if hasattr(default_logger, "info_context"):
+        default_logger.info_context(ctx, format_str, *args, **kwargs)
         return
     kwargs["extra"][CTX_FIELDS_IN_EXTRA_KEY] = get_ctx_fields(ctx)
     info(format_str, *args, **kwargs)
 
 
-def warning_context(ctx: context.Context, format_str: str, *args, **kwargs) -> None:
+def warning_context(ctx: TrpcContext, format_str: str, *args, **kwargs) -> None:
     """Log a warning level message with context fields.
 
     Args:
@@ -651,14 +446,15 @@ def warning_context(ctx: context.Context, format_str: str, *args, **kwargs) -> N
         **kwargs: Additional keyword arguments including 'extra'.
     """
     kwargs = ensure_filepath_and_lineno(**kwargs)
-    if hasattr(set_log_name(DEFAULT_LOG_NAME), "warning_context"):
-        set_log_name(DEFAULT_LOG_NAME).warning_context(ctx, format_str, *args, **kwargs)
+    default_logger = get_logger(DEFAULT_LOG_NAME)
+    if hasattr(default_logger, "warning_context"):
+        default_logger.warning_context(ctx, format_str, *args, **kwargs)
         return
     kwargs["extra"][CTX_FIELDS_IN_EXTRA_KEY] = get_ctx_fields(ctx)
     warning(format_str, *args, **kwargs)
 
 
-def error_context(ctx: context.Context, format_str: str, *args, **kwargs) -> None:
+def error_context(ctx: TrpcContext, format_str: str, *args, **kwargs) -> None:
     """Log an error level message with context fields.
 
     Args:
@@ -668,14 +464,15 @@ def error_context(ctx: context.Context, format_str: str, *args, **kwargs) -> Non
         **kwargs: Additional keyword arguments including 'extra'.
     """
     kwargs = ensure_filepath_and_lineno(**kwargs)
-    if hasattr(set_log_name(DEFAULT_LOG_NAME), "error_context"):
-        set_log_name(DEFAULT_LOG_NAME).error_context(ctx, format_str, *args, **kwargs)
+    default_logger = get_logger(DEFAULT_LOG_NAME)
+    if hasattr(default_logger, "error_context"):
+        default_logger.error_context(ctx, format_str, *args, **kwargs)
         return
     kwargs["extra"][CTX_FIELDS_IN_EXTRA_KEY] = get_ctx_fields(ctx)
     error(format_str, *args, **kwargs)
 
 
-def fatal_context(ctx: context.Context, format_str: str, *args, **kwargs) -> None:
+def fatal_context(ctx: TrpcContext, format_str: str, *args, **kwargs) -> None:
     """Log a fatal level message with context fields.
 
     Args:
@@ -685,8 +482,18 @@ def fatal_context(ctx: context.Context, format_str: str, *args, **kwargs) -> Non
         **kwargs: Additional keyword arguments including 'extra'.
     """
     kwargs = ensure_filepath_and_lineno(**kwargs)
-    if hasattr(set_log_name(DEFAULT_LOG_NAME), "fatal_context"):
-        set_log_name(DEFAULT_LOG_NAME).fatal_context(ctx, format_str, *args, **kwargs)
+    default_logger = get_logger(DEFAULT_LOG_NAME)
+    if hasattr(default_logger, "fatal_context"):
+        default_logger.fatal_context(ctx, format_str, *args, **kwargs)
         return
     kwargs["extra"][CTX_FIELDS_IN_EXTRA_KEY] = get_ctx_fields(ctx)
     fatal(format_str, *args, **kwargs)
+
+
+def _recreate_logging_locks() -> None:
+    """Recreate standard-library logging locks after a process fork."""
+    _LoggerManager._recreate_logging_locks()
+
+
+# Register fork hook for logging. Reset lock in child process.
+register_at_fork(before=None, after_in_parent=None, after_in_child=_recreate_logging_locks)
