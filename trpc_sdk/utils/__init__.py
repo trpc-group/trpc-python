@@ -6,6 +6,7 @@
 
 """Utility functions"""
 
+from ._factory import Factory
 from ._fork_hook import register_at_fork
 from ._fork_hook import execute_before
 from ._fork_hook import execute_after_in_parent
@@ -22,6 +23,7 @@ from ._singleton import singleton
 from ._singleton import SingletonBase
 
 __all__ = [
+    "Factory",
     "register_at_fork",
     "execute_before",
     "execute_after_in_parent",
