@@ -5,7 +5,6 @@
 # tRPC-Python is licensed under Apache-2.0.
 """plugin builder"""
 
-
 from __future__ import annotations
 
 from typing import Optional
@@ -17,7 +16,7 @@ from ._exceptions import PluginInitError
 from ._registry import DEFAULT_PLUGIN_MANAGER
 
 
-def init_plugins(pos:Optional[PluginInitPos] = None, without_user_define:bool = False) -> None:
+def init_plugins(pos: Optional[PluginInitPos] = None, without_user_define: bool = False) -> None:
     """init plugins
     Args:
         pos: plugin init position
@@ -41,7 +40,9 @@ def init_plugins(pos:Optional[PluginInitPos] = None, without_user_define:bool = 
                     if not plugin_instance.name:
                         plugin_instance._name = plugin_info.plugin_name
                     if plugin_instance.type == PluginType.UNKNOWN:
-                        plugin_instance._type= plugin_info.plugin_type
+                        plugin_instance._type = plugin_info.plugin_type
+                    if plugin_instance.init_pos == PluginInitPos.UNKNOWN:
+                        plugin_instance._init_pos = plugin_info.init_pos
                     plugin_instance.start()
                     DEFAULT_PLUGIN_MANAGER.set_instance(plugin_instance)
                 except PluginInitError:
@@ -63,4 +64,3 @@ def init_worker_plugins():
 def init_task_plugins():
     """init task plugins"""
     init_plugins(pos=PluginInitPos.TASK, without_user_define=True)
-

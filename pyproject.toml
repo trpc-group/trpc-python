@@ -72,6 +72,7 @@ dependencies = [
     "loguru",
     "protobuf >=3.19.4",
     "packaging",
+    "PyYAML",
     "dataclasses>=0.8; python_version < '3.7'",
 ]
 

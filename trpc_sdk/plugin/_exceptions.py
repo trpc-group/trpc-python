@@ -13,6 +13,7 @@ from trpc_sdk.exceptions import TrpcErrorCode
 from trpc_sdk.exceptions import TrpcErrorType
 from trpc_sdk.exceptions import TrpcException
 
+
 class PluginInitError(TrpcException):
     """Exception raised when plugin initialization fails
     
@@ -27,7 +28,3 @@ class PluginInitError(TrpcException):
             msg: Description of the initialization failure
         """
         super().__init__(TrpcErrorType.FRAMEWORK, TrpcErrorCode.TRPC_PLUGIN_INIT_ERR, msg)
-
-
-
-

@@ -11,15 +11,16 @@ providers, and decoders used by pluggable configuration backends.
 """
 from __future__ import annotations
 
-from abc import ABC
 from abc import abstractmethod
 from typing import Any
 from typing import Callable
 from typing import Optional
 from typing import Dict
 
+from ._plugin import PluginType
+from ._plugin import BasePlugin
 
-class BaseConfig(ABC):
+class BaseConfig(BasePlugin):
     """Define configuration loading and value access.
 
     A concrete implementation loads configuration from a named data source,
@@ -29,23 +30,25 @@ class BaseConfig(ABC):
 
     def __init__(
         self,
-        data_source_name: str,
+        provider_name: str,
         decoder_name: str,
-        ds_options: Dict,
-        de_options: Dict
+        provider_options: Dict,
+        decoder_options: Dict
     ) -> None:
         """Initialize the configuration backend identity and options.
 
         Args:
-            data_source_name: Registered data provider name.
-            decoder_name: Registered decoder name.
-            ds_options: Options passed to the data provider.
-            de_options: Options passed to the decoder.
+            provider_name: Registered config provider name.
+            decoder_name: Registered config decoder name.
+            provider_options: Options passed to the config provider.
+            decoder_options: Options passed to the config decoder.
         """
-        self._data_source_name = data_source_name
+        super().__init__()
+        self._type = PluginType.CONFIG
+        self._provider_name = provider_name
         self._decoder_name = decoder_name
-        self._ds_options = ds_options
-        self._de_options = de_options
+        self._provider_options = provider_options
+        self._decoder_options = decoder_options
         self._raw_config_dict: Dict = {}
 
     @abstractmethod
@@ -90,64 +93,72 @@ class BaseConfig(ABC):
         self._raw_config_dict = raw_config_dict
 
 
-class BaseDataProvider(ABC):
-    """Define configuration data source access and hot-reload."""
+class BaseConfigProvider(BasePlugin):
+    """Define config provider access and hot-reload."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._type = PluginType.CONFIG_PROVIDER
 
     @abstractmethod
     def load(self, file_path: str, options: Optional[Dict] = None) -> bytes:
-        """Load raw configuration bytes from the data source.
+        """Load raw config bytes from the provider.
 
         Args:
-            file_path: Path or identifier of the configuration resource.
+            file_path: Path or identifier of the config resource.
             options: Optional provider-specific load options.
 
         Returns:
-            Raw configuration bytes.
+            Raw config bytes.
         """
         ...
 
     @abstractmethod
     def hot_reload(self, key: str, callback: Callable, options: Optional[Dict] = None) -> None:
-        """Hot-reload the data source and invoke a callback on changes.
+        """Hot-reload the provider and invoke a callback on changes.
 
         Args:
-            key: Key of the configuration to hot-reload.
-            callback: Callable invoked when the configuration changes.
+            key: Key of the config to hot-reload.
+            callback: Callable invoked when the config changes.
             options: Optional provider-specific hot-reload options.
         """
         ...
 
     @abstractmethod
     def set_options(self, options: Dict) -> None:
-        """Update provider options.
+        """Update config provider options.
 
         Args:
-            options: Provider-specific configuration options.
+            options: Config provider-specific options.
         """
         ...
 
 
-class BaseDecoder(ABC):
-    """Define decoding of raw configuration bytes into dictionaries."""
+class BaseConfigDecoder(BasePlugin):
+    """Define decoding of raw config bytes into dictionaries."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._type = PluginType.CONFIG_DECODER
 
     @abstractmethod
     def decode(self, config_data: bytes, options: Optional[Dict] = None) -> Dict:
-        """Decode raw configuration bytes into a dictionary.
+        """Decode raw config bytes into a dictionary.
 
         Args:
-            config_data: Raw configuration payload.
+            config_data: Raw config payload.
             options: Optional decoder-specific options.
 
         Returns:
-            Decoded configuration dictionary.
+            Decoded config dictionary.
         """
         ...
 
     @abstractmethod
     def set_options(self, options: Dict) -> None:
-        """Update decoder options.
+        """Update config decoder options.
 
         Args:
-            options: Decoder-specific configuration options.
+            options: Config decoder-specific options.
         """
         ...

@@ -38,6 +38,7 @@ def _build_exception_code() -> type[IntEnum]:
             "TRPC_CLIENT_POOL_CONN_CLOSED": 153,
             "TRPC_TASK_HANDLE_ERR": 200,
             "TRPC_PLUGIN_INIT_ERR": 202,
+            "TRPC_CONFIG_ERR": 203,
         }
     )
 

@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Config decoder plugins.
 
 Decoders turn the raw bytes returned by a data provider into a Python object,
@@ -19,69 +18,69 @@ from __future__ import annotations
 
 import json
 from typing import Optional
+from typing import Dict
 
 import yaml
 
-from trpc_sdk.abc import BaseDecoder
-from trpc_sdk.plugin import PluginInitPos
-from trpc_sdk.plugin import PluginType
+from trpc_sdk.abc import BaseConfigDecoder
+from trpc_sdk.abc import PluginType
 from trpc_sdk.plugin import register_plugin
+
 from ._constants import DEFAULT_ENCODING
 
 
-def _resolve_encoding(options: Optional[dict]) -> str:
-    """Read the text encoding from the decoder options.
-
-    Args:
-        options: Decoder options, may be ``None``.
-
-    Returns:
-        The configured encoding, or ``utf8`` when unset.
-    """
-    if options is not None and 'code' in options:
-        return options.get('code') or DEFAULT_ENCODING
-    return DEFAULT_ENCODING
-
-
-class _OptionsDecoder(BaseDecoder):
+class _OptionsDecoder(BaseConfigDecoder):
     """Base for decoders that only need to remember their options."""
 
     def __init__(self):
         super().__init__()
-        self.options = None
+        self._options: Optional[Dict] = None
 
-    def set_options(self, options: dict) -> None:
-        self.options = options
+    def set_options(self, options: Dict) -> None:
+        self._options = options
+
+    def _resolve_encoding(self, options: Optional[dict]) -> str:
+        """Read the text encoding from the decoder options.
+    
+        Args:
+            options: Decoder options, may be ``None``.
+    
+        Returns:
+            The configured encoding, or ``utf8`` when unset.
+        """
+        if options is not None and 'code' in options:
+            return options.get('code') or DEFAULT_ENCODING
+        return DEFAULT_ENCODING
 
 
-@register_plugin(PluginType.CONFIG_DECODER, 'YamlDecoder', init_pos=PluginInitPos.MASTER)
+@register_plugin(PluginType.CONFIG_DECODER, 'yaml')
 class YamlDecoder(_OptionsDecoder):
     """Decodes YAML config data into a dict."""
 
-    def decode(self, config_data: bytes, options: Optional[dict] = None) -> dict:
-        config_data_str = config_data.decode(_resolve_encoding(options))
+    def decode(self, config_data: bytes, options: Optional[Dict] = None) -> Dict:
+        config_data_str = config_data.decode(self._resolve_encoding(options))
         return yaml.load(config_data_str, Loader=yaml.FullLoader)
 
 
-@register_plugin(PluginType.CONFIG_DECODER, 'JsonDecoder', init_pos=PluginInitPos.MASTER)
+@register_plugin(PluginType.CONFIG_DECODER, 'json')
 class JsonDecoder(_OptionsDecoder):
     """Decodes JSON config data into a dict."""
 
-    def decode(self, config_data: bytes, options: Optional[dict] = None) -> dict:
-        config_data_str = config_data.decode(_resolve_encoding(options))
+    def decode(self, config_data: bytes, options: Optional[Dict] = None) -> Dict:
+        config_data_str = config_data.decode(self._resolve_encoding(options))
         return json.loads(config_data_str)
 
 
-@register_plugin(PluginType.CONFIG_DECODER, 'NoopDecoder', init_pos=PluginInitPos.MASTER)
-class NoopDecoder(BaseDecoder):
+@register_plugin(PluginType.CONFIG_DECODER, 'noop')
+class NoopDecoder(BaseConfigDecoder):
     """Returns the raw config data unchanged.
 
     Note: because raw bytes are returned rather than a dict, the
     ``ConfigLoader.get()`` interface is not supported with this decoder.
     """
 
-    def decode(self, config_data: bytes, options: Optional[dict] = None) -> bytes:
+    def decode(self, config_data: bytes, options: Optional[Dict] = None) -> bytes:
         return config_data
 
-    def set_options(self, options: dict) -> None:
+    def set_options(self, options: Dict) -> None:
         return None

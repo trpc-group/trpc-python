@@ -83,7 +83,6 @@ def is_worker_process() -> bool:
     return get_process_type() == ProcessType.WORKER
 
 
-
 def is_task_process() -> bool:
     """Check if current process is a task process.
     

@@ -11,8 +11,8 @@ from ._client import BaseClient
 from ._client import BaseClientStream
 from ._client import BaseClientStreamConnection
 from ._config import BaseConfig
-from ._config import BaseDataProvider
-from ._config import BaseDecoder
+from ._config import BaseConfigProvider
+from ._config import BaseConfigDecoder
 from ._cython import BaseClientProtocolChecker  # pyright: ignore[reportMissingModuleSource]
 from ._cython import BaseCodec  # pyright: ignore[reportMissingModuleSource]
 from ._cython import BaseServerProtocolChecker  # pyright: ignore[reportMissingModuleSource]
@@ -77,8 +77,8 @@ __all__ = [
     "BaseClientTransportOption",
     "BaseCodec",
     "BaseConfig",
-    "BaseDataProvider",
-    "BaseDecoder",
+    "BaseConfigProvider",
+    "BaseConfigDecoder",
     "BaseDiscovery",
     "BaseFilter",
     "FilterHandleType",

@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Configuration data models.
 
 Every section of the framework config file is described here as a dataclass:
@@ -28,6 +27,7 @@ from typing import Optional
 import automaxprocs
 
 from trpc_sdk.utils import UNIX_TYPE
+
 from ._constants import DEFAULT_BIND_INFO_FILE
 from ._constants import DEFAULT_CLIENT_DIAL_TIMEOUT_MS
 from ._constants import DEFAULT_CLIENT_IDLE_TIME_S
@@ -93,14 +93,14 @@ class Rpcz:
 class GlobalConfig:
     """Global framework configuration."""
 
-    namespace: str = '' # Peer service environment, production or testing.
-    env_name: str = '' # Peer service environment name, production or testing.
-    container_name: str = '' # Peer service container name.
-    local_ip: str = '' # Peer service local IP address.
-    enable_set: str = '' # Peer service enable set.
-    full_set_name: str = '' # Peer service full set name.
-    save_bind_info: Optional[SaveBindInfo] = None # Save bind information to a file.
-    rpcz: Optional[Rpcz] = None # Rpcz sampling and caching configuration.
+    namespace: str = ''  # Peer service environment, production or testing.
+    env_name: str = ''  # Peer service environment name, production or testing.
+    container_name: str = ''  # Peer service container name.
+    local_ip: str = ''  # Peer service local IP address.
+    enable_set: str = ''  # Peer service enable set.
+    full_set_name: str = ''  # Peer service full set name.
+    save_bind_info: Optional[SaveBindInfo] = None  # Save bind information to a file.
+    rpcz: Optional[Rpcz] = None  # Rpcz sampling and caching configuration.
 
     def __post_init__(self) -> None:
         if self.save_bind_info is None:

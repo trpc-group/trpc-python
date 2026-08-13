@@ -29,9 +29,8 @@ from trpc_sdk.abc import PluginType
 from trpc_sdk.abc import TrpcContext
 from trpc_sdk.plugin import get_plugin
 from trpc_sdk.plugin import register_plugin
-from trpc_sdk.utils import register_at_fork
+from trpc_sdk.common import register_at_fork
 
-from ._config import get_log_backend_config
 from ._config import get_log_config
 from ._config import parse_output_configs
 from ._constants import CTX_FIELDS_IN_EXTRA_KEY
@@ -66,8 +65,7 @@ class _LoggerManager:
         Returns:
             Name of the log backend plugin.
         """
-        env_backend = os.environ.get(TRPC_LOG_BACKEND, "").strip().lower()
-        configured = env_backend or next(iter(get_log_backend_config()), "")
+        configured = os.environ.get(TRPC_LOG_BACKEND, "").strip().lower()
         if configured and configured != DEFAULT_LOG_BACKEND_NAME:
             warnings.warn(
                 f"log backend '{configured}' is no longer available; using loguru",
@@ -126,13 +124,13 @@ class _LoggerManager:
         backend.install_third_party_capture(root_level)
 
     @classmethod
-    def _register_logger(cls, log_plugin_config_dict: Dict) -> None:
+    def _register_logger(cls, log_config_dict: Dict[str, List[Dict]]) -> None:
         """Register loggers from a plugin configuration dictionary."""
         log_factory = cls._select_log_factory()
         cls._active_backend_name = log_factory.name
         output_configs_by_logger = {}
-        for name, log_plugin_config in log_plugin_config_dict.items():
-            output_configs_by_logger[name] = parse_output_configs(log_plugin_config)
+        for name, log_outputs in log_config_dict.items():
+            output_configs_by_logger[name] = parse_output_configs(log_outputs)
             logger = log_factory.create_logger(name, output_configs_by_logger[name])
             if name == DEFAULT_LOG_NAME:
                 cls._default_logger = logger
@@ -242,16 +240,16 @@ class DefaultLoggerInitPlugin(BasePlugin):
         if _LoggerManager._already_initialized:
             return
 
-        log_plugin_config_dict = get_log_config()
+        log_config_dict = get_log_config()
 
-        if log_plugin_config_dict:
-            self._register_logger(log_plugin_config_dict)
+        if log_config_dict:
+            self._register_logger(log_config_dict)
         _LoggerManager._already_initialized = True
 
     @staticmethod
-    def _register_logger(log_plugin_config_dict: Dict) -> None:
+    def _register_logger(log_config_dict: Dict[str, List[Dict]]) -> None:
         """Compatibility entry point for logger plugin initialization."""
-        _LoggerManager._register_logger(log_plugin_config_dict)
+        _LoggerManager._register_logger(log_config_dict)
 
 
 def set_stack_level(level: int) -> None:

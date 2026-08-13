@@ -37,17 +37,19 @@ class PluginType(IntEnum):
 
     CLIENT_CHECKER = 6
 
-    CONFIG_DATA_SOURCE = 7
+    CONFIG = 7
 
-    CONFIG_DECODER = 8
+    CONFIG_PROVIDER = 8
 
-    SERIALIZATION = 9
+    CONFIG_DECODER = 9
 
-    COMPRESS = 10
+    SERIALIZATION = 10
 
-    SERVER_FILTER_COMPONENT = 11
+    COMPRESS = 11
 
-    CLIENT_FILTER_COMPONENT = 12
+    SERVER_FILTER_COMPONENT = 12
+
+    CLIENT_FILTER_COMPONENT = 13
 
     # plugin - log
     LOG = 50
@@ -95,10 +97,10 @@ class BasePlugin(ABC):
 
     def __init__(self):
         """Initialize plugin"""
-        self._name = ""
-        self._version = ""
-        self._type = PluginType.UNKNOWN
-        self._init_pos = PluginInitPos.WORKER
+        self._name: str = ""
+        self._version: str = ""
+        self._type: PluginType = PluginType.UNKNOWN
+        self._init_pos: PluginInitPos = PluginInitPos.UNKNOWN
     
     @property
     def name(self) -> str:

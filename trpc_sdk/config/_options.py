@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Option builders for :class:`~trpc_sdk.config.ConfigLoader`.
 
 These ``with_*`` helpers are passed to
@@ -20,11 +19,12 @@ to select a decoder or data provider::
 from __future__ import annotations
 
 from typing import Callable
-from typing import TYPE_CHECKING
 
-from trpc_sdk.plugin import PluginType
+from trpc_sdk.abc import PluginType
 from trpc_sdk.plugin import get_plugin
-from ._exceptions import DataSourceNotExist
+
+from ._exceptions import ConfigDecoderError
+from ._exceptions import ProviderNotExist
 from ._loader import ConfigLoader
 
 
@@ -40,7 +40,10 @@ def with_codec(name: str) -> Callable:
     """
 
     def option(config: ConfigLoader) -> None:
-        config.decoder = get_plugin(PluginType.CONFIG_DECODER, name)
+        decoder = get_plugin(PluginType.CONFIG_DECODER, name)
+        if decoder is None:
+            raise ConfigDecoderError(name)
+        config.set_decoder(decoder)
 
     return option
 
@@ -57,11 +60,10 @@ def with_provider(name: str) -> Callable:
     """
 
     def option(config: ConfigLoader) -> None:
-        from ._provider import get_provider
 
-        provider = get_provider(name)
+        provider = get_plugin(PluginType.CONFIG_PROVIDER, name)
         if provider is None:
-            raise DataSourceNotExist(name)
-        config.provider = provider
+            raise ProviderNotExist(name)
+        config.set_provider(provider)
 
     return option

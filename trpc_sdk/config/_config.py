@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Process-wide tRPC configuration.
 
 :class:`TrpcConfig` owns everything the framework used to keep in module-level
@@ -19,7 +18,7 @@ from typing import ClassVar
 from typing import Dict
 from typing import Optional
 
-from ._defaults import _repair_config
+from ._defaults import repair_config
 from ._defaults import merge_client_service_config
 from ._parser import TrpcConfigParser
 from ._types import ClientConfig
@@ -33,7 +32,7 @@ class TrpcConfig:
     """The framework configuration of the current process.
 
     This is deliberately not a singleton: the state is held in class variables
-    and reached through classmethods, so callers use the class itself rather
+    and reached through classmethod, so callers use the class itself rather
     than an instance handed out by an accessor.
     """
 
@@ -44,17 +43,15 @@ class TrpcConfig:
     # Global plugins config, used to store the global plugins config.
     _plugins_config: ClassVar[Dict] = {}
     # Fallback client config used when a callee service has no registered
-    # entry. Populated in place by parse_client_config from client-level defaults.
+    # service. Populated in place by parse_client_config from client-level defaults.
     _fallback_client_config: ClassVar[ClientServiceConfig] = ClientServiceConfig()
     # Client service configuration, parsed and populated from the user's config
     # and then read back by the framework.
     _client_service_configs: ClassVar[Dict[str, ClientServiceConfig]] = {}
 
     def __init__(self) -> None:
-        raise TypeError(
-            "TrpcConfig keeps the process-wide config in class variables; "
-            "call its classmethods instead of instantiating it."
-        )
+        raise TypeError("TrpcConfig keeps the process-wide config in class variables; "
+                        "call its classmethod instead of instantiating it.")
 
     @classmethod
     def load(cls, config_path: str, file_code: str = "utf-8") -> Config:
@@ -70,9 +67,8 @@ class TrpcConfig:
         Returns:
             The configuration that was just loaded.
         """
-        cls._config_parser = TrpcConfigParser(
-            'FileProvider', 'YamlDecoder', {'file_path': config_path}, {'code': file_code}
-        )
+        cls._config_parser = TrpcConfigParser('FileProvider', 'YamlDecoder', {'file_path': config_path},
+                                              {'code': file_code})
         # The parser retains the decoded dictionary for lookup and deserializing.
         cls._config_parser.load()
         if cls._config_parser.get('client') is not None:
@@ -82,7 +78,7 @@ class TrpcConfig:
 
         cls._plugins_config = cls._config_parser.get("plugins")
 
-        _repair_config(cls._config)
+        repair_config(cls._config)
 
         return cls._config
 
@@ -96,16 +92,16 @@ class TrpcConfig:
         client_config = ClientConfig()
         config_parser.parse({"client": client_config})
 
-        client_backend_config = {}
+        client_service_config = {}
 
         for service_conf in client_config.service:
             merge_client_service_config(client_config, service_conf)
             if service_conf.callee:
-                client_backend_config[service_conf.callee] = service_conf
+                client_service_config[service_conf.callee] = service_conf
             else:
-                client_backend_config[service_conf.service_name] = service_conf
+                client_service_config[service_conf.service_name] = service_conf
 
-        cls.set_client_backend_configs(client_backend_config)
+        cls.set_client_service_configs(client_service_config)
 
         if client_config.filters is not None:
             cls._fallback_client_config.filters = client_config.filters
@@ -148,34 +144,34 @@ class TrpcConfig:
 
     @classmethod
     def client_service_config(cls, service_name: str) -> ClientServiceConfig:
-        """Get a backend config by the callee service name from the peer's protocol file.
+        """Get a service config by the callee service name from the peer's protocol file.
 
         Args:
             service_name: The callee service name to look up.
 
         Returns:
-            The registered backend config, or the fallback one.
+            The registered service config, or the fallback one.
         """
         return cls._client_service_configs.get(service_name, cls._fallback_client_config)
 
     @classmethod
     def set_client_service_config(cls, callee_service_name: str, config: ClientServiceConfig) -> None:
-        """Register a single backend config after the user parsed config.
+        """Register a single service config after the user parsed config.
 
         Not safe for concurrent calls.
 
         Args:
             callee_service_name: The callee service name to register under.
-            config: The backend config to register.
+            config: The service config to register.
         """
         cls._client_service_configs[callee_service_name] = config
 
     @classmethod
-    def set_client_backend_configs(cls, configs: Dict[str, ClientServiceConfig]) -> None:
-        """Replace the whole backend config registry after the user parsed config.
+    def set_client_service_configs(cls, configs: Dict[str, ClientServiceConfig]) -> None:
+        """Replace the whole service config registry after the user parsed config.
 
         Args:
-            configs: The backend configs keyed by callee service name.
+            configs: The service configs keyed by callee service name.
         """
         cls._client_service_configs = configs
 
@@ -187,9 +183,13 @@ class TrpcConfig:
             RuntimeError: If :meth:`load` has not been called yet.
         """
         if cls._config_parser is None:
-            raise RuntimeError(
-                "Global config is not loaded. Call TrpcConfig.load() first."
-            )
+            raise RuntimeError("Global config is not loaded. Call TrpcConfig.load() first.")
         config = Config()
         cls._config_parser.parse(config)
         return config
+
+
+get_plugins_config = TrpcConfig.plugins_config
+get_global_config = TrpcConfig.global_config
+get_server_config = TrpcConfig.server_config
+get_client_config = TrpcConfig.client_config
