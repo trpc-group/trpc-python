@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Post-load repair of config values.
 
 The config file lets a value be declared once at a parent level and inherited
@@ -21,47 +20,32 @@ from typing import Any
 from typing import List
 from typing import Optional
 
-from trpc_sdk.utils import get_ip_with_nic
-from trpc_sdk.utils import join_host_port
 from ._types import ClientConfig
 from ._types import ClientServiceConfig
 from ._types import Config
+from ._utils import get_ip_with_nic
+from ._utils import join_host_port
 
 
 def _set_default_val(obj: Any, attr: str, default: Any) -> None:
-    """Fill ``attr`` on ``obj`` when it is still empty.
+    """Fill attr on obj when it is still empty.
 
     Empty means ``None`` or ``""``. ``0`` and ``False`` are kept, so numeric
     and boolean fields are not overwritten.
+
+    Args:
+        obj: The object to fill the attribute on.
+        attr: The attribute to fill.
+        default: The default value to fill.
     """
     if getattr(obj, attr) in (None, ""):
         setattr(obj, attr, default)
 
 
-def _repair_config(cfg: Config) -> None:
-    """Fill in missing service/client config fields from parent defaults.
-
-    Args:
-        cfg: The top-level config to repair.
-    """
-    _repair_service_ip_with_nic(cfg)
-
-    for service in cfg.server.service:
-        _set_default_val(service, "protocol", cfg.server.protocol)
-        _set_default_val(service, "network", cfg.server.network)
-        _set_default_val(service, "ip", cfg.global_config.local_ip)
-        _set_default_val(service, "address", join_host_port(service.ip, int(service.port)))
-
-    _set_default_val(cfg.client, "namespace", cfg.global_config.namespace)
-
-    for backend_conf in cfg.client.service:
-        _repair_client_config(backend_conf, cfg.client)
-
-
 def _repair_service_ip_with_nic(cfg: Config) -> None:
     """Resolve service IPs from NIC names when IP is not explicitly set.
 
-    Also populates ``cfg.global_config.local_ip`` from the first service
+    Also populates cfg.global_config.local_ip from the first service
     if it is empty.
 
     Args:
@@ -97,43 +81,63 @@ def _repair_client_config(conf: ClientServiceConfig, cfg: ClientConfig) -> None:
         prepend_client_filters(conf, cfg.filters)
 
 
-def merge_client_service_config(client_conf, service: ClientServiceConfig):
-    """Apply the client-level shared parameters to a client service config.
-
-    Only fields the backend has not set itself are filled in.
+def repair_config(cfg: Config) -> None:
+    """Fill in missing service/client config fields from parent defaults.
 
     Args:
-        client_conf: The client-level config holding the shared parameters.
-        service: The backend config to fill in.
+        cfg: The top-level config to repair.
     """
-    for key in dir(client_conf):
-        if not key.startswith("_") and hasattr(service, key):
-            value = getattr(client_conf, key)
-            _apply_default_field(key, service, value)
+    _repair_service_ip_with_nic(cfg)
+
+    for service in cfg.server.service:
+        _set_default_val(service, "protocol", cfg.server.protocol)
+        _set_default_val(service, "network", cfg.server.network)
+        _set_default_val(service, "ip", cfg.global_config.local_ip)
+        _set_default_val(service, "address", join_host_port(service.ip, int(service.port)))
+
+    _set_default_val(cfg.client, "namespace", cfg.global_config.namespace)
+
+    for client_service_conf in cfg.client.service:
+        _repair_client_config(client_service_conf, cfg.client)
 
 
-def _apply_default_field(key, service: ClientServiceConfig, value):
-    """Apply one client-level shared parameter to a backend config.
+def _apply_default_field(client_service_conf: ClientServiceConfig, key: str, value: Any) -> None:
+    """Apply one client-level shared parameter to a client service config.
 
     Lists are merged with the client-level values first; other fields are only
-    filled in when the backend has not set them.
+    filled in when the client service has not set them.
 
     Args:
         key: Name of the shared parameter.
-        service: The backend config to fill in.
+        client_service_conf: The client service config to fill in.
         value: Value of the shared parameter.
     """
-    if isinstance(value, list) and isinstance(getattr(service, key), list):
-        setattr(service, key, value + getattr(service, key))
-    if getattr(service, key) is None:
-        setattr(service, key, value)
+    if isinstance(value, list) and isinstance(getattr(client_service_conf, key), list):
+        setattr(client_service_conf, key, value + getattr(client_service_conf, key))
+    if getattr(client_service_conf, key) is None:
+        setattr(client_service_conf, key, value)
 
 
-def prepend_client_filters(conf: ClientServiceConfig, parent_filters: Optional[List[str]]):
-    """Insert filters in front of the backend's existing ones, de-duplicating.
+def merge_client_service_config(client_conf: ClientConfig, client_service_conf: ClientServiceConfig):
+    """Apply the client-level shared parameters to a client service config.
+
+    Only fields the client service has not set itself are filled in.
 
     Args:
-        conf: The backend config whose filters are updated.
+        client_conf: The client-level config holding the shared parameters.
+        client_service_conf: The client service config to fill in.
+    """
+    for key in dir(client_conf):
+        if not key.startswith("_") and hasattr(client_service_conf, key):
+            value = getattr(client_conf, key)
+            _apply_default_field(client_service_conf, key, value)
+
+
+def prepend_client_filters(client_service_conf: ClientServiceConfig, parent_filters: Optional[List[str]]):
+    """Insert filters in front of the client service's existing ones, de-duplicating.
+
+    Args:
+        client_service_conf: The client service config whose filters are updated.
         parent_filters: The filters to insert first.
     """
     if parent_filters is None:
@@ -142,10 +146,9 @@ def prepend_client_filters(conf: ClientServiceConfig, parent_filters: Optional[L
     filters = []
     filters.extend(parent_filters)
 
-    if conf.filters is not None:
-        for item in conf.filters:
+    if client_service_conf.filters is not None:
+        for item in client_service_conf.filters:
             if item not in filters:
                 filters.append(item)
 
-    conf.filters = filters
- 
+    client_service_conf.filters = filters

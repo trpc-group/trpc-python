@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Config loading and dict-to-object deserializing.
 
 :class:`TrpcConfigParser` reads raw bytes through a data provider plugin, decodes them
@@ -30,11 +29,12 @@ from typing import Union
 from typing import get_type_hints
 
 from trpc_sdk.abc import BaseConfig
-from trpc_sdk.abc import BaseDataProvider
-from trpc_sdk.abc import BaseDecoder
-from trpc_sdk.plugin import DefaultPluginManager
-from trpc_sdk.plugin import PluginType
-from ._exceptions import DecodeError
+from trpc_sdk.abc import BaseConfigProvider
+from trpc_sdk.abc import BaseConfigDecoder
+from trpc_sdk.abc import PluginType
+from trpc_sdk.plugin import get_plugin_class
+
+from ._exceptions import ConfigDecoderError
 
 
 class TrpcConfigParser(BaseConfig):
@@ -44,29 +44,28 @@ class TrpcConfigParser(BaseConfig):
     into typed Python objects.
     """
 
-    def __init__(self, data_source: str, decoder: str, ds_options: dict, de_options: dict):
-        super().__init__(data_source, decoder, ds_options, de_options)
-        self.data_source: BaseDataProvider = DefaultPluginManager.get(PluginType.CONFIG_DATA_SOURCE, data_source)()
-        self.decoder: BaseDecoder = DefaultPluginManager.get(PluginType.CONFIG_DECODER, decoder)()
-        self.data_source.set_options(ds_options)
-        self.decoder.set_options(de_options)
-        self.config = None
+    def __init__(self, provider_name: str, decoder_name: str, provider_options: Dict, decoder_options: Dict):
+        super().__init__(provider_name, decoder_name, provider_options, decoder_options)
+        self._provider: BaseConfigProvider = get_plugin_class(PluginType.CONFIG_PROVIDER, provider_name)()
+        self._decoder: BaseConfigDecoder = get_plugin_class(PluginType.CONFIG_DECODER, decoder_name)()
+        self._provider.set_options(provider_options)
+        self._decoder.set_options(decoder_options)
 
-    def load(self) -> dict:
+    def load(self) -> Dict:
         """Load and decode config file data(bytes) into a dictionary."""
-        config_data = self.data_source.load(self.ds_options.get('file_path', None), self.ds_options)
+        config_data = self._provider.load(self._provider_options.get('file_path', None), self._provider_options)
         if config_data:
             config_data = os.path.expandvars(config_data)
         try:
-            config_dict = self.decoder.decode(config_data, self.de_options)
+            config_dict = self._decoder.decode(config_data, self._decoder_options)
         except Exception as exc:  # pylint: disable=broad-except
-            raise DecodeError(self.decoder_name, str(exc)) from exc
-        self.config = config_dict
+            raise ConfigDecoderError(self._decoder_name, str(exc)) from exc
+        self._raw_config_dict = config_dict
         return config_dict
 
     def get(self, key: str, default: Optional[object] = None) -> object:
         """Get a config value by key."""
-        return self.config.get(key, default)
+        return self._raw_config_dict.get(key, default)
 
     @classmethod
     def _resolve_attr_type(cls, target: object, attr_name: str) -> type:
@@ -86,19 +85,15 @@ class TrpcConfigParser(BaseConfig):
         # Handle the issue where a parameter defaulting to None causes the type annotation
         # to automatically become typing.Union[MyType, NoneType].
         if getattr(attr_type, '__origin__', None) == Union:
-            attr_type = next(
-                (t for t in attr_type.__args__ if t is not type(None)), attr_type
-            )
+            attr_type = next((t for t in attr_type.__args__ if t is not type(None)), attr_type)
         return attr_type
 
     @classmethod
-    def _assign_dict_attr(
-        cls, attr_type: type, target: object, attr_name: str, config_value: dict
-    ) -> None:
+    def _assign_dict_attr(cls, attr_type: type, target: object, attr_name: str, config_value: dict) -> None:
         """Assign a dict config value to a typed attribute.
 
         If the attribute type is ``dict``, assigns directly. Otherwise,
-        initialises the attribute (if absent or None) and recurses into it.
+        initializes the attribute (if absent or None) and recurses into it.
 
         Args:
             attr_type: The declared type of the attribute.
@@ -112,7 +107,7 @@ class TrpcConfigParser(BaseConfig):
             setattr(target, attr_name, config_value)
             return
 
-        # Initialise the attribute when it is missing or None.
+        # Initialize the attribute when it is missing or None.
         if not hasattr(target, attr_name) or getattr(target, attr_name) is None:
             setattr(target, attr_name, attr_type())
 
@@ -120,9 +115,7 @@ class TrpcConfigParser(BaseConfig):
         cls.populate_from_dict(config_value, getattr(target, attr_name))
 
     @classmethod
-    def _assign_list_attr(
-        cls, attr_type: type, target: object, attr_name: str, config_value: List
-    ) -> None:
+    def _assign_list_attr(cls, attr_type: type, target: object, attr_name: str, config_value: List) -> None:
         """Assign a list config value to a typed attribute.
 
         Args:
@@ -165,14 +158,14 @@ class TrpcConfigParser(BaseConfig):
     def _build_config_key_to_attr_map(cls, object_class: type) -> Dict[str, str]:
         """Build a mapping from config-file keys to class attribute names.
 
-        Parses docstrings for ``:param attr_name: \\`config_key\\``` patterns
-        to support renaming between YAML keys and Python attributes.
+        Parses doc strings for ``:param attr_name: \\`config_key\\``` patterns
+        to support renaming between config keys and Python attributes.
 
         Args:
             object_class: The class whose docstring to parse.
 
         Returns:
-            A dict mapping config keys to attribute names.
+            A dictionary mapping config keys to attribute names.
         """
         attribute_map = {}
         # __init__ is the constructor of the class, __doc__ is the documentation string of dataclass.
@@ -222,7 +215,7 @@ class TrpcConfigParser(BaseConfig):
                 setattr(target, attr_name, config_value)
 
     @classmethod
-    def _parse(cls, source: Dict, target: object) -> None:
+    def parse_dict_to_config(cls, source: Dict, target: object) -> None:
         """Parse a config dictionary into typed objects following a
         structure specification.
 
@@ -230,7 +223,7 @@ class TrpcConfigParser(BaseConfig):
         top-level object to parse into.
 
         Args:
-            source: The parsed config dictionary (or subtree of it) from yaml file.
+            source: The parsed config dictionary (or subtree of it) from dict.
             target: A dict or object specifying the target structure (or subtree of it) from trpc_sdk config.
         """
         # if target is a dict, it means to get a part of the config, otherwise it means to get the whole config
@@ -245,22 +238,22 @@ class TrpcConfigParser(BaseConfig):
                 continue
             sub_source = source[key]
             if isinstance(sub_target, dict):
-                cls._parse(sub_source, sub_target)
+                cls.parse_dict_to_config(sub_source, sub_target)
             elif isinstance(sub_target, list):
                 if sub_source is None:
                     continue
                 for index, item in enumerate(sub_target):
-                    cls._parse(sub_source[index], item)
+                    cls.parse_dict_to_config(sub_source[index], item)
             else:
                 cls.populate_from_dict(sub_source, sub_target)
 
     def parse(self, target: object) -> None:
-        """Parse the loaded config into the given structure."""
-        TrpcConfigParser._parse(self.config, target)
+        """Parse the loaded config into the given structure.
 
-    def hot_reload(self, callback: Callable, interval: int, event_loop: AbstractEventLoop) -> None:
-        """Hot-reload config source changes and trigger a callback."""
-        key = self.ds_options.get("file_path")
-        self.data_source.hot_reload(
-            key, callback, {"interval": interval, "event_loop": event_loop}
-        )
+        Args:
+            target: The target object to parse the config into.
+        """
+        self.parse_dict_to_config(self._raw_config_dict, target)
+
+
+parse_dict_to_config = TrpcConfigParser.parse_dict_to_config

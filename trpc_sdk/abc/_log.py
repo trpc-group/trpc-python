@@ -109,7 +109,6 @@ class OutputConfig:
         caller_skip: Number of stack frames to skip when recording callers.
         writer_config: Writer-specific options.
         format_config: Formatter-specific options.
-        remote_config: Remote sink options, if any.
     """
 
     writer: str = ""
@@ -118,7 +117,6 @@ class OutputConfig:
     caller_skip: int = 2
     writer_config: WriterConfig = None
     format_config: FormatConfig = None
-    remote_config: dict = None
     capture_third_party: bool = False
     third_party_level: str = ""
 

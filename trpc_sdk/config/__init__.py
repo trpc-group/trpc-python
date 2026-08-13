@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """tRPC-Python configuration module.
 
 The package is split by responsibility:
@@ -33,10 +32,6 @@ friends) remain for call-site migration.
 
 from __future__ import annotations
 
-from ._client_config import get_client_service_config
-from ._client_config import parse_client_config
-from ._client_config import set_client_service_config
-from ._client_config import set_default_client_config
 from ._config import TrpcConfig
 from ._decoder import JsonDecoder
 from ._decoder import NoopDecoder
@@ -44,18 +39,16 @@ from ._decoder import YamlDecoder
 from ._defaults import merge_client_service_config
 from ._defaults import prepend_client_filters
 from ._exceptions import ConfigError
-from ._exceptions import DataSourceError
-from ._exceptions import DataSourceNotExist
-from ._exceptions import DecodeError
+from ._exceptions import ProviderError
+from ._exceptions import ProviderNotExist
+from ._exceptions import ConfigDecoderError
 from ._exceptions import GetConfigKeyError
 from ._loader import ConfigLoader
 from ._loader import ConfigLoaderFactory
 from ._options import with_codec
 from ._options import with_provider
 from ._parser import TrpcConfigParser
-from ._provider import FileDataProvider
-from ._provider import get_provider
-from ._provider import set_provider
+from ._provider import FileConfigProvider
 from ._types import Admin
 from ._types import ClientConfig
 from ._types import ClientServiceConfig
@@ -90,12 +83,6 @@ __all__ = [
     "merge_client_service_config",
     "prepend_client_filters",
     # Global state and registries
-    "get_client_service_config",
-    "get_provider",
-    "set_client_service_config",
-    "set_default_client_config",
-    "set_provider",
-    "parse_client_config",
     # config loading
     "ConfigLoader",
     "ConfigLoaderFactory",
@@ -104,12 +91,21 @@ __all__ = [
     # Exceptions
     "ConfigError",
     "GetConfigKeyError",
-    "DecodeError",
-    "DataSourceError",
-    "DataSourceNotExist",
+    "ConfigDecoderError",
+    "ProviderError",
+    "ProviderNotExist",
     # Plugins
     "JsonDecoder",
     "NoopDecoder",
     "YamlDecoder",
-    "FileDataProvider",
+    "FileConfigProvider",
 ]
+
+get_client_service_config = TrpcConfig.client_service_config
+parse_client_config = TrpcConfig.parse_client_config
+set_client_service_config = TrpcConfig.set_client_service_config
+set_client_service_configs = TrpcConfig.set_client_service_configs
+get_plugins_config = TrpcConfig.plugins_config
+get_global_config = TrpcConfig.global_config
+get_server_config = TrpcConfig.server_config
+get_client_config = TrpcConfig.client_config

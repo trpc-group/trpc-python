@@ -39,7 +39,7 @@ class _PluginManager:
         self._plugin_specs: Dict[PluginType, Dict[str, PluginSpec]] = defaultdict(dict)
         self._plugin_instances: Dict[PluginType, Dict[str, BasePlugin]] = defaultdict(dict)
         self._plugin_spec_sequence: Dict[PluginType, List[str]] = defaultdict(list)
-    
+
     def set_plugin_order(self, plugin_type: PluginType, plugin_name_sequence: List[str]):
         """Set plugin order"""
         self._plugin_spec_sequence[plugin_type] = plugin_name_sequence
@@ -128,12 +128,12 @@ class _PluginManager:
         """Get all plugin specifications"""
         specs = [spec for v in self._plugin_specs.values() for spec in v.values()]
         return specs
-    
+
     def all_plugin_instances(self) -> List[BasePlugin]:
         """Get all plugin instances"""
         instances = [instance for v in self._plugin_instances.values() for instance in v.values()]
         return instances
-    
+
     def all_plugin_specs_by_type(self, plugin_type: PluginType) -> List[PluginSpec]:
         """Get all plugin specifications by plugin type
         Args:
@@ -142,7 +142,7 @@ class _PluginManager:
             List of plugin specifications
         """
         return [spec for spec in self._plugin_specs[plugin_type].values()]
-    
+
     def all_plugin_instances_by_type(self, plugin_type: PluginType) -> List[BasePlugin]:
         """Get all plugin instances by plugin type
         Args:
@@ -151,7 +151,6 @@ class _PluginManager:
             List of plugin instances
         """
         return [instance for instance in self._plugin_instances[plugin_type].values()]
-
 
 
 DEFAULT_PLUGIN_MANAGER = _PluginManager()
