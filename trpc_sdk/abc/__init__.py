@@ -50,6 +50,7 @@ from ._plugin import PluginType
 from ._selector import BaseSelector
 from ._selector import SelectorOption
 from ._selector import ServerRouterOption
+from ._server import BaseServer
 from ._server import BaseServerStream
 from ._server import BaseService
 from ._server import BaseTrpcServerEngine
@@ -89,6 +90,7 @@ __all__ = [
     "BaseLoadBalance",
     "BaseLogger",
     "BaseMetrics",
+    "BaseServer",
     "BaseServerProtocolChecker",
     "BaseServerStream",
     "BaseServerTransport",

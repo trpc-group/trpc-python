@@ -103,6 +103,18 @@ class BaseService(ABC):
         ...
 
 
+class BaseServer(ABC):
+    """Define the server interface: start serving and block."""
+
+    @abstractmethod
+    def serve(self) -> None:
+        """Start the server and run until shutdown.
+
+        Args:
+            None.
+        """
+
+
 class BaseServerStream(ABC):
     """Define bidirectional server-stream operations."""
 
