@@ -7,6 +7,8 @@
 """tRPC-Python ABC module"""
 
 from ._circuit_breaker import BaseCircuitBreaker
+from ._codec import BaseCompress
+from ._codec import BaseSerializer
 from ._client import BaseClient
 from ._client import BaseClientStream
 from ._client import BaseClientStreamConnection
@@ -77,6 +79,7 @@ __all__ = [
     "BaseClientTransport",
     "BaseClientTransportOption",
     "BaseCodec",
+    "BaseCompress",
     "BaseConfig",
     "BaseConfigProvider",
     "BaseConfigDecoder",
@@ -115,6 +118,7 @@ __all__ = [
     "ReportStatus",
     "RpczData",
     "BaseSelector",
+    "BaseSerializer",
     "SelectorOption",
     "ServerRouterOption",
     "ServiceDesc",

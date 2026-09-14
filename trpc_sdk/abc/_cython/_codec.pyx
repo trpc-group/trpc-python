@@ -47,6 +47,7 @@ class BaseCodec(ABC):
         """
         ...
 
+
 cdef class BaseServerProtocolChecker:
     """Maintain a reusable byte buffer for incremental frame parsing.
 
