@@ -49,9 +49,12 @@ from ._node import Node
 from ._plugin import BasePlugin
 from ._plugin import PluginInitPos
 from ._plugin import PluginType
+from ._pool import BasePool
 from ._selector import BaseSelector
+from ._selector import BaseServiceRouter
 from ._selector import SelectorOption
 from ._selector import ServerRouterOption
+from ._selector import ServiceNameExtractor
 from ._server import BaseServer
 from ._server import BaseServerStream
 from ._server import BaseService
@@ -62,6 +65,7 @@ from ._server import ServiceDesc
 from ._server import StreamDesc
 from ._service_registry import BaseServiceRegistry
 from ._task_info import TaskInfo
+from ._transport import AddrType
 from ._transport import BaseClientStreamTransport
 from ._transport import BaseClientTransport
 from ._transport import BaseClientTransportOption
@@ -70,6 +74,7 @@ from ._transport import BaseServerTransportOption
 
 __all__ = [
     "ActiveData",
+    "AddrType",
     "BaseCircuitBreaker",
     "BaseClient",
     "BaseClientProtocolChecker",
@@ -100,6 +105,7 @@ __all__ = [
     "BaseServerTransportOption",
     "BaseService",
     "BaseServiceRegistry",
+    "BaseServiceRouter",
     "BaseTrpcServerEngine",
     "BaseWriter",
     "CallResult",
@@ -110,6 +116,7 @@ __all__ = [
     "Method",
     "Node",
     "BasePlugin",
+    "BasePool",
     "PluginInitPos",
     "PluginType",
     "OutputConfig",
@@ -121,6 +128,7 @@ __all__ = [
     "BaseSerializer",
     "SelectorOption",
     "ServerRouterOption",
+    "ServiceNameExtractor",
     "ServiceDesc",
     "StatPolicy",
     "StatValue",
