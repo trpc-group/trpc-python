@@ -20,10 +20,10 @@ from typing import Callable
 from typing import Optional
 from typing import Tuple
 
-from ._cython import BaseClientProtocolChecker  # pyright: ignore[reportMissingModuleSource]
-from ._cython import BaseCodec  # pyright: ignore[reportMissingModuleSource]
-from ._cython import BaseServerProtocolChecker  # pyright: ignore[reportMissingModuleSource]
-from ._cython import TrpcContext  # pyright: ignore[reportMissingModuleSource]
+from ._cython import BaseClientProtocolChecker
+from ._cython import BaseCodec
+from ._cython import BaseServerProtocolChecker
+from ._cython import TrpcContext
 from ._server import BaseService
 from ._server import BaseTrpcServerEngine
 
@@ -106,7 +106,10 @@ class BaseClientTransportOption:
     """Describe options used by a client transport.
 
     Attributes:
-        address: Remote endpoint as ``(host, port)``.
+        address: Remote endpoint as ``(host, port)``. Defaults to
+            ``("", 0)`` because subclasses such as
+            ``trpc_sdk.transport.RoundTripOptions`` are constructed empty
+            and filled by setters before the call.
         endpoint: Logical endpoint or dial target string.
         socket_type: Socket backend type such as ``net``.
         network: Network type such as ``tcp`` or ``udp``.
@@ -117,8 +120,8 @@ class BaseClientTransportOption:
         sock: Optional pre-created socket reused by the transport.
     """
 
-    address: AddrType
-    endpoint: str
+    address: AddrType = ("", 0)
+    endpoint: str = ""
     socket_type: str = "net"
     network: str = "tcp"
     short_conn: bool = False
