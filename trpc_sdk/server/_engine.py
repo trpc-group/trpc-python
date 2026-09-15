@@ -42,9 +42,9 @@ from trpc_sdk.abc import BaseService
 from trpc_sdk.abc import BaseTrpcServerEngine
 from trpc_sdk.abc import Parser
 from trpc_sdk.log import logger
+from trpc_sdk.utils import is_tcp_port_available
+from trpc_sdk.utils import is_udp_port_available
 from trpc_sdk.utils import is_unix_socket
-from trpc_sdk.utils import tcp_port_valid
-from trpc_sdk.utils import udp_port_valid
 from trpc_sdk.utils import unix_path_valid
 from ._constants import Network
 from ._option import ServerOption
@@ -130,11 +130,11 @@ class TrpcServerEngine(BaseTrpcServerEngine):
                 exit()
         else:
             if network.find(Network.TCP) != -1 or network.find(Network.HTTP) != -1:
-                if not tcp_port_valid(address[0], address[1]):
+                if not is_tcp_port_available(address[0], address[1]):
                     logger.error("[Master Engine] tcp address %s invalid", address)
                     exit()
             elif network.find(Network.UDP) != -1:
-                if not udp_port_valid(address[0], address[1]):
+                if not is_udp_port_available(address[0], address[1]):
                     logger.error("[Master Engine] udp address %s invalid", address)
                     exit()
             else:
