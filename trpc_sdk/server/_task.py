@@ -41,13 +41,13 @@ from typing import Dict
 from typing import List
 from typing import Optional
 
+from trpc_sdk.abc import BaseTaskStreamServiceHandler
 from trpc_sdk.common import ProcessType
 from trpc_sdk.log import logger
 from trpc_sdk.naming import pause_heartbeat as pause_registry_heartbeat
 from trpc_sdk.naming import resume_heartbeat
 from trpc_sdk.plugin import get_registered_tasks
 from trpc_sdk.plugin import init_task_plugins
-from trpc_sdk.stream import BaseTaskStreamServiceHandler
 from trpc_sdk.stream import TaskStreamServiceAdapter
 from trpc_sdk.task import TaskConsumer
 from trpc_sdk.task import consume_response
