@@ -9,6 +9,7 @@
 from ._circuit_breaker import BaseCircuitBreaker
 from ._codec import BaseCompress
 from ._codec import BaseSerializer
+from ._codec import TaskCodec
 from ._client import BaseClient
 from ._client import BaseClientStream
 from ._client import BaseClientStreamConnection
@@ -133,6 +134,7 @@ __all__ = [
     "StatPolicy",
     "StatValue",
     "StreamDesc",
+    "TaskCodec",
     "TaskInfo",
     "TrpcContext",
     "TrpcFrameHead",

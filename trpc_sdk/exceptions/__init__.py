@@ -16,6 +16,7 @@ from ._server_exceptions import ServerEncodeError
 from ._server_exceptions import ServerFuncNotFoundError
 from ._server_exceptions import ServerSystemError
 from ._server_exceptions import ServerTimeoutError
+from ._exceptions import TaskHandleError
 from ._client_exceptions import ClientConnectionError
 from ._client_exceptions import ClientDecodeError
 from ._client_exceptions import ClientEncodeError
@@ -37,6 +38,7 @@ __all__ = [
     "ServerFuncNotFoundError",
     "ServerTimeoutError",
     "ServerSystemError",
+    "TaskHandleError",
     "ClientTimeoutError",
     "ClientConnectionError",
     "ClientEncodeError",
