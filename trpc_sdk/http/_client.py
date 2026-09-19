@@ -18,8 +18,8 @@ from urllib.parse import ParseResult
 
 from aiohttp import hdrs
 
+from trpc_sdk.abc import clone_client_message
 from trpc_sdk.client import Client as TrpcClient
-from trpc_sdk.codec import clone_client_message
 from ._constants import HTTP_ARG_STREAM_KEY
 from ._constants import HTTP_ARGS_META_KEY
 from ._ctx_manager import RequestContextManager

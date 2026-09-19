@@ -65,3 +65,7 @@ DEFAULT_CLIENT_MAX_IDLE_CONN: int = 5
 
 # Default text encoding for decoder ``code`` option when unset.
 DEFAULT_ENCODING: str = "utf8"
+
+# Socket-family label stored on service config (``socket_type``). This is the
+# YAML/string value compared by callers, not ``socket.AF_UNIX``.
+UNIX_TYPE: str = "unix"

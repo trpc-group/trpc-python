@@ -28,10 +28,10 @@ from trpc_sdk.abc import BaseTaskStreamServerMethod
 from trpc_sdk.abc import BaseTaskStreamServiceHandler
 from trpc_sdk.abc import TaskStreamMethodType
 from trpc_sdk.abc import TrpcContext
+from trpc_sdk.abc import TrpcMessage
+from trpc_sdk.abc import get_message
 from trpc_sdk.codec import INNER_TASK_STREAM
-from trpc_sdk.codec import Message
 from trpc_sdk.codec import TaskStreamClientReadFrameError
-from trpc_sdk.codec import get_message
 from trpc_sdk.codec import get_server_codec
 from trpc_sdk.log import logger
 from trpc_sdk._inner import trpc_pb2
@@ -222,7 +222,7 @@ class TaskStreamServiceAdapter:
         Raises:
             AssertionError: ``session_id`` is missing from ``ctx``.
         """
-        msg: Message = get_message(ctx)
+        msg: TrpcMessage = get_message(ctx)
         session_id = ctx.get_meta_data("session_id", None)
         assert session_id is not None, "session_id is None"
         msg.set_session_id(int(session_id))
@@ -238,7 +238,7 @@ class TaskStreamServiceAdapter:
         Raises:
             TaskStreamClientReadFrameError: The frame is not a stream frame.
         """
-        msg: Message = get_message(ctx)
+        msg: TrpcMessage = get_message(ctx)
         if msg.frame_head.frame_type != trpc_pb2.TRPC_STREAM_FRAME:
             raise TaskStreamClientReadFrameError(f"msg frame type {msg.frame_head.frame_type} != {trpc_pb2.TRPC_STREAM_FRAME}")
         task_handle = self._stream_handler.get_task_stream_handler(msg.server_rpc_name)

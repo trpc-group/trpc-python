@@ -6,15 +6,15 @@
 
 """Cython framing and queues of the worker/task IPC protocol."""
 
-from ._c_task_frame import inner_decode_task_req  # pyright: ignore[reportMissingModuleSource]
-from ._c_task_frame import inner_decode_task_rsp  # pyright: ignore[reportMissingModuleSource]
-from ._c_task_frame import inner_encode_task_req  # pyright: ignore[reportMissingModuleSource]
-from ._c_task_frame import inner_encode_task_rsp  # pyright: ignore[reportMissingModuleSource]
-from ._c_task_queue import co_consume_batch_req  # pyright: ignore[reportMissingModuleSource]
-from ._c_task_queue import consume_batch_req  # pyright: ignore[reportMissingModuleSource]
-from ._c_task_queue import consume_batch_rsp  # pyright: ignore[reportMissingModuleSource]
-from ._c_task_queue import receive_pkg_from_worker  # pyright: ignore[reportMissingModuleSource]
-from ._c_task_queue import task_init  # pyright: ignore[reportMissingModuleSource]
+from ._task_frame import inner_decode_task_req  # pyright: ignore[reportMissingModuleSource]
+from ._task_frame import inner_decode_task_rsp  # pyright: ignore[reportMissingModuleSource]
+from ._task_frame import inner_encode_task_req  # pyright: ignore[reportMissingModuleSource]
+from ._task_frame import inner_encode_task_rsp  # pyright: ignore[reportMissingModuleSource]
+from ._task_queue import co_consume_batch_req  # pyright: ignore[reportMissingModuleSource]
+from ._task_queue import consume_batch_req  # pyright: ignore[reportMissingModuleSource]
+from ._task_queue import consume_batch_rsp  # pyright: ignore[reportMissingModuleSource]
+from ._task_queue import receive_pkg_from_worker  # pyright: ignore[reportMissingModuleSource]
+from ._task_queue import task_init  # pyright: ignore[reportMissingModuleSource]
 
 __all__ = [
     "co_consume_batch_req",

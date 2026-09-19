@@ -24,8 +24,10 @@ from abc import ABC
 from abc import abstractmethod
 from typing import Any
 
+from ._plugin import BasePlugin
 
-class BaseCompress(ABC):
+
+class BaseCompress(BasePlugin):
     """Plugin contract for frame-body compression.
 
     Both methods take and return raw ``bytes``. Implementations decide
@@ -52,7 +54,7 @@ class BaseCompress(ABC):
         return bytes()
 
 
-class BaseSerializer(ABC):
+class BaseSerializer(BasePlugin):
     """Plugin contract for RPC-body serialization.
 
     ``serialize`` turns an application object into body bytes.

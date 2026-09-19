@@ -23,9 +23,9 @@ from __future__ import annotations
 
 import http
 import threading
+from dataclasses import dataclass
 from functools import partial
 from typing import Dict
-from typing import NamedTuple
 from typing import Optional
 from urllib.parse import ParseResult
 from urllib.parse import urlparse
@@ -36,10 +36,10 @@ from aiohttp import ClientSession
 from aiohttp import hdrs
 from google.protobuf.descriptor import FieldDescriptor
 
-from trpc_sdk.codec import CompressType
-from trpc_sdk.codec import SerializationType
+from trpc_sdk.compressor import CompressType
 from trpc_sdk.exceptions import TrpcErrorCode
 from trpc_sdk.exceptions import TrpcErrorType
+from trpc_sdk.serialization import SerializationType
 from trpc_sdk.utils import strtobool
 from ._exceptions import InvalidURL
 from ._utils import find_from_dict
@@ -58,7 +58,8 @@ class HttpSession(threading.local):
         self.instance: Optional[ClientSession] = None
 
 
-class HttpTrpcHeader(NamedTuple):
+@dataclass
+class HttpTrpcHeader:
     """tRPC-over-HTTP header names.
 
     Each field is the wire name written onto (or read from) an HTTP
@@ -127,8 +128,8 @@ _trpc_err_code_to_http_status: Dict[int, http.HTTPStatus] = {
     TrpcErrorCode.TRPC_SERVER_TIMEOUT_ERR: http.HTTPStatus.GATEWAY_TIMEOUT,
     TrpcErrorCode.TRPC_SERVER_OVERLOAD_ERR: http.HTTPStatus.TOO_MANY_REQUESTS,
     TrpcErrorCode.TRPC_SERVER_SYSTEM_ERR: http.HTTPStatus.INTERNAL_SERVER_ERROR,
-    TrpcErrorCode.TRPC_SERVER_AUTH_FAIL: http.HTTPStatus.NON_AUTHORITATIVE_INFORMATION,
-    TrpcErrorCode.TRPC_SERVER_VALIDATE_FAIL: http.HTTPStatus.BAD_REQUEST,
+    TrpcErrorCode.TRPC_SERVER_AUTH_ERR: http.HTTPStatus.NON_AUTHORITATIVE_INFORMATION,
+    TrpcErrorCode.TRPC_SERVER_VALIDATE_ERR: http.HTTPStatus.BAD_REQUEST,
     TrpcErrorCode.TRPC_INVOKE_UNKNOWN_ERR: http.HTTPStatus.INTERNAL_SERVER_ERROR,
 }
 

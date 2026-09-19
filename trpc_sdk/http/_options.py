@@ -9,7 +9,7 @@
 :func:`get_options` turns a parsed URL plus extra
 :class:`~trpc_sdk.client.Options` into the list the HTTP client passes to
 tRPC ``invoke``. It is not :func:`trpc_sdk.client.get_options`, which
-builds options from a :class:`~trpc_sdk.codec.Message`.
+builds options from a :class:`~trpc_sdk.abc.TrpcMessage`.
 """
 
 from __future__ import annotations
@@ -19,8 +19,8 @@ from typing import Optional
 from urllib.parse import ParseResult
 
 from trpc_sdk.client import Options
-from trpc_sdk.codec import SerializationType
 from trpc_sdk.naming import TrpcSelector
+from trpc_sdk.serialization import SerializationType
 
 
 def get_options(url: ParseResult, opts: Optional[List]) -> List:

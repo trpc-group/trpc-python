@@ -12,13 +12,13 @@ import asyncio
 from dataclasses import dataclass
 from enum import IntEnum
 from enum import unique
-from typing import NamedTuple
 from typing import Optional
 
 from trpc_sdk._inner import trpc_pb2
 
 
-class ClientConnectionInfo(NamedTuple):
+@dataclass
+class ClientConnectionInfo:
     """One live client TCP connection as seen by the dispatcher.
 
     Stored in ``app.client_connections`` keyed by the kernel fd. Workers never

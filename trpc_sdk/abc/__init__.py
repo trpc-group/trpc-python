@@ -19,10 +19,18 @@ from ._config import BaseConfigDecoder
 from ._cython import BaseClientProtocolChecker  # pyright: ignore[reportMissingModuleSource]
 from ._cython import BaseCodec  # pyright: ignore[reportMissingModuleSource]
 from ._cython import BaseServerProtocolChecker  # pyright: ignore[reportMissingModuleSource]
+from ._cython import BaseService  # pyright: ignore[reportMissingModuleSource]
 from ._cython import RpczData  # pyright: ignore[reportMissingModuleSource]
 from ._cython import TrpcContext  # pyright: ignore[reportMissingModuleSource]
 from ._cython import TrpcFrameHead  # pyright: ignore[reportMissingModuleSource]
 from ._cython import TrpcMessage  # pyright: ignore[reportMissingModuleSource]
+from ._cython import clone_client_message  # pyright: ignore[reportMissingModuleSource]
+from ._cython import clone_context_and_message  # pyright: ignore[reportMissingModuleSource]
+from ._cython import clone_message  # pyright: ignore[reportMissingModuleSource]
+from ._cython import create_frame_head  # pyright: ignore[reportMissingModuleSource]
+from ._cython import create_message  # pyright: ignore[reportMissingModuleSource]
+from ._cython import get_message  # pyright: ignore[reportMissingModuleSource]
+from ._cython import parse_frame_head  # pyright: ignore[reportMissingModuleSource]
 from ._discovery import BaseDiscovery
 from ._filter import BaseFilter
 from ._filter import FilterHandleType
@@ -48,6 +56,7 @@ from ._metrics import StatPolicy
 from ._metrics import StatValue
 from ._node import Node
 from ._plugin import BasePlugin
+from ._plugin import BasePluginFactory
 from ._plugin import PluginInitPos
 from ._plugin import PluginType
 from ._pool import BasePool
@@ -58,14 +67,19 @@ from ._selector import ServerRouterOption
 from ._selector import ServiceNameExtractor
 from ._server import BaseServer
 from ._server import BaseServerStream
-from ._server import BaseService
 from ._server import BaseTrpcServerEngine
 from ._server import Method
 from ._server import ProcessType
 from ._server import ServiceDesc
 from ._server import StreamDesc
 from ._service_registry import BaseServiceRegistry
+from ._stream import BaseTaskStreamClientHandler
+from ._stream import BaseTaskStreamClientMethod
+from ._stream import BaseTaskStreamServerMethod
+from ._stream import BaseTaskStreamServiceHandler
+from ._stream import TaskStreamMethodType
 from ._task_info import TaskInfo
+from ._timer_hook import TimerHook
 from ._transport import AddrType
 from ._transport import BaseClientStreamTransport
 from ._transport import BaseClientTransport
@@ -107,6 +121,10 @@ __all__ = [
     "BaseService",
     "BaseServiceRegistry",
     "BaseServiceRouter",
+    "BaseTaskStreamClientHandler",
+    "BaseTaskStreamClientMethod",
+    "BaseTaskStreamServerMethod",
+    "BaseTaskStreamServiceHandler",
     "BaseTrpcServerEngine",
     "BaseWriter",
     "CallResult",
@@ -117,6 +135,7 @@ __all__ = [
     "Method",
     "Node",
     "BasePlugin",
+    "BasePluginFactory",
     "BasePool",
     "PluginInitPos",
     "PluginType",
@@ -136,8 +155,17 @@ __all__ = [
     "StreamDesc",
     "TaskCodec",
     "TaskInfo",
+    "TaskStreamMethodType",
+    "TimerHook",
     "TrpcContext",
     "TrpcFrameHead",
     "TrpcMessage",
     "WriterConfig",
+    "clone_client_message",
+    "clone_context_and_message",
+    "clone_message",
+    "create_frame_head",
+    "create_message",
+    "get_message",
+    "parse_frame_head",
 ]

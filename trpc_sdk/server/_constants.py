@@ -9,37 +9,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from enum import IntEnum
 from enum import unique
-
-
-@unique
-class PipeEnd(IntEnum):
-    """Which end of a pre-fork socketpair this process owns.
-
-    The pair is created in the master before fork. After fork each process
-    keeps one end and must close the other so the peer can observe EOF.
-    Values stay ``1`` / ``2`` so integer comparisons keep working without
-    a cast.
-    """
-
-    # socket_pair[0]; typically kept by the worker / child.
-    LEFT = 1
-    # socket_pair[1]; typically kept by the dispatcher / master.
-    RIGHT = 2
-
-
-@unique
-class PipeKind(IntEnum):
-    """Socketpair protocol passed to ``create_pipe()``.
-
-    Both kinds are Unix-domain pairs. TCP selects ``SOCK_STREAM``; UDP
-    selects ``SOCK_DGRAM``, which the C dispatcher uses for req/rsp IPC.
-    Numeric values: TCP = 1 (``SOCK_STREAM``), UDP = 2 (``SOCK_DGRAM``).
-    """
-
-    TCP = 1
-    UDP = 2
 
 
 @unique

@@ -28,14 +28,14 @@ from trpc_sdk.common import ProcessType
 from trpc_sdk.common import get_or_create_event_loop
 from trpc_sdk.common import register_child_callback
 from trpc_sdk.config import TrpcConfig
+from trpc_sdk.ipc import PipeConnection
+from trpc_sdk.ipc import PipeEnd
+from trpc_sdk.ipc import PipeKind
+from trpc_sdk.ipc import create_pipe
 from trpc_sdk.log import logger
 from trpc_sdk.plugin import register_plugin
 from ._constants import MAGIC_VAL
 from ._constants import PKG_LEN
-from ._constants import PipeEnd
-from ._constants import PipeKind
-from ._pipe import PipeConnection
-from ._pipe import create_pipe
 from ._types import TaskInfo
 
 
@@ -359,12 +359,13 @@ def _run_checker_thread_in_master() -> None:
         loop.stop()
 
 
-@register_plugin(PluginType.USER_DEFINED, "healthy_checker", init_pos=PluginInitPos.MASTER)
+@register_plugin(PluginType.USER_DEFINED, "healthy_checker", init_pos=PluginInitPos.WORKER)
 class HealthyCheckerPlugin(BasePlugin):
     """Plugin for managing healthy checking functionality in TRPC framework."""
 
     def __init__(self):
         """Initialize the HealthyCheckerPlugin with no active thread."""
+        super().__init__()
         # Daemon thread started once by ``on_master_start``; stays ``None`` when
         # ``heartbeat_interval`` is unset.
         self.checker_thread: Optional[threading.Thread] = None
@@ -417,7 +418,5 @@ def _run_checker_thread_in_worker(type: ProcessType) -> None:
 
 register_child_callback(partial(_run_checker_thread_in_worker, ProcessType.WORKER),
                                   ProcessType.WORKER)
-register_child_callback(partial(_run_checker_thread_in_worker, ProcessType.DISPATCHER),
-                                  ProcessType.DISPATCHER)
 register_child_callback(partial(_run_checker_thread_in_worker, ProcessType.TASK),
                                   ProcessType.TASK)

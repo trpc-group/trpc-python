@@ -43,9 +43,6 @@ class DSNSelector(BaseSelector):
     form: ``dsn://user:passwd@tcp(ip:port)/db``.
     """
 
-    def __init__(self):
-        pass
-
     async def select(self, service_name: str, opt: SelectorOption) -> Node:
         """Return a node whose address is the raw DSN.
 

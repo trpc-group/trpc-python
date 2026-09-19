@@ -67,7 +67,7 @@ class TrpcConfig:
         Returns:
             The configuration that was just loaded.
         """
-        cls._config_parser = TrpcConfigParser('FileProvider', 'YamlDecoder', {'file_path': config_path},
+        cls._config_parser = TrpcConfigParser('file', 'yaml', {'file_path': config_path},
                                               {'code': file_code})
         # The parser retains the decoded dictionary for lookup and deserializing.
         cls._config_parser.load()

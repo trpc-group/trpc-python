@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 
 from trpc_sdk.abc import TrpcContext
-from trpc_sdk.codec import get_message
+from trpc_sdk.abc import get_message
 from trpc_sdk.exceptions import ClientInvokeError
 from trpc_sdk.exceptions import ClientTimeoutError
 from trpc_sdk.log import logger
@@ -81,16 +81,16 @@ async def tcp_round_trip(ctx: TrpcContext, req_data: bytes, options: RoundTripOp
         get_message(ctx)
         set_addr_to_ctx_from_transport(ctx, conn.stream_conn.transport)
         send_us = now_us()
-        ctx.client_post_sched_send_msg_us = send_us
-        ctx.client_pre_io_send_msg_us = send_us
+        ctx.rpcz_data.client_post_sched_send_msg_us = send_us
+        ctx.rpcz_data.client_pre_io_send_msg_us = send_us
         ctx.with_meta_data(RPCZ_CLIENT_REQ_SIZE_CTX_KEY, len(req_data))
         conn.write(req_data)
-        ctx.client_post_io_send_msg_us = now_us()
+        ctx.rpcz_data.client_post_io_send_msg_us = now_us()
         logger.debug("%s|write data len=%d", options.endpoint, len(req_data))
 
         if options.req_type != RequestType.SendOnly:
             rsp = await asyncio.wait_for(options.checker.read_frame(conn), get_remain_time(ctx.deadline))
-            ctx.client_post_sched_recv_msg_us = now_us()
+            ctx.rpcz_data.client_post_sched_recv_msg_us = now_us()
             ctx.with_meta_data(RPCZ_CLIENT_RSP_SIZE_CTX_KEY, len(rsp))
     except asyncio.TimeoutError as err:
         if conn:
@@ -140,15 +140,15 @@ async def tcp_multiplexed(ctx: TrpcContext, req_data: bytes, options: RoundTripO
         conn = await options.multiplexed.get_conn(options.network, options.address, options.msg.request_id, options.msg,
                                                   options.checker, options.codec, get_remain_time(ctx.deadline))
         send_us = now_us()
-        ctx.client_post_sched_send_msg_us = send_us
-        ctx.client_pre_io_send_msg_us = send_us
+        ctx.rpcz_data.client_post_sched_send_msg_us = send_us
+        ctx.rpcz_data.client_pre_io_send_msg_us = send_us
         ctx.with_meta_data(RPCZ_CLIENT_REQ_SIZE_CTX_KEY, len(req_data))
         conn.write(req_data)
-        ctx.client_post_io_send_msg_us = now_us()
+        ctx.rpcz_data.client_post_io_send_msg_us = now_us()
 
         if options.req_type != RequestType.SendOnly:
             rsp = await asyncio.wait_for(conn.read(), get_remain_time(ctx.deadline))
-            ctx.client_post_sched_recv_msg_us = now_us()
+            ctx.rpcz_data.client_post_sched_recv_msg_us = now_us()
             ctx.with_meta_data(RPCZ_CLIENT_RSP_SIZE_CTX_KEY, len(rsp))
     except asyncio.TimeoutError as err:
         raise ClientTimeoutError(

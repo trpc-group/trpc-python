@@ -7,7 +7,7 @@
 """HTTP client response wrappers.
 
 :class:`HttpClientRspHeader` is the raw status/headers/body the
-transport stores on ``Message.client_rsp_head``. :class:`TrpcHttpResponse`
+transport stores on ``TrpcMessage.client_rsp_head``. :class:`TrpcHttpResponse`
 is the user-facing wrapper returned by :class:`~trpc_sdk.http.Client`.
 """
 
@@ -23,7 +23,7 @@ from google.protobuf.message import Message as PbMessage
 
 
 class HttpClientRspHeader:
-    """Raw HTTP response fields stored on ``Message.client_rsp_head``.
+    """Raw HTTP response fields stored on ``TrpcMessage.client_rsp_head``.
 
     When ``stream`` is ``True``, ``body`` is the live aiohttp
     ``ClientResponse`` (the transport has not read it). Otherwise
@@ -168,7 +168,7 @@ def create_rsp_object():
     """Return the empty response placeholder passed to ``Client.invoke``.
 
     HTTP responses are filled by the transport onto
-    ``Message.client_rsp_head``, so the invoke path only needs a
+    ``TrpcMessage.client_rsp_head``, so the invoke path only needs a
     no-op factory here.
 
     Returns:

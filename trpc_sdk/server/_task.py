@@ -19,10 +19,8 @@ This module provides:
   forked: :class:`~trpc_sdk.server._worker.BaseWorker` for the startup sequence
   and IPC bookkeeping, ``multiprocessing.Process`` for the process identity
   (MRO is ``(BaseWorker, Process)`` so :meth:`BaseWorker.run` wins).
-* :class:`TaskProcess` — the Python implementation: an event loop feeding a
-  global queue that :class:`~trpc_sdk.task.TaskConsumer` threads drain.
-* :class:`CTaskProcess` — the native implementation, which hands the task
-  loop to the C driver and therefore has no Python event loop at all.
+* :class:`TaskProcess` — an event loop feeding a global queue that
+  :class:`~trpc_sdk.task.TaskConsumer` threads drain.
 
 The pre-fork record is :class:`~trpc_sdk.server._types.TaskInfo`.
 """
@@ -30,7 +28,6 @@ The pre-fork record is :class:`~trpc_sdk.server._types.TaskInfo`.
 from __future__ import annotations
 
 import asyncio
-import importlib
 import os
 from functools import partial
 from multiprocessing import Process
@@ -43,6 +40,10 @@ from typing import Optional
 
 from trpc_sdk.abc import BaseTaskStreamServiceHandler
 from trpc_sdk.common import ProcessType
+from trpc_sdk.ipc import PipeConnection
+from trpc_sdk.ipc import PipeEnd
+from trpc_sdk.ipc import PipeKind
+from trpc_sdk.ipc import create_pipe
 from trpc_sdk.log import logger
 from trpc_sdk.naming import pause_heartbeat as pause_registry_heartbeat
 from trpc_sdk.naming import resume_heartbeat
@@ -51,18 +52,12 @@ from trpc_sdk.plugin import init_task_plugins
 from trpc_sdk.stream import TaskStreamServiceAdapter
 from trpc_sdk.task import TaskConsumer
 from trpc_sdk.task import consume_response
-from trpc_sdk.task import get_default_codec
-from trpc_sdk.task import register_ctask_name
 from trpc_sdk.task import register_task_num
 from trpc_sdk.task import task_init
 from trpc_sdk.transport import TaskStreamConnection
 from trpc_sdk.transport import TaskWorkerConnection
 from trpc_sdk.utils import unlink_unix_socket_file
-from ._constants import PipeEnd
-from ._constants import PipeKind
 from ._constants import WORKER_PRODUCER_PREFIX
-from ._pipe import PipeConnection
-from ._pipe import create_pipe
 from ._types import TaskInfo
 from ._worker import BaseWorker
 
@@ -109,12 +104,8 @@ def build_task_infos() -> List[TaskInfo]:
     task_infos: List[TaskInfo] = []
     for task_handler in get_registered_tasks():
         register_task_num(task_handler.name, task_handler.task_num)
-        if task_handler.use_c_task:
-            handle = CTaskProcess
-            enable = len(task_handler.c_task_driver_params) > 0
-            register_ctask_name(task_handler.name, enable)
-        else:
-            handle = TaskProcess
+
+        handle = TaskProcess
 
         for i in range(task_handler.task_num):
             task = TaskInfo()
@@ -206,33 +197,6 @@ class TaskIpcMesh:
                 socket_pair[1].setblocking(False)
                 task.task_pipe_conn[row] = PipeConnection(socket_pair, PipeEnd.LEFT)
                 self._producer_pipes[producer][column] = PipeConnection(socket_pair, PipeEnd.RIGHT)
-            self._reject_gaps_on_c_task(task)
-
-    @staticmethod
-    def _reject_gaps_on_c_task(task: TaskInfo) -> None:
-        """Refuse a native task whose producer list has holes in it.
-
-        ``trpc_sdk._task._ctask`` walks ``task_pipe_conn`` positionally and assumes
-        every entry is a live pipe. A hole appears only when some *other* task
-        declared ``peers`` and thereby added a producer that does not reach
-        this one. Failing at startup is far better than handing ``None`` to the
-        native driver, where it surfaces as a crash with no link back to the
-        declaration that caused it.
-
-        Args:
-            task: The task record just wired up.
-
-        Raises:
-            ValueError: ``use_c_task`` is set and some producer has no pipe.
-        """
-        if not task.use_c_task:
-            return
-        missing = [name for name, pipe in zip(task.producer_names, task.task_pipe_conn) if pipe is None]
-        if missing:
-            raise ValueError(
-                f"task '{task.name}' runs on the native driver, which needs a pipe from every producer, "
-                f"but these have none: {missing}. Either drop use_c_task on it, or add it to the "
-                f"peers of the tasks listed.")
 
     def _has_edge(self, producer: str, task: TaskInfo) -> bool:
         """Report whether ``producer`` is allowed to send work to ``task``.
@@ -317,9 +281,7 @@ def set_task_ipc_mesh(mesh: Optional[TaskIpcMesh]) -> None:
     """Publish the mesh so forked children inherit it.
 
     Assigned in the worker **before** the first fork, which is the only way a
-    child can learn about pipes it did not create. Passing it through the task
-    constructors instead would not reach :class:`CTaskProcess`, whose
-    signature the native driver fixes.
+    child can learn about pipes it did not create.
 
     Args:
         mesh: The mesh this process tree was built with, or ``None`` to clear
@@ -568,117 +530,3 @@ class TaskProcess(BaseTaskProcess):
             self._unix_srv.close()
             unlink_unix_socket_file(self._unix_path)
             self._unix_srv = None
-
-
-class CTaskProcess(Process):
-    """Native task child: the C driver owns the loop, so there is no asyncio.
-
-    Does **not** extend :class:`BaseTaskProcess`. The native driver runs the
-    whole task loop, so this process has no Python event loop and does not
-    share the base class's plugin / SIGTERM / ``run_forever`` sequence.
-
-    :meth:`run` picks a driver from ``task_info.c_task_driver_params``:
-
-    * non-empty — :meth:`_run_trpc_driver` hands control to
-      ``trpc_driver.run_c_task_process``.
-    * empty — :meth:`_run_default_driver` registers the Python handler with
-      ``task_driver.RegisterTask`` (unless ``on_fork`` replaces that) and
-      starts :class:`~trpc_sdk._task._ctask.CTask`.
-    """
-
-    def __init__(self, task_info: TaskInfo, engine) -> None:
-        """Record name, pipes, handler and driver flags; nothing is started yet.
-
-        Runs in the master **before fork**. :meth:`run` is the first code that
-        executes inside the new process.
-
-        Args:
-            task_info: Master-side task record. ``c_task_driver_params``
-                non-empty selects the trpc_driver path.
-            engine: Master engine, inherited through fork. Used for
-                ``opts.task_wait_interval`` / ``opts.task_batch_size``.
-        """
-        super().__init__()
-        # Process role used by the master for health checks and restarts.
-        self.type: ProcessType = ProcessType.TASK
-        # Process name shown in logs and process listings.
-        self.name = f"c_task_{task_info.name}"
-        # Master engine that forked this child.
-        self.server_engine = engine
-        # This task's end of each worker <-> task IPC pipe; ``None`` for
-        # stream tasks. The native driver reads the list from ``task_info``.
-        self.task_pipe_conn: List[Optional[PipeConnection]] = task_info.task_pipe_conn
-        # Master-side task record this process was spawned for.
-        self.task_info: TaskInfo = task_info
-        # Optional user callback run once after fork; ``task_handle[0]``.
-        self.task_initializer: Optional[Callable[..., Any]] = task_info.task_handle[0]
-        # User handler registered with the native driver; ``task_handle[1]``.
-        self.task_handle: Callable[..., Any] = task_info.task_handle[1]
-        # Milliseconds a consumer sleeps when the inbound queue is empty.
-        self.wait_interval: int = engine.opts.task_wait_interval
-        # If True, registry heartbeats were paused at registration and must be
-        # resumed after the initializer (wrapped into ``RegisterTask``).
-        self.pause_heartbeat: bool = task_info.pause_heartbeat
-        if self.task_info.batch_size <= 0:
-            self.task_info.batch_size = engine.opts.task_batch_size
-
-        # Always ``None``: the native driver owns the loop, unlike TaskProcess.
-        self.loop: Optional[asyncio.AbstractEventLoop] = None
-        # Kept for API parity with :class:`BaseTaskProcess`; unused here.
-        self.block: bool = True
-        # True when ``c_task_driver_params`` is non-empty: use trpc_driver.
-        self.c_task_driver: bool = len(self.task_info.c_task_driver_params) > 0
-
-    def run(self) -> None:
-        """Child entry point: pick the native driver and hand it the task."""
-        if self.c_task_driver:
-            self._run_trpc_driver()
-        else:
-            self._run_default_driver()
-
-    def _run_default_driver(self) -> None:
-        """Register the Python handler (unless ``on_fork``), then start CTask.
-
-        ``task_info.on_fork``, when set, replaces ``RegisterTask`` entirely.
-        Otherwise the handler is registered with ``task_driver``; if
-        ``pause_heartbeat`` is set, the initializer is wrapped so
-        :func:`resume_heartbeat` runs after it. :class:`~trpc_sdk._task._ctask.CTask`
-        then takes ``task_info`` and blocks in ``start()``.
-        """
-        if self.task_info.on_fork:
-            self.task_info.on_fork()
-        else:
-            task_driver = importlib.import_module("trpc_sdk.task._task_driver")
-            if self.pause_heartbeat:
-
-                def with_resume_heartbeat_initializer(initializer):
-                    """Run ``initializer`` if set, then resume registry heartbeats."""
-                    if initializer is not None:
-                        initializer()
-                    resume_heartbeat()
-
-                task_driver.RegisterTask(with_resume_heartbeat_initializer(self.task_initializer), self.task_handle,
-                                         self.task_info.batch_size)
-            else:
-                task_driver.RegisterTask(self.task_initializer, self.task_handle, self.task_info.batch_size)
-
-        ctask = importlib.import_module("trpc_sdk.task._ctask")
-        task = ctask.CTask()
-        task.set_task_info(self.task_info)
-        task.start()
-
-    def _run_trpc_driver(self) -> None:
-        """Hand the process to ``trpc_driver.run_c_task_process``.
-
-        Log level and log file come from ``c_task_driver_params``, defaulting
-        to level ``4`` and ``./trpc_task_driver.log``.
-        """
-        trpc_driver = importlib.import_module("trpc_driver")
-        log_level = self.task_info.c_task_driver_params.get("log_level", 4)
-        log_file = self.task_info.c_task_driver_params.get("log_file", "./trpc_task_driver.log")
-        trpc_driver.run_c_task_process(self.task_info,
-                                       get_default_codec(),
-                                       self.task_initializer,
-                                       self.task_handle,
-                                       log_level=log_level,
-                                       log_file=log_file)

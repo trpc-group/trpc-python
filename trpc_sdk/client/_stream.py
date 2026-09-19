@@ -24,8 +24,8 @@ from trpc_sdk.abc import BaseClientStreamConnection
 from trpc_sdk.abc import TrpcContext
 from trpc_sdk.codec import TaskStreamClientCodec
 from trpc_sdk.codec import TaskStreamClientParser
-from trpc_sdk.codec import compress
-from trpc_sdk.codec import serialize
+from trpc_sdk.compressor import compress
+from trpc_sdk.serialization import serialize
 from trpc_sdk.transport import ClientTaskStreamTransport
 from trpc_sdk.utils import now_ms
 from ._client import select_node
@@ -122,7 +122,7 @@ class Stream(BaseClientStreamConnection):
         client_options.call_options.set_codec(client_options.codec)
 
         self.opts = client_options
-        await self.opts.transport.start(ctx, client_options.call_options)
+        await self.opts.transport.start_stream(ctx, client_options.call_options)
 
         cost = now_ms() - begin
         if client_options.node:
@@ -169,5 +169,5 @@ class TaskClientStream(Stream):
 
         self.opts = client_options
         self.opts.call_options.is_task_stream = True
-        await self.opts.transport.start(ctx, client_options.call_options)
+        await self.opts.transport.start_stream(ctx, client_options.call_options)
         return client_options

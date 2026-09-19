@@ -43,7 +43,7 @@ from ._client_transport_udp import udp_round_trip
 from ._options import RoundTripOptions
 
 
-@register_plugin(PluginType.CLIENT_TRANSPORT, "trpc", init_pos=PluginInitPos.MASTER)
+@register_plugin(PluginType.CLIENT_TRANSPORT, "trpc", init_pos=PluginInitPos.WORKER)
 class ClientTransport(BaseClientStreamTransport):
     """Default tRPC client transport (plugin name ``"trpc"``).
 
@@ -53,8 +53,8 @@ class ClientTransport(BaseClientStreamTransport):
 
     Attributes:
         stream_id_to_conn: Live stream connections keyed by the tRPC
-            stream id on the client message. Filled by :meth:`start`,
-            removed by :meth:`close`.
+            stream id on the client message. Filled by
+            :meth:`start_stream`, removed by :meth:`close`.
     """
 
     def __init__(self):
@@ -62,6 +62,7 @@ class ClientTransport(BaseClientStreamTransport):
 
         Unary ``round_trip`` does not use this map.
         """
+        super().__init__()
         self.stream_id_to_conn: Dict[int, ClientStreamConn] = {}
 
     async def round_trip(self, ctx: TrpcContext, req_data: bytes, options: RoundTripOptions):
@@ -167,7 +168,7 @@ class ClientTransport(BaseClientStreamTransport):
             client_conn.close(client_conn.need_close)
             self.stream_id_to_conn.pop(stream_id)
 
-    async def start(self, ctx: TrpcContext, options: RoundTripOptions):
+    async def start_stream(self, ctx: TrpcContext, options: RoundTripOptions):
         """Take a pooled TCP connection and bind it to this stream id.
 
         Forces ``options.short_conn = False`` so the pool keeps the

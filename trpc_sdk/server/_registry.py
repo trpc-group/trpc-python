@@ -4,7 +4,7 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
-"""Background naming-service registration for one :class:`~trpc_sdk.server._service.Service`.
+"""Background naming-service registration for one :class:`~trpc_sdk.server._cython._service.Service`.
 
 A service with a configured registry starts a :class:`RegistryThread` so
 register / heartbeat / deregister run on a dedicated event loop, not the
@@ -22,7 +22,7 @@ from typing import Awaitable
 from typing import Callable
 from typing import Optional
 
-from trpc.utils import asynclib
+from trpc_sdk.utils import asynclib
 
 
 class RegistryThread(threading.Thread):
@@ -81,7 +81,7 @@ class RegistryThread(threading.Thread):
         """Ask the retry loop to stop and cancel the in-flight register task.
 
         Must use ``call_soon_threadsafe`` because the caller (typically
-        :meth:`trpc_sdk.server._service.Service.close`) is on another thread.
+        :meth:`trpc_sdk.server._cython._service.Service.close`) is on another thread.
         """
         self._running = False
         if self._task is not None:

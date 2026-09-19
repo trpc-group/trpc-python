@@ -25,9 +25,9 @@ cdef class RpczData:
 cdef class TrpcContext:
     """Own the runtime state and message for one RPC invocation.
 
-    Ownership is intentionally one-way: the context holds the message, and the
-    message has no reference back to the context. Public native fields provide
-    direct access to statically typed Cython callers.
+    The context owns the message, not the other way round. ``msg`` stays
+    ``None`` until :func:`trpc_sdk.abc.get_message` or one of the clone
+    helpers attaches one.
     """
 
     def __cinit__(self):
@@ -53,6 +53,17 @@ cdef class TrpcContext:
     cpdef object pop_meta_data(self, object key, object default=None):
         """Remove and return a metadata value or the supplied default."""
         return self.meta_data.pop(key, default)
+
+    cpdef object get_client_message(self):
+        """Return the message attached to this context.
+
+        :func:`trpc_sdk.abc.get_message` creates it when missing. The
+        client invoke path reads codec state from this object.
+
+        Returns:
+            The :class:`TrpcMessage`, or ``None`` before one is attached.
+        """
+        return self.msg
 
     def __copy__(self):
         """Return a shallow copy without copying the owned message."""

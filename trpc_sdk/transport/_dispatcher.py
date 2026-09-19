@@ -28,8 +28,8 @@ from typing import Any
 from typing import Optional
 from typing import Tuple
 
-from trpc_sdk.codec import CFrameHead
-from trpc_sdk.codec import parse_frame_head
+from trpc_sdk.abc import TrpcFrameHead
+from trpc_sdk.abc import parse_frame_head
 from trpc_sdk.config import TrpcConfig
 from trpc_sdk.exceptions import ServerDecodeError
 from trpc_sdk.log import logger
@@ -39,10 +39,10 @@ from trpc_sdk.telemetry import report_attr
 from trpc_sdk.utils import make_addr_info_to_bytes
 from trpc_sdk.utils import now_ms
 from trpc_sdk.utils import now_us
-from ._c_ipc_codec import InnerStreamParser
-from ._c_ipc_codec import decode_worker_msg_req
-from ._c_ipc_codec import inner_decode_rsp
-from ._c_ipc_codec import inner_encode_req
+from ._cython import InnerStreamParser
+from ._cython import decode_worker_msg_req
+from ._cython import inner_decode_rsp
+from ._cython import inner_encode_req
 from ._connection import BaseConnection
 from ._scheduler import get_next_worker
 from ._types import ClientConnectionInfo
@@ -150,7 +150,7 @@ class DispatcherClientConnection(BaseConnection):
                 req_body_buf = inner_encode_req(self.fd, self.port, self.session_id,
                                                 now_ms(), self.addr_info, package)
 
-                frame_head: CFrameHead = parse_frame_head(package[:16])
+                frame_head: TrpcFrameHead = parse_frame_head(package[:16])
                 scheduler_params = SchedulerParams(worker_conn_num=len(self.app.worker_connections),
                                                    remote_ip=self.remote_ip,
                                                    session_id=self.session_id,

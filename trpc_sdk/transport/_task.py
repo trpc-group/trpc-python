@@ -32,7 +32,7 @@ from trpc_sdk.task import receive_pkg_from_worker
 from trpc_sdk.telemetry import report_attr
 from trpc_sdk.utils import now_ms
 
-from ._c_ipc_codec import InnerStreamParser
+from ._cython import InnerStreamParser
 
 # Remaining socketpair end per worker index. ``TaskWorkerConnection`` fills
 # this after fork; C task code writes responses back through the same map.

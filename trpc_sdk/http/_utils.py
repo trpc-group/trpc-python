@@ -31,7 +31,7 @@ def reverse_dict(origin: Mapping[_KT, _VT]) -> Mapping[_VT, _KT]:
     Duplicate values keep the last key that mapped to them, matching
     the historical ``defines._reverse_dict`` behaviour. That is why
     ``application/protobuf`` (and not ``application/x-protobuf``) is
-    the content type returned for :attr:`~trpc_sdk.codec.SerializationType.PB`.
+    the content type returned for :attr:`~trpc_sdk.serialization.SerializationType.PB`.
 
     Args:
         origin: Mapping to invert.

@@ -8,9 +8,8 @@
 
 Listen-socket defaults live here so :mod:`trpc_sdk.transport._socket` and any
 future listener code share one backlog. The IPC frame constants are the
-single source of truth for the pure-Python inner codec in
-:mod:`trpc_sdk.transport._ipc_codec` and the Cython twin in
-:mod:`trpc_sdk.transport._c_ipc_codec`, which copies them into typed
+single source of truth for the Cython inner-IPC codec in
+:mod:`trpc_sdk.transport._cython._ipc_codec`, which copies them into typed
 ``cdef`` locals at module import.
 
 The client-side request enums live here too:

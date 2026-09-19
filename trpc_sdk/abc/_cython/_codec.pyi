@@ -4,14 +4,14 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
-from abc import ABC
 from abc import abstractmethod
 from typing import Any
 
+from trpc_sdk.abc import BasePlugin
 from ._context import TrpcContext
 
 
-class BaseCodec(ABC):
+class BaseCodec(BasePlugin):
     """Context-first protocol codec interface."""
 
     @abstractmethod
@@ -40,7 +40,7 @@ class BaseServerProtocolChecker:
         ...
 
 
-class BaseClientProtocolChecker(ABC):
+class BaseClientProtocolChecker(BasePlugin):
     """Asynchronous client-side frame reader."""
 
     @abstractmethod

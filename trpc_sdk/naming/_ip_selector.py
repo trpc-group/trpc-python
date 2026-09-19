@@ -42,9 +42,6 @@ class DNSSelector(BaseSelector):
     that host. Empty ``service_name`` is rejected before any lookup.
     """
 
-    def __init__(self):
-        pass
-
     async def select(self, service_name: str, opt: SelectorOption) -> Node:
         """Resolve one address from ``service_name`` through DNS.
 
@@ -89,9 +86,6 @@ class IpSelector(BaseSelector):
     is stored as-is. Registered under the ``ip``, ``http``, and
     ``https`` target schemes.
     """
-
-    def __init__(self):
-        pass
 
     async def select(self, service_name: str, opt: SelectorOption) -> Node:
         """Parse one address from ``service_name`` without DNS.

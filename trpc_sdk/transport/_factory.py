@@ -34,12 +34,9 @@ DefaultServerTransportOption = BaseServerTransportOption
 DefaultServerTransport = TrpcServerStreamTransport
 
 
-@register_plugin(PluginType.SERVER_TRANSPORT, "trpc", init_pos=PluginInitPos.MASTER)
+@register_plugin(PluginType.SERVER_TRANSPORT, "trpc", init_pos=PluginInitPos.WORKER)
 class TrpcServerTransportFactory(BasePluginFactory):
     """Build the default tRPC streaming server transport."""
-
-    def __init__(self) -> None:
-        pass
 
     def create(self) -> TrpcServerStreamTransport:
         """Return a new :class:`TrpcServerStreamTransport`."""

@@ -20,18 +20,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from multiprocessing import Process
-from typing import Any
+from typing import TYPE_CHECKING
 from typing import Tuple
-from typing import NamedTuple
 from typing import Optional
 from typing import Type
 from typing import Union
 
 from trpc_sdk.abc import TimerHook
 from ._constants import TimerType
-from ._timer import TimerExecutor
-from ._timer import TimerTask
-from ._timer_process import TimerProcess
+
+if TYPE_CHECKING:
+    from ._timer import TimerExecutor
+    from ._timer import TimerTask
+    from ._timer_process import TimerProcess
 
 # ``(host, port)`` as used by asyncio transports and listen endpoints.
 # Unix sockets reuse the tuple with port unused.
@@ -42,7 +43,8 @@ IpType = Union[int, str, bytes]
 PortType = Union[int, str, bytes]
 
 
-class TimerTaskInfo(NamedTuple):
+@dataclass
+class TimerTaskInfo:
     """Registration record for one :class:`~trpc.utils._timer.TimerTask` subclass.
 
     Built by :func:`trpc.utils._timer.register_timer_task` at import time.
@@ -50,7 +52,7 @@ class TimerTaskInfo(NamedTuple):
     child process and copies the remaining fields onto that instance.
 
     Attributes:
-        cls: Task subclass to construct; ``None`` only as the NamedTuple default.
+        cls: Task subclass to construct; ``None`` only as the dataclass default.
         interval: Delay or period in seconds for ``ONCE`` / ``REPEAT_WITH_SECOND``.
         type: Schedule kind; see :class:`~trpc.utils._constants.TimerType`.
         name: Target process name such as ``worker:0``. Empty means every

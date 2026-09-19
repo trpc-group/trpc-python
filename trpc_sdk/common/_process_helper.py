@@ -18,9 +18,7 @@ class ProcessType(IntEnum):
     """Enumeration of different process types in the system.
     
     Attributes:
-        MANAGER: Process responsible for managing other processes
         WORKER: General worker process for task execution
-        DISPATCHER: Process that distributes tasks to workers
         TASK: Process dedicated to specific task execution
         TIMER: Process handling timed operations
         UNKNOWN: Default type for unclassified processes

@@ -7,7 +7,7 @@
 """HTTP client request-header record.
 
 :class:`HttpClientReqHeader` is the object stored on
-``Message.client_req_head``. The HTTP client fills it before invoke;
+``TrpcMessage.client_req_head``. The HTTP client fills it before invoke;
 :class:`~trpc_sdk.http.HttpClientTransport` reads method, headers, stream
 flag and the already-parsed URL from it.
 """
@@ -24,7 +24,7 @@ from ._types import UrlParser
 
 
 class HttpClientReqHeader:
-    """HTTP request fields carried on a tRPC ``Message``.
+    """HTTP request fields carried on a tRPC ``TrpcMessage``.
 
     ``url_parser`` is the source of truth for scheme and ``parsed_url``
     when present: :meth:`_full` copies them onto this object so the

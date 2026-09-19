@@ -14,12 +14,13 @@ so they work regardless of which module is imported first.
 
 A checker cuts complete frames out of a byte stream by magic plus
 ``package_len``; it never parses ``RequestProtocol``. The server side
-buffers a TCP stream (:class:`~trpc_sdk.codec._codec_parser.CServerParser`),
+buffers a TCP stream (:class:`~trpc_sdk.codec._cython._codec_parser.CServerParser`),
 while the client side reads exactly one frame off a pooled connection.
 """
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from typing import Optional
 
 from trpc_sdk._inner import trpc_pb2
@@ -27,15 +28,17 @@ from trpc_sdk.abc import BaseClientProtocolChecker
 from trpc_sdk.abc import BasePluginFactory
 from trpc_sdk.abc import PluginInitPos
 from trpc_sdk.abc import PluginType
+from trpc_sdk.abc import TrpcFrameHead
+from trpc_sdk.abc import parse_frame_head
 from trpc_sdk.exceptions import ClientDecodeError
 from trpc_sdk.plugin import get_plugin
 from trpc_sdk.plugin import register_plugin
 from trpc_sdk.telemetry import report_attr
-from trpc_sdk.transport import PooledConnection
-from ._codec_parser import CServerParser
 from ._constants import FRAME_HEAD_LEN
-from ._message import CFrameHead
-from ._message import parse_frame_head
+from ._cython import CServerParser
+
+if TYPE_CHECKING:
+    from trpc_sdk.pool import PooledConnection
 
 # Public name for the Cython stream splitter used as the server checker.
 TrpcServerParser = CServerParser
@@ -53,7 +56,7 @@ class TrpcServerCheckerFactory(BasePluginFactory):
         return TrpcServerParser()
 
 
-@register_plugin(PluginType.SERVER_CHECKER, "trpc", init_pos=PluginInitPos.MASTER)
+@register_plugin(PluginType.SERVER_CHECKER, "trpc", init_pos=PluginInitPos.WORKER)
 def setup_server_checker() -> TrpcServerCheckerFactory:
     """Build the plugin instance stored under ``SERVER_CHECKER`` / ``"trpc"``.
 
@@ -73,7 +76,7 @@ def get_server_checker(name: str) -> Optional[TrpcServerCheckerFactory]:
     return get_plugin(PluginType.SERVER_CHECKER, name)
 
 
-@register_plugin(PluginType.CLIENT_CHECKER, "trpc", init_pos=PluginInitPos.MASTER)
+@register_plugin(PluginType.CLIENT_CHECKER, "trpc", init_pos=PluginInitPos.WORKER)
 class TrpcClientParser(BaseClientProtocolChecker):
     """Read one complete tRPC frame off a pooled client connection."""
 
@@ -93,7 +96,7 @@ class TrpcClientParser(BaseClientProtocolChecker):
         """
         frame_head_buff = await conn.read(FRAME_HEAD_LEN)
 
-        frame_head: CFrameHead = parse_frame_head(frame_head_buff)
+        frame_head: TrpcFrameHead = parse_frame_head(frame_head_buff)
 
         if frame_head.stx != trpc_pb2.TRPC_MAGIC_VALUE:
             conn.close(True)

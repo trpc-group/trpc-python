@@ -8,8 +8,8 @@
 
 ``ClientCodec`` and ``ServerCodec`` own no packing logic of their own:
 they read ``frame_head.frame_type`` / ``frame_state`` and forward to the
-Cython unary codec in :mod:`trpc_sdk.codec._c_codec` or the stream codec in
-:mod:`trpc_sdk.codec._c_codec_stream`.
+Cython unary codec in :mod:`trpc_sdk.codec._cython._codec` or the stream codec in
+:mod:`trpc_sdk.codec._cython._codec_stream`.
 
 Protocol checkers and the ``get_*`` plugin lookups live in
 :mod:`trpc_sdk.codec._factory`.
@@ -20,24 +20,24 @@ from typing import Dict
 from trpc_sdk._inner import trpc_pb2
 from trpc_sdk.abc import PluginInitPos
 from trpc_sdk.abc import PluginType
+from trpc_sdk.abc import TrpcFrameHead
+from trpc_sdk.abc import TrpcMessage
+from trpc_sdk.abc import parse_frame_head
 from trpc_sdk.exceptions import ClientDecodeError
 from trpc_sdk.exceptions import ServerSystemError
 from trpc_sdk.plugin import register_plugin
-from ._c_codec import CClientCodec
-from ._c_codec import CServerCodec
-from ._c_codec_stream import CClientStreamCodec
-from ._c_codec_stream import CServerStreamCodec
 from ._constants import FRAME_HEAD_LEN
-from ._message import CFrameHead
-from ._message import Message
-from ._message import parse_frame_head
+from ._cython import CClientCodec
+from ._cython import CClientStreamCodec
+from ._cython import CServerCodec
+from ._cython import CServerStreamCodec
 from ._types import StreamInitMeta
 
 
 ClientCodecImpl = CClientCodec
 
 
-@register_plugin(PluginType.CLIENT_CODEC, "trpc", init_pos=PluginInitPos.MASTER)
+@register_plugin(PluginType.CLIENT_CODEC, "trpc", init_pos=PluginInitPos.WORKER)
 class ClientCodec(CClientCodec):
     """Client-side ``"trpc"`` codec: unary vs stream dispatch.
 
@@ -50,7 +50,7 @@ class ClientCodec(CClientCodec):
         self.codec = CClientCodec()
         self.stream_codec = CClientStreamCodec()
 
-    def encode(self, message: Message, body: bytes) -> bytes:
+    def encode(self, message: TrpcMessage, body: bytes) -> bytes:
         """Dispatch unary or stream encode for an outbound client frame.
 
         Unary frames go to :class:`CClientCodec`. Stream frames go to
@@ -72,7 +72,7 @@ class ClientCodec(CClientCodec):
 
         return self.codec.encode(message, body)
 
-    def encode_stream(self, message: Message, body: bytes) -> bytes:
+    def encode_stream(self, message: TrpcMessage, body: bytes) -> bytes:
         """Pack one client stream frame by ``frame_state``.
 
         Args:
@@ -98,7 +98,7 @@ class ClientCodec(CClientCodec):
             return self.stream_codec.encode_feedback_frame(message, body)
         raise ValueError(f"client encode_stream unknown stream frame type {frame_state}")
 
-    def decode(self, message: Message, body: bytes) -> bytes:
+    def decode(self, message: TrpcMessage, body: bytes) -> bytes:
         """Dispatch unary or stream decode for an inbound client frame.
 
         The first 16 bytes are parsed so a stream reply can set
@@ -120,14 +120,14 @@ class ClientCodec(CClientCodec):
         if len(body) < FRAME_HEAD_LEN:
             raise ClientDecodeError("client decode rsp buf len invalid")
 
-        frame_head: CFrameHead = parse_frame_head(body[:16])
+        frame_head: TrpcFrameHead = parse_frame_head(body[:16])
         if frame_head.frame_type != trpc_pb2.TRPC_UNARY_FRAME:
             message.set_frame_head(frame_head)
             message.set_stream_id(frame_head.stream_id)
             return self.decode_stream(message, body)
         return self.codec.decode(message, body)
 
-    def decode_stream(self, message: Message, body: bytes) -> bytes:
+    def decode_stream(self, message: TrpcMessage, body: bytes) -> bytes:
         """Unpack one client stream frame by ``frame_state``.
 
         Args:
@@ -154,7 +154,7 @@ class ClientCodec(CClientCodec):
         raise ValueError(f"client decode_stream unknown stream frame type {frame_state}")
 
 
-@register_plugin(PluginType.SERVER_CODEC, "trpc", init_pos=PluginInitPos.MASTER)
+@register_plugin(PluginType.SERVER_CODEC, "trpc", init_pos=PluginInitPos.WORKER)
 class ServerCodec(CServerCodec):
     """Server-side ``"trpc"`` codec: unary vs stream dispatch.
 
@@ -170,7 +170,7 @@ class ServerCodec(CServerCodec):
         self.stream_codec = CServerStreamCodec()
         self.init_metas: Dict[int, Dict[int, StreamInitMeta]] = {}
 
-    def store_init_meta(self, msg: Message, init_meta: StreamInitMeta):
+    def store_init_meta(self, msg: TrpcMessage, init_meta: StreamInitMeta):
         """Cache INIT meta for later DATA / CLOSE / FEEDBACK frames.
 
         Nested as ``init_metas[session_id][stream_id]``. Created on
@@ -187,7 +187,7 @@ class ServerCodec(CServerCodec):
 
         self.init_metas[session_id][stream_id] = init_meta
 
-    def delete_init_meta(self, msg: Message):
+    def delete_init_meta(self, msg: TrpcMessage):
         """Drop the INIT cache entry for this session/stream.
 
         No-op when the session is already gone. An empty session map
@@ -205,7 +205,7 @@ class ServerCodec(CServerCodec):
         if len(self.init_metas[session_id]) == 0:
             self.init_metas.pop(session_id)
 
-    def set_init_meta(self, msg: Message):
+    def set_init_meta(self, msg: TrpcMessage):
         """Restore ``server_rpc_name`` from the cached INIT meta.
 
         Args:
@@ -227,7 +227,7 @@ class ServerCodec(CServerCodec):
         init_meta: StreamInitMeta = self.init_metas[session_id][stream_id]
         msg.server_rpc_name = init_meta.request_meta.func.decode('utf8')
 
-    def encode(self, message: Message, body: bytes) -> bytes:
+    def encode(self, message: TrpcMessage, body: bytes) -> bytes:
         """Dispatch unary or stream encode for an outbound server frame.
 
         Unary frames go to :class:`CServerCodec`. Stream frames go to
@@ -249,7 +249,7 @@ class ServerCodec(CServerCodec):
 
         return self.codec.encode(message, body)
 
-    def encode_stream(self, message: Message, body: bytes) -> bytes:
+    def encode_stream(self, message: TrpcMessage, body: bytes) -> bytes:
         """Pack one server stream frame by ``frame_state``.
 
         A successful CLOSE pack also calls :meth:`delete_init_meta`.
@@ -279,7 +279,7 @@ class ServerCodec(CServerCodec):
             return self.stream_codec.encode_feedback_frame(message, body)
         raise ValueError(f"server encode_stream unknown stream frame type {frame_state}")
 
-    async def decode(self, message: Message, body: bytes) -> bytes:
+    async def decode(self, message: TrpcMessage, body: bytes) -> bytes:
         """Dispatch unary or stream decode for an inbound server frame.
 
         Declared ``async`` to match the server codec plugin contract;
@@ -302,7 +302,7 @@ class ServerCodec(CServerCodec):
         if len(body) < FRAME_HEAD_LEN:
             raise ClientDecodeError("client decode rsp buf len invalid")
 
-        frame_head: CFrameHead = parse_frame_head(body[:16])
+        frame_head: TrpcFrameHead = parse_frame_head(body[:16])
         if frame_head.frame_type != trpc_pb2.TRPC_UNARY_FRAME:
             message.set_frame_head(frame_head)
             message.set_stream_id(frame_head.stream_id)
@@ -310,7 +310,7 @@ class ServerCodec(CServerCodec):
 
         return self.codec.decode(message, body)
 
-    def decode_stream(self, message: Message, body: bytes) -> bytes:
+    def decode_stream(self, message: TrpcMessage, body: bytes) -> bytes:
         """Unpack one server stream frame by ``frame_state``.
 
         INIT stores ``message.stream_frame`` in the cache. DATA / CLOSE /

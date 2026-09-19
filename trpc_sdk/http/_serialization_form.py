@@ -21,14 +21,14 @@ from google.protobuf.message import Message as PbMessage
 from trpc_sdk.abc import BaseSerializer
 from trpc_sdk.abc import PluginInitPos
 from trpc_sdk.abc import PluginType
-from trpc_sdk.codec import SerializationType
-from trpc_sdk.codec import get_serializer
 from trpc_sdk.exceptions import ServerDecodeError
 from trpc_sdk.plugin import register_plugin
+from trpc_sdk.serialization import SerializationType
+from trpc_sdk.serialization import get_serializer
 from ._dict_pb_convertor import dict_to_protobuf
 
 
-@register_plugin(PluginType.SERIALIZATION, SerializationType.Form, init_pos=PluginInitPos.MASTER)
+@register_plugin(PluginType.SERIALIZATION, SerializationType.Form, init_pos=PluginInitPos.WORKER)
 class FormSerializer(BaseSerializer):
     """Serializer for HTTP form / query-string payloads."""
 

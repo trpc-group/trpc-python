@@ -9,7 +9,7 @@
 This is the process-internal stream protocol registered as
 ``inner_task_stream``, used over the Unix-domain socket that pairs a
 worker with a :class:`~trpc_sdk.server._task.TaskProcess`. It is **not**
-the public TCP stream path in :mod:`trpc_sdk.codec._c_codec_stream`.
+the public TCP stream path in :mod:`trpc_sdk.codec._cython._codec_stream`.
 
 The on-wire layout is still the 16-byte tRPC frame head, and the magic
 equals ``trpc_pb2.TRPC_MAGIC_VALUE`` (aliased here as ``TASK_STREAM_MAGIC_VALUE``).
@@ -21,12 +21,12 @@ Four ``frame_state`` values after a stream ``frame_type``:
 * FEEDBACK carries ``trpc_pb2.TrpcStreamFeedBackMeta``.
 
 Packing is hand-rolled Python. Like
-:func:`trpc_sdk.codec._c_codec_stream._common_pack`, the ``head_len`` slot at
+:func:`trpc_sdk.codec._cython._codec_stream._common_pack`, the ``head_len`` slot at
 offset 8 is left unwritten: stream meta lives in the body slot, with no
 separate ``RequestProtocol`` / ``ResponseProtocol``.
 
 Codecs interpret frames. Parsers only cut complete frames: the client
-parser reads asynchronously from a :class:`~trpc_sdk.transport.PooledConnection`;
+parser reads asynchronously from a :class:`~trpc_sdk.pool.PooledConnection`;
 the server parser scans a buffer for magic + ``package_len``.
 
 The server codec caches INIT meta by ``session_id + stream_id`` so later
@@ -34,13 +34,17 @@ DATA / CLOSE / FEEDBACK frames can recover ``server_rpc_name``. That
 cache is dropped when the server encodes CLOSE.
 """
 
+from __future__ import annotations
+
 __all__ = ['TaskStreamClientCodec', 'TaskStreamServerCodec', 'TaskStreamClientParser', 'TaskStreamServerParser']
 
 import socket
 import struct
 import sys
+from abc import ABC
 from abc import abstractmethod
 from collections import defaultdict
+from typing import TYPE_CHECKING
 from typing import Callable
 from typing import Dict
 from typing import List
@@ -49,12 +53,12 @@ from google.protobuf.message import Message as PbMessage
 
 from trpc_sdk._inner import trpc_pb2
 from trpc_sdk.abc import BaseClientProtocolChecker
-from trpc_sdk.abc import Codec
-from trpc_sdk.abc import Parser
 from trpc_sdk.abc import PluginInitPos
 from trpc_sdk.abc import PluginType
+from trpc_sdk.abc import TrpcFrameHead
+from trpc_sdk.abc import TrpcMessage
+from trpc_sdk.abc import parse_frame_head
 from trpc_sdk.plugin import register_plugin
-from trpc_sdk.transport import PooledConnection
 from ._constants import FRAME_HEAD_LEN
 from ._constants import INNER_TASK_STREAM
 from ._constants import TASK_STREAM_MAGIC_VALUE
@@ -63,11 +67,11 @@ from ._exceptions import TaskStreamClientEncodeError
 from ._exceptions import TaskStreamClientReadFrameError
 from ._exceptions import TaskStreamServerDecodeError
 from ._exceptions import TaskStreamServerEncodeError
-from ._message import CFrameHead
-from ._message import Message
-from ._message import parse_frame_head
 from ._types import StreamInitMeta
 from ._types import TaskStreamCodecRole
+
+if TYPE_CHECKING:
+    from trpc_sdk.pool import PooledConnection
 
 
 def _fill_field(src: bytes, dst: bytearray, index: int) -> int:
@@ -92,7 +96,7 @@ def _fill_field(src: bytes, dst: bytearray, index: int) -> int:
     return offset + index
 
 
-def _common_pack(frame_head: CFrameHead, body: bytes):
+def _common_pack(frame_head: TrpcFrameHead, body: bytes):
     """Hand-pack a stream frame: 16-byte head plus body.
 
     ``zfill(total_len)`` prepends padding so the body sits at offset 16
@@ -107,7 +111,7 @@ def _common_pack(frame_head: CFrameHead, body: bytes):
 
     Offset 8 (2 bytes) is the tRPC ``head_len`` slot. It is skipped so
     the remaining fields stay aligned with the 16-byte frame head, the
-    same layout as :func:`trpc_sdk.codec._c_codec_stream._common_pack`.
+    same layout as :func:`trpc_sdk.codec._cython._codec_stream._common_pack`.
 
     Args:
         frame_head: Host-endian type / state / stream id / reserved.
@@ -146,11 +150,15 @@ def _common_pack(frame_head: CFrameHead, body: bytes):
     return bytes(results)
 
 
-class _TaskStreamCodec(Codec):
-    """Shared INIT / DATA / CLOSE / FEEDBACK encode and decode.
+class _TaskStreamCodec(ABC):
+    """Private shared INIT / DATA / CLOSE / FEEDBACK encode and decode.
 
-    Dispatch maps key on ``frame_state``. INIT is abstract: the client
-    fills ``request_meta``, the server fills ``response_meta``.
+    Not :class:`~trpc_sdk.abc.BaseCodec` (context-first TCP frames) and
+    not :class:`~trpc_sdk.abc.TaskCodec` (task body pickle). Callers
+    construct :class:`TaskStreamClientCodec` or
+    :class:`TaskStreamServerCodec`; this base only shares the dispatch
+    maps. INIT encode is abstract: the client fills ``request_meta``,
+    the server fills ``response_meta``.
 
     ``_encode_err_cls`` / ``_decode_err_cls`` / ``_role`` default to the
     client side so shared methods can format error text with
@@ -180,7 +188,7 @@ class _TaskStreamCodec(Codec):
         self._init_metas: Dict[int, Dict[int, StreamInitMeta]] = defaultdict(dict)
 
     @abstractmethod
-    def _encode_init_frame(self, message: Message, body: bytes) -> bytes:
+    def _encode_init_frame(self, message: TrpcMessage, body: bytes) -> bytes:
         """Pack an INIT frame from ``message.stream_frame``.
 
         ``body`` is unused; the payload is serialized
@@ -197,7 +205,7 @@ class _TaskStreamCodec(Codec):
             Complete stream frame with the 16-byte head.
         """
 
-    def _encode_data_frame(self, message: Message, body: bytes) -> bytes:
+    def _encode_data_frame(self, message: TrpcMessage, body: bytes) -> bytes:
         """Pack a DATA frame: frame head plus the business body.
 
         Unlike INIT / CLOSE / FEEDBACK, DATA has no stream-meta proto;
@@ -213,7 +221,7 @@ class _TaskStreamCodec(Codec):
         """
         return _common_pack(message.frame_head, body)
 
-    def _encode_close_frame(self, message: Message, _: bytes) -> bytes:
+    def _encode_close_frame(self, message: TrpcMessage, _: bytes) -> bytes:
         """Pack a CLOSE frame from ``message.stream_frame``.
 
         ``body`` is unused; the payload is serialized
@@ -236,7 +244,7 @@ class _TaskStreamCodec(Codec):
                 f"{self._role.name} encode close stream frame type: '{type(close_frame)}' invalid")
         return _common_pack(message.frame_head, close_frame.SerializeToString())
 
-    def _encode_feedback_frame(self, message: Message, _: bytes) -> bytes:
+    def _encode_feedback_frame(self, message: TrpcMessage, _: bytes) -> bytes:
         """Pack a FEEDBACK frame from ``message.stream_frame``.
 
         ``body`` is unused; the payload is serialized
@@ -260,7 +268,7 @@ class _TaskStreamCodec(Codec):
         return _common_pack(message.frame_head, feedback_frame.SerializeToString())
 
     @abstractmethod
-    def _decode_init_frame(self, message: Message, body: bytes) -> bytes:
+    def _decode_init_frame(self, message: TrpcMessage, body: bytes) -> bytes:
         """Parse an INIT frame into ``message``.
 
         ``body`` is the **complete frame**, including the 16-byte head;
@@ -277,7 +285,7 @@ class _TaskStreamCodec(Codec):
             Empty / unused; INIT has no business body.
         """
 
-    def _decode_data_frame(self, message: Message, body: bytes) -> bytes:
+    def _decode_data_frame(self, message: TrpcMessage, body: bytes) -> bytes:
         """Slice the DATA payload after the 16-byte head.
 
         ``body`` is the complete frame. ``head_len`` is ignored; the
@@ -293,7 +301,7 @@ class _TaskStreamCodec(Codec):
         message.set_stream_id(message.frame_head.stream_id)
         return body[FRAME_HEAD_LEN:]
 
-    def _decode_close_frame(self, message: Message, body: bytes) -> bytes:
+    def _decode_close_frame(self, message: TrpcMessage, body: bytes) -> bytes:
         """Parse CLOSE meta; RESET or a non-zero ``ret`` is an error.
 
         ``body`` is the complete frame. A reset or failed close raises
@@ -321,7 +329,7 @@ class _TaskStreamCodec(Codec):
                 f"{self._role.name} decode close stream error, close_type: {close.close_type}, ret: {close.ret}")
         message.set_stream_frame(close)
 
-    def _decode_feedback_frame(self, message: Message, body: bytes) -> bytes:
+    def _decode_feedback_frame(self, message: TrpcMessage, body: bytes) -> bytes:
         """Parse FEEDBACK meta onto ``message.stream_frame``.
 
         ``body`` is the complete frame. No return value; :meth:`decode`
@@ -338,7 +346,7 @@ class _TaskStreamCodec(Codec):
         feedback.ParseFromString(body[FRAME_HEAD_LEN:])
         message.set_stream_frame(feedback)
 
-    def _check_init_metas(self, message: Message):
+    def _check_init_metas(self, message: TrpcMessage):
         """Restore ``server_rpc_name`` from the INIT cache.
 
         Called only for non-INIT frames on the server. A missing
@@ -361,7 +369,7 @@ class _TaskStreamCodec(Codec):
         init_meta: StreamInitMeta = self._init_metas[session_id][stream_id]
         message.server_rpc_name = init_meta.request_meta.func.decode('utf8')
 
-    def _delete_init_metas(self, message: Message):
+    def _delete_init_metas(self, message: TrpcMessage):
         """Drop the INIT cache entry for this session/stream.
 
         No-op if the pair is already gone (duplicate CLOSE, or a CLOSE
@@ -379,7 +387,7 @@ class _TaskStreamCodec(Codec):
         if len(self._init_metas[session_id]) == 0:
             self._init_metas.pop(session_id)
 
-    def encode(self, message: Message, body: bytes) -> bytes:
+    def encode(self, message: TrpcMessage, body: bytes) -> bytes:
         """Dispatch on ``frame_state`` and pack one stream frame.
 
         After a successful server CLOSE pack, the INIT cache entry is
@@ -408,7 +416,7 @@ class _TaskStreamCodec(Codec):
             self._delete_init_metas(message)
         return data
 
-    def decode(self, message: Message, buffer: bytes) -> bytes:
+    def decode(self, message: TrpcMessage, buffer: bytes) -> bytes:
         """Parse the 16-byte head, then dispatch on ``frame_state``.
 
         ``buffer`` is the **complete frame**, not a body slice. On the
@@ -428,7 +436,7 @@ class _TaskStreamCodec(Codec):
             Exception: Unknown ``frame_state``. The concrete class is
                 ``_decode_err_cls``.
         """
-        frame_head: CFrameHead = parse_frame_head(buffer[:FRAME_HEAD_LEN])
+        frame_head: TrpcFrameHead = parse_frame_head(buffer[:FRAME_HEAD_LEN])
         message.set_frame_head(frame_head)
         message.set_stream_id(frame_head.stream_id)
         frame_state = frame_head.frame_state
@@ -442,13 +450,13 @@ class _TaskStreamCodec(Codec):
         return rsp or b''
 
 
-@register_plugin(PluginType.CLIENT_CODEC, INNER_TASK_STREAM, init_pos=PluginInitPos.MASTER)
+@register_plugin(PluginType.CLIENT_CODEC, INNER_TASK_STREAM, init_pos=PluginInitPos.WORKER)
 class TaskStreamClientCodec(_TaskStreamCodec):
     """Worker-side (client) codec for the inner task stream.
 
-    Registered as ``CLIENT_CODEC`` / ``inner_task_stream`` on the
-    master. Keeps the base class's CLIENT role and client encode/decode
-    error classes. INIT encode fills ``request_meta.func`` from
+    Registered as ``CLIENT_CODEC`` / ``inner_task_stream``. Keeps the
+    base class's CLIENT role and client encode/decode error
+    classes. INIT encode fills ``request_meta.func`` from
     ``client_rpc_name``; INIT decode applies the peer's compress /
     serialization and fails on a non-zero ``response_meta.ret``.
     """
@@ -458,7 +466,7 @@ class TaskStreamClientCodec(_TaskStreamCodec):
         self._encode_err_cls: Callable[[str], Exception] = TaskStreamClientEncodeError
         self._decode_err_cls: Callable[[str], Exception] = TaskStreamClientDecodeError
 
-    def _encode_init_frame(self, message: Message, body: bytes) -> bytes:
+    def _encode_init_frame(self, message: TrpcMessage, body: bytes) -> bytes:
         """Pack a client INIT: func, content_type, content_encoding.
 
         Reuses ``message.stream_frame`` when it is already a
@@ -499,7 +507,7 @@ class TaskStreamClientCodec(_TaskStreamCodec):
         stream_buf = init_meta.SerializeToString()
         return _common_pack(message.frame_head, stream_buf)
 
-    def _decode_init_frame(self, message: Message, body: bytes) -> bytes:
+    def _decode_init_frame(self, message: TrpcMessage, body: bytes) -> bytes:
         """Apply the server INIT meta and fail on a non-zero ret.
 
         ``body`` is the complete frame. Compress / serialization on
@@ -527,12 +535,12 @@ class TaskStreamClientCodec(_TaskStreamCodec):
         message.set_stream_frame(init_meta)
 
 
-@register_plugin(PluginType.SERVER_CODEC, INNER_TASK_STREAM, init_pos=PluginInitPos.MASTER)
+@register_plugin(PluginType.SERVER_CODEC, INNER_TASK_STREAM, init_pos=PluginInitPos.WORKER)
 class TaskStreamServerCodec(_TaskStreamCodec):
     """Task-side (server) codec for the inner task stream.
 
-    Registered as ``SERVER_CODEC`` / ``inner_task_stream`` on the
-    master. Flips ``_role`` to SERVER and uses server encode/decode
+    Registered as ``SERVER_CODEC`` / ``inner_task_stream``. Flips
+    ``_role`` to SERVER and uses server encode/decode
     errors. INIT decode stores meta under ``session_id + stream_id``;
     INIT encode copies ``server_rsp_err`` onto ``response_meta``.
     """
@@ -543,7 +551,7 @@ class TaskStreamServerCodec(_TaskStreamCodec):
         self._decode_err_cls: Callable[[str], Exception] = TaskStreamServerDecodeError
         self._role = TaskStreamCodecRole.SERVER
 
-    def _encode_init_frame(self, message: Message, _: bytes) -> bytes:
+    def _encode_init_frame(self, message: TrpcMessage, _: bytes) -> bytes:
         """Pack a server INIT, attaching ``server_rsp_err`` as response_meta.
 
         Reuses ``message.stream_frame`` when it is already a
@@ -580,7 +588,7 @@ class TaskStreamServerCodec(_TaskStreamCodec):
         stream_buf = init_meta.SerializeToString()
         return _common_pack(message.frame_head, stream_buf)
 
-    def _decode_init_frame(self, message: Message, body: bytes) -> bytes:
+    def _decode_init_frame(self, message: TrpcMessage, body: bytes) -> bytes:
         """Parse client INIT, set rpc name, and cache the meta.
 
         ``body`` is the complete frame. The meta is stored at
@@ -606,7 +614,7 @@ class TaskStreamServerCodec(_TaskStreamCodec):
         self._init_metas[message.session_id][message.stream_id] = init_meta
 
 
-@register_plugin(PluginType.CLIENT_CHECKER, INNER_TASK_STREAM, init_pos=PluginInitPos.MASTER)
+@register_plugin(PluginType.CLIENT_CHECKER, INNER_TASK_STREAM, init_pos=PluginInitPos.WORKER)
 class TaskStreamClientParser(BaseClientProtocolChecker):
     """Async client framer: read 16 bytes, then the rest of the package.
 
@@ -636,7 +644,7 @@ class TaskStreamClientParser(BaseClientProtocolChecker):
         """
         frame_head_buff = await conn.read(FRAME_HEAD_LEN)
 
-        frame_head: CFrameHead = parse_frame_head(frame_head_buff)
+        frame_head: TrpcFrameHead = parse_frame_head(frame_head_buff)
         if frame_head.stx != trpc_pb2.TRPC_MAGIC_VALUE:
             conn.close(True)
             raise TaskStreamClientReadFrameError(f"invalid magic number {frame_head.stx}, expect: {trpc_pb2.TRPC_MAGIC_VALUE}")
@@ -646,23 +654,27 @@ class TaskStreamClientParser(BaseClientProtocolChecker):
         return frame_head_buff + left_pkg
 
 
-class TaskStreamServerParser(Parser):
+class TaskStreamServerParser:
     """Buffered server framer: scan magic + ``package_len`` out of ``buf``.
 
     Not plugin-registered; the task-stream server constructs it
     directly. ``feeds_data`` appends socket chunks; :meth:`read` yields
     every complete frame and leaves a partial one in ``buf``.
+
+    This is not :class:`~trpc_sdk.abc.BaseServerProtocolChecker`: that
+    ABC yields one ``bytes`` frame from ``_buffer``, while this parser
+    yields a list and keeps a ``bytearray`` named ``buf``.
     """
 
     def __init__(self):
-        super().__init__()
+        self.buf = bytearray()
         self.size = 1024
         self.length = 0
 
     def feeds_data(self, data: bytes):
         """Append a socket chunk and bump the buffered-byte counter.
 
-        ``self.buf`` is inherited from :class:`~trpc_sdk.abc.Parser`.
+        ``self.buf`` is the local sticky-packet buffer.
         ``self.length`` tracks ``len(buf)`` so :meth:`read` can scan
         without calling ``len`` on every iteration.
 
@@ -692,8 +704,6 @@ class TaskStreamServerParser(Parser):
         results = []
         scan_end = 0
         while self.length >= scan_end + FRAME_HEAD_LEN:
-            # pylint:disable=access-member-before-definition
-            # 'self.buf' is from 'Parser'
             stx = socket.ntohs(struct.unpack('=H', self.buf[scan_end:scan_end + 2])[0])
             if stx != TASK_STREAM_MAGIC_VALUE:
                 raise TaskStreamServerDecodeError(f"magic is {stx} != {TASK_STREAM_MAGIC_VALUE}")
@@ -705,13 +715,12 @@ class TaskStreamServerParser(Parser):
             results.append(bytes(self.buf[scan_end:scan_end + package_len]))
             scan_end = scan_end + package_len
         if scan_end > 0:
-            # pylint:disable=attribute-defined-outside-init
             self.buf = self.buf[scan_end:self.length]
             self.length = self.length - scan_end
         return results
 
     def reset(self):
-        """Clear the inherited Parser buffer.
+        """Clear ``buf``.
 
         ``self.length`` is not reset here (historical). Callers that
         reuse the parser after an error should treat ``length`` as

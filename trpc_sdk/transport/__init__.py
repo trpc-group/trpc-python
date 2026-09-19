@@ -17,12 +17,15 @@ The **server half** never accepts connections itself. It tells
 :class:`~trpc_sdk.server.TrpcServerEngine` which children to fork, and the
 asyncio protocols in this package then run *inside* those children:
 
-- dispatcher mode: :class:`DispatcherClientConnection` accepts the client
-  TCP, splits frames, and writes them to a worker pipe;
+- dispatcher / separate mode: :class:`DispatcherClientConnection` accepts
+  the client TCP, splits frames, and writes them to a worker pipe;
   :class:`WorkerDispatcherConnection` (or the C / trpcio variants) runs
   the handler and writes the response back
-- multi-listener mode: :class:`ExecutorUDPConnection` (and
-  ``TCPConnection`` from ``trpc_sdk.protocol``) listen on each executor
+- merge mode: :class:`ExecutorUDPConnection` and the re-exported
+  :class:`TCPConnection` listen on the merge worker. The TCP Protocol is
+  owned by :mod:`trpc_sdk.protocol`; this package only forwards the name
+  so :class:`~trpc_sdk.server.MergeWorker` can import both listen
+  protocols from here.
 
 The package is split by responsibility:
 
@@ -50,8 +53,8 @@ The package is split by responsibility:
   :mod:`~trpc_sdk.transport._features` — shared records, defaults (listen
   backlog, IPC frame sizes, ``RequestType``, ``ClientTimeoutReason``),
   accessors
-- :mod:`~trpc_sdk.transport._ipc_codec` — pure-Python inner-IPC framing; the
-  production twin is the Cython ``_c_ipc_codec`` extension
+- :mod:`~trpc_sdk.transport._cython` — Cython inner-IPC framing used
+  across dispatcher / worker / task pipes
 
 Symbols renamed or dropped relative to the pre-rewrite package are listed in
 ``MIGRATION.md``; the frozen original lives in :mod:`trpc_sdk.old_transport`.
@@ -63,7 +66,7 @@ from importlib import import_module
 
 from trpc_sdk.abc import BaseServerTransportOption
 
-from ._c_ipc_codec import encode_worker_msg_req  # pylint: disable=no-name-in-module
+from ._cython import encode_worker_msg_req  # pylint: disable=no-name-in-module
 from ._client_transport import ClientTaskStreamTransport
 from ._client_transport import ClientTransport
 from ._client_transport import get_client_transport
@@ -83,10 +86,6 @@ from ._factory import DefaultServerTransportOption
 from ._factory import TrpcServerTransportFactory
 from ._factory import get_server_transport
 from ._features import is_uvloop_enabled
-from ._ipc_codec import InnerCodec
-from ._ipc_codec import InnerParser
-from ._ipc_codec import inner_decode
-from ._ipc_codec import inner_encode
 from ._options import RoundTripOptions
 from ._scheduler import get_next_worker
 from ._scheduler import register_dispatcher_worker_func
@@ -136,11 +135,11 @@ __all__ = [
     # Worker-process protocols
     "WorkerDispatcherConnection",
     "WorkerTaskConnection",
-    "WorkerCTaskConnection",
     "WorkerMessageConnection",
-    # Executor-process protocols
+    # Executor / merge-worker listen protocols
     "ExecutorUDPConnection",
     "ExecutorTaskConnection",
+    "TCPConnection",
     # Task-process protocols
     "TaskWorkerConnection",
     "TaskStreamConnection",
@@ -156,14 +155,9 @@ __all__ = [
     "create_inet_socket",
     "create_unix_socket",
     "DEFAULT_BACKLOG",
-    # Pure-Python IPC framing
-    "InnerParser",
-    "InnerCodec",
-    "inner_decode",
-    "inner_encode",
+    # Inner-IPC frame constants and Cython framing used across processes
     "INNER_MAGIC_VALUE",
     "FRAME_HEAD_LEN",
-    # Cython inner-IPC framing used across process boundaries
     "encode_worker_msg_req",
     # Feature accessors
     "is_uvloop_enabled",
@@ -176,7 +170,7 @@ _LAZY_EXPORTS = {
     "TaskWorkerConnection": ("._task", "TaskWorkerConnection"),
     "ExecutorTaskConnection": ("._executor", "ExecutorTaskConnection"),
     "ExecutorUDPConnection": ("._executor", "ExecutorUDPConnection"),
-    "WorkerCTaskConnection": ("._worker", "WorkerCTaskConnection"),
+    "TCPConnection": ("trpc_sdk.protocol", "TCPConnection"),
     "WorkerDispatcherConnection": ("._worker", "WorkerDispatcherConnection"),
     "WorkerMessageConnection": ("._worker", "WorkerMessageConnection"),
     "WorkerTaskConnection": ("._worker", "WorkerTaskConnection"),
@@ -184,12 +178,13 @@ _LAZY_EXPORTS = {
 
 
 def __getattr__(name: str):
-    """Lazily export the child-process protocols to break an import cycle.
+    """Lazily export symbols that would otherwise load too early.
 
     ``_worker`` / ``_executor`` / ``_task`` import ``trpc_sdk.task``, which
-    imports ``trpc_sdk.stream`` while that package is still initializing. They
-    are only needed once a process is already serving, so resolving them on
-    first access is enough.
+    imports ``trpc_sdk.stream`` while that package is still initializing.
+    :class:`TCPConnection` is owned by :mod:`trpc_sdk.protocol` and is only
+    needed once a merge worker is already serving. Resolving these on first
+    access is enough.
     """
     spec = _LAZY_EXPORTS.get(name)
     if spec is None:

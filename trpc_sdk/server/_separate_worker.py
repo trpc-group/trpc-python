@@ -45,6 +45,10 @@ from typing import List
 from typing import Tuple
 
 from trpc_sdk.common import ProcessType
+from trpc_sdk.ipc import PipeConnection
+from trpc_sdk.ipc import PipeEnd
+from trpc_sdk.ipc import PipeKind
+from trpc_sdk.ipc import create_pipe
 from trpc_sdk.log import logger
 from trpc_sdk.plugin import init_task_plugins
 from trpc_sdk.telemetry import report_attr
@@ -55,11 +59,7 @@ from trpc_sdk.transport import DispatcherWorkerConnection
 from trpc_sdk.transport import WorkerDispatcherConnection
 from trpc_sdk.transport import create_server_socket
 from ._constants import LISTEN_BACKLOG
-from ._constants import PipeEnd
-from ._constants import PipeKind
 from ._constants import RPC_TASK_PRODUCER_PREFIX
-from ._pipe import PipeConnection
-from ._pipe import create_pipe
 from ._worker import BaseWorker
 
 

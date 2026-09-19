@@ -19,7 +19,7 @@ import traceback
 from typing import List
 
 from trpc_sdk.abc import TrpcContext
-from trpc_sdk.codec import get_message
+from trpc_sdk.abc import get_message
 from trpc_sdk.common import get_or_create_event_loop
 from trpc_sdk.exceptions import ServerDecodeError
 from trpc_sdk.log import logger
@@ -28,7 +28,7 @@ from trpc_sdk.task import receive_from_task
 from trpc_sdk.telemetry import report_attr
 from trpc_sdk.utils import set_addr_to_ctx_from_transport
 
-from ._c_ipc_codec import InnerStreamParser
+from ._cython import InnerStreamParser
 from ._connection import BaseConnection
 
 

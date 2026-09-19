@@ -4,17 +4,18 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
-"""Helpers that build the aiohttp application served by an HTTP listener.
+"""Stateless helpers used by the server package.
 
-An HTTP endpoint in ``multi-listener`` mode is an ``aiohttp`` application whose
-routes come from three places: the handlers the user registered with
-``@trpc_sdk.http.route``, the static directories registered with
-``trpc_sdk.http.register_static``, and a catch-all route that feeds anything else
-back into the tRPC service. TLS, when configured, is layered on top of the
-same application.
+Two kinds of work live here, both of which take their inputs explicitly and
+do not touch the process model:
 
-These functions are stateless and take the application explicitly, so they
-depend on the HTTP stack only and not on the process model around it.
+- HTTP listener assembly: routes from ``@trpc_sdk.http.route``, static
+  directories from ``trpc_sdk.http.register_static``, and the TLS context
+  layered on the same aiohttp application.
+- Bind-info dump: appending ``name ip port`` for one listen endpoint when
+  YAML ``global.save_bind_info`` is enabled. :func:`create_server` calls
+  this after it has chosen a port, including when the kernel assigned an
+  ephemeral one.
 """
 
 from __future__ import annotations
@@ -28,8 +29,37 @@ from aiohttp import hdrs
 from aiohttp import web
 
 from trpc_sdk.abc import BaseServerTransportOption
+from trpc_sdk.config import GlobalConfig
+from trpc_sdk.config import ServerService
 from trpc_sdk.http import HttpMessageHandle
-from trpc_sdk.http import routes
+from trpc_sdk.http import RegisteredRoutes
+from trpc_sdk.http import StaticFileRouters
+
+
+def save_bind_info(global_config: GlobalConfig, service_config: ServerService) -> None:
+    """Append this service's listen address to the bind-info file.
+
+    No-op unless YAML ``global.save_bind_info.enable`` is true. The file is
+    opened in append mode so several services in one process each add a
+    line; :func:`create_server` writes after it has filled ``port``, so an
+    ephemeral port chosen by :func:`find_free_port` is what gets recorded.
+
+    Args:
+        global_config: The ``global:`` section holding ``save_bind_info``.
+        service_config: The ``server.service[]`` entry whose ``name``,
+            ``ip`` and ``port`` are written.
+    """
+    bind_info = global_config.save_bind_info
+    if bind_info is None or not bind_info.enable:
+        return
+
+    file_name = bind_info.file_name
+    dirname = os.path.dirname(file_name)
+    if dirname == '':
+        dirname = './'
+    os.makedirs(dirname, exist_ok=True)
+    with open(file_name, 'a+') as f:
+        f.write("%s %s %s\n" % (service_config.name, service_config.ip, service_config.port))
 
 
 def get_https_certs(service_config: BaseServerTransportOption) -> Optional[ssl.SSLContext]:
@@ -70,7 +100,7 @@ def reg_static_file(app: web.Application) -> None:
     Args:
         app: Application that receives the static routes.
     """
-    for prefix, path_to_file in routes.StaticFileRouters.items():
+    for prefix, path_to_file in StaticFileRouters.items():
         app.router.add_static(prefix, path_to_file)
 
 
@@ -87,7 +117,7 @@ def add_user_route(app: web.Application, service_name: str, msg_handle: HttpMess
         service_name: Service this listener serves.
         msg_handle: Bridge that turns an aiohttp request into a tRPC call.
     """
-    for route_func in routes.RegisteredRoutes.values():
+    for route_func in RegisteredRoutes.values():
         if route_func.service_name and route_func.service_name != service_name:
             continue
         resource = app.router.add_resource(route_func.path)

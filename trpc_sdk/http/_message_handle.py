@@ -23,7 +23,7 @@ from aiohttp.web_request import Request
 from aiohttp.web_response import Response
 
 from trpc_sdk.abc import TrpcContext
-from trpc_sdk.codec import get_message
+from trpc_sdk.abc import get_message
 from trpc_sdk.utils import now_ms
 from trpc_sdk.utils import set_addr_to_ctx_from_transport
 from ._codec import ServerHttpCodec
@@ -74,7 +74,7 @@ class HttpMessageHandle:
         self._addr = f"{self._process_info.addresses[self._index][0]}:{self._process_info.addresses[self._index][1]}"
 
     def _init_request_context(self, ctx: TrpcContext, request: Request) -> web.Response:
-        """Stash timeout, request/response and Message onto ``ctx``.
+        """Stash timeout, request/response and TrpcMessage onto ``ctx``.
 
         The returned ``web.Response`` is the same object stored under
         ``HTTP_RSP_KEY``, so later header/body writes are what aiohttp
@@ -162,7 +162,7 @@ class HttpMessageHandle:
         """Fill rpc_name and tRPC request headers without reading the body.
 
         Args:
-            ctx: tRPC context that already has a Message.
+            ctx: tRPC context that already has a TrpcMessage.
             request: Incoming aiohttp request.
         """
         message = get_message(ctx)

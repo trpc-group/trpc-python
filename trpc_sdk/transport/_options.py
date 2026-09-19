@@ -15,8 +15,14 @@ level; this module only holds the options object itself.
 
 from __future__ import annotations
 
+from socket import socket
+from typing import Optional
+
+from trpc_sdk.abc import AddrType
+from trpc_sdk.abc import BaseClientProtocolChecker
 from trpc_sdk.abc import BaseClientTransportOption
-from trpc_sdk.codec import Message
+from trpc_sdk.abc import BaseCodec
+from trpc_sdk.abc import TrpcMessage
 from trpc_sdk.codec import TrpcClientParser
 from trpc_sdk.pool import ConnPoolOptions
 from trpc_sdk.pool import ConnectionPoolManager
@@ -44,7 +50,7 @@ class RoundTripOptions(BaseClientTransportOption):
             virtual-connection path instead of a pooled one-shot conn.
         multiplexed: Multiplexed pool instance used when
             ``enable_multiplexed`` is True.
-        msg: Request :class:`~trpc_sdk.codec.Message`; the multiplexed path
+        msg: Request :class:`~trpc_sdk.abc.TrpcMessage`; the multiplexed path
             needs it to match responses by ``request_id``.
         ssl_context: TLS context for HTTPS.
         is_task_stream: When True, :class:`ClientConn` must not close the
@@ -129,10 +135,82 @@ class RoundTripOptions(BaseClientTransportOption):
         """
         self.multiplexed = multiplexed
 
-    def set_msg(self, msg: Message):
+    def set_msg(self, msg: TrpcMessage):
         """Attach the request message so multiplexed responses can be matched.
 
         Args:
             msg: Request message whose ``request_id`` keys the virtual conn.
         """
         self.msg = msg
+
+    def set_checker(self, checker: Optional[BaseClientProtocolChecker]) -> None:
+        """Install the protocol frame checker used to split the response.
+
+        Args:
+            checker: Client checker, typically from ``get_client_checker``.
+        """
+        self.checker = checker
+
+    def set_codec(self, codec: Optional[BaseCodec]) -> None:
+        """Install the codec used to encode and decode payloads.
+
+        Args:
+            codec: Client codec for this round trip.
+        """
+        self.codec = codec
+
+    def set_network(self, network: str) -> None:
+        """Set the dial network, e.g. ``tcp`` or ``udp``.
+
+        Args:
+            network: Network type copied from client options or the node.
+        """
+        self.network = network
+
+    def set_short_conn(self, short_conn: bool) -> None:
+        """Use a short-lived connection for this call when True.
+
+        Args:
+            short_conn: True to skip pooling.
+        """
+        self.short_conn = short_conn
+
+    def set_endpoint(self, endpoint: str) -> None:
+        """Set the logical dial target string.
+
+        Args:
+            endpoint: Selector result such as ``127.0.0.1:8000``.
+        """
+        self.endpoint = endpoint
+
+    def set_address(self, address: AddrType) -> None:
+        """Set the remote ``(host, port)`` for this round trip.
+
+        Args:
+            address: Dial endpoint selected by the naming layer.
+        """
+        self.address = address
+
+    def set_local_address(self, addr: Optional[AddrType]) -> None:
+        """Bind the local end of the client socket.
+
+        Args:
+            addr: Local ``(host, port)``, or ``None`` for the default.
+        """
+        self.local_addr = addr
+
+    def set_socket_type(self, socket_type: str) -> None:
+        """Set the socket family label, e.g. ``net`` or ``unix``.
+
+        Args:
+            socket_type: Socket family copied from client options.
+        """
+        self.socket_type = socket_type
+
+    def set_sock(self, sock: Optional[socket]) -> None:
+        """Reuse a pre-created socket instead of dialing.
+
+        Args:
+            sock: Connected socket, or ``None`` to dial as usual.
+        """
+        self.sock = sock

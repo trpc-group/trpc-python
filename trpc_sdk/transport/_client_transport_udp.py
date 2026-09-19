@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 
 from trpc_sdk.abc import TrpcContext
-from trpc_sdk.codec import get_message
+from trpc_sdk.abc import get_message
 from trpc_sdk.exceptions import ClientTimeoutError
 from trpc_sdk.rpcz import RPCZ_CLIENT_REQ_SIZE_CTX_KEY
 from trpc_sdk.rpcz import RPCZ_CLIENT_RSP_SIZE_CTX_KEY
@@ -52,11 +52,11 @@ async def udp_round_trip(ctx: TrpcContext, req_data: bytes, options: RoundTripOp
     ip, port = options.address
     conn = await open_datagram_endpoint(ip, port)
     send_us = now_us()
-    ctx.client_post_sched_send_msg_us = send_us
-    ctx.client_pre_io_send_msg_us = send_us
+    ctx.rpcz_data.client_post_sched_send_msg_us = send_us
+    ctx.rpcz_data.client_pre_io_send_msg_us = send_us
     ctx.with_meta_data(RPCZ_CLIENT_REQ_SIZE_CTX_KEY, len(req_data))
     conn.write(req_data)
-    ctx.client_post_io_send_msg_us = now_us()
+    ctx.rpcz_data.client_post_io_send_msg_us = now_us()
 
     now = now_ms()
 
@@ -77,7 +77,7 @@ async def udp_round_trip(ctx: TrpcContext, req_data: bytes, options: RoundTripOp
             return
 
         rsp_data, _ = await asyncio.wait_for(conn.receive(), timeout)
-        ctx.client_post_sched_recv_msg_us = now_us()
+        ctx.rpcz_data.client_post_sched_recv_msg_us = now_us()
         ctx.with_meta_data(RPCZ_CLIENT_RSP_SIZE_CTX_KEY, len(rsp_data))
 
         return rsp_data

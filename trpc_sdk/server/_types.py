@@ -24,15 +24,14 @@ from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import List
-from typing import NamedTuple
 from typing import Optional
 from typing import Tuple
 from typing import Type
 
+from trpc_sdk.ipc import PipeConnection
 from trpc_sdk.transport import encode_worker_msg_req
 from trpc_sdk.task import TaskStreamHandler
 from ._loop_thread import LoopThread
-from ._pipe import PipeConnection
 
 
 @unique
@@ -40,7 +39,7 @@ class QueueWaitPolicy(IntEnum):
     """Queue-wait circuit-breaker policy (YAML ``server.queue_wait_policy``).
 
     Compared with ``ServiceOption.queue_wait_policy`` in
-    :meth:`trpc_sdk.server._service.Service._check_queue_wait`.
+    :meth:`trpc_sdk.server._cython._service.Service._check_queue_wait`.
     """
 
     # Drop the request as soon as it exceeds the queue-wait limit.
@@ -140,7 +139,8 @@ class QueueWindow:
         return True
 
 
-class AcceptTarget(NamedTuple):
+@dataclass
+class AcceptTarget:
     """One loop thread plus the protocol factory to use for sockets sent to it.
 
     The factory is per target rather than per acceptor because some front ends
@@ -266,8 +266,6 @@ class TaskInfo:
     # Stable name ``{registered_name}:{index}`` used for IPC lookup and
     # Unix-domain path ``.__{name}`` for stream tasks.
     name: str = ""
-    # ``multiprocessing.Process`` subclass to spawn: ``TaskProcess`` or
-    # ``CTaskProcess``. Set in ``init_task_process`` before fork.
     handle: Optional[Type[Process]] = None
     # ``(initializer, handler)`` from the user registration; the child
     # reads these after fork.
@@ -290,19 +288,16 @@ class TaskInfo:
     # Batch size for :class:`~trpc_sdk.task.TaskConsumer`; ``0``
     # means fall back to ``engine.opts.task_batch_size``.
     batch_size: int = 0
-    # Native C-task thread count; ignored by the Python ``TaskProcess``.
+    # The four fields below configured the native C-task driver, which this
+    # build no longer ships. They are still carried from the registration so
+    # existing configs keep starting, but nothing reads them any more.
     thread_num: int = 0
-    # Optional opaque model metadata passed through to the C driver.
     model_info: Any = None
-    # Native C-task reactor count; used by ``ctask.CTask.set_task_info``.
     reactor_num: int = 1
-    # If True, spawn ``CTaskProcess``; otherwise ``TaskProcess``.
     use_c_task: bool = True
-    # Non-empty selects ``trpc_driver.run_c_task_process`` over the
-    # default ``task_driver`` + ``CTask`` path.
     c_task_driver_params: Dict[str, Any] = field(default_factory=dict)
-    # Optional callback that replaces ``RegisterTask`` on the default
-    # C-task path when set.
+    # Optional callback that replaced ``RegisterTask`` on the native path;
+    # likewise unread now.
     on_fork: Optional[Callable[..., Any]] = None
     # If True, registry heartbeats were paused at registration and must
     # be resumed after the task initializer returns.

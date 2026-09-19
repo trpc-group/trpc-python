@@ -27,8 +27,8 @@ from typing import List
 from typing import Optional
 from typing import Tuple
 
+from trpc_sdk.abc import TrpcMessage
 from trpc_sdk.codec import ClientCodec
-from trpc_sdk.codec import Message
 from trpc_sdk.codec import TrpcClientParser
 from trpc_sdk.common import get_or_create_event_loop
 from trpc_sdk.common import wait_for_by_loop
@@ -67,10 +67,10 @@ class VirtualConnection:
     :meth:`MultiplexedConnection.send_rsp` on a matching response, or by
     :meth:`MultiplexedConnection.close` when the real connection dies.
     :meth:`read` then copies response heads onto the caller's
-    :class:`~trpc_sdk.codec.Message` via ``codec.update_msg_by_msg``.
+    :class:`~trpc_sdk.abc.TrpcMessage` via ``codec.update_msg_by_msg``.
     """
 
-    def __init__(self, request_id: int, conn: MultiplexedConnection, msg: Message):
+    def __init__(self, request_id: int, conn: MultiplexedConnection, msg: TrpcMessage):
         self.request_id = request_id
         self.conn = conn
         self.msg = msg
@@ -233,7 +233,7 @@ class MultiplexedConnection:
                 self.close(ClientPoolConnClosedError("ErrConnClosed"))
                 return
 
-            message = Message()
+            message = TrpcMessage()
             request_id = 0
             rsp_body = b''
             try:
@@ -250,7 +250,7 @@ class MultiplexedConnection:
                 self.future_dict.pop(request_id)
                 logger.error(f"recv_msg err {err}")
 
-    def new(self, request_id: int, msg: Message) -> Optional[VirtualConnection]:
+    def new(self, request_id: int, msg: TrpcMessage) -> Optional[VirtualConnection]:
         """Register a virtual connection, or return ``None`` if the queue is full.
 
         Args:
@@ -374,7 +374,7 @@ class Multiplexed(threading.local):
         self.opts = opts
         self.locks = {}
 
-    async def get_conn(self, network: str, address: Tuple[str, int], request_id: int, msg: Message,
+    async def get_conn(self, network: str, address: Tuple[str, int], request_id: int, msg: TrpcMessage,
                        checker: TrpcClientParser, codec: ClientCodec, timeout: float) -> VirtualConnection:
         """Return a virtual connection for one unary request.
 

@@ -35,12 +35,10 @@ import threading
 from typing import Callable
 from typing import List
 from typing import Optional
-from typing import Tuple
 
 from trpc_sdk.abc import BaseServerTransportOption
-from trpc_sdk.abc import BaseService
 from trpc_sdk.abc import BaseTrpcServerEngine
-from trpc_sdk.abc import Parser
+from trpc_sdk.abc import ProcessType
 from trpc_sdk.log import logger
 from trpc_sdk.utils import is_tcp_port_available
 from trpc_sdk.utils import is_udp_port_available
@@ -84,6 +82,18 @@ class TrpcServerEngine(BaseTrpcServerEngine):
         # ``close()`` acquires ``service_num`` times before returning.
         self.registry_semaphore: threading.Semaphore = threading.Semaphore(self.opts.service_num)
 
+    def set_process_info(self, process_type: ProcessType) -> None:
+        """Satisfy :class:`BaseTrpcServerEngine`; merge workers ignore this.
+
+        The master / dispatcher / executor topology that used to stamp a
+        process role here is gone. The method stays so the ABC can be
+        instantiated; nothing reads the argument.
+
+        Args:
+            process_type: Role of the current process.
+        """
+        del process_type
+
     @property
     def on_worker_message(self) -> Optional[Callable]:
         """Callback invoked when a worker receives an inter-worker message.
@@ -95,16 +105,7 @@ class TrpcServerEngine(BaseTrpcServerEngine):
             return None
         return self.opts.on_worker_message
 
-    def add_listen_endpoint(self,
-                            address: Tuple[str, int],
-                            socket_type: str,
-                            handler: Callable,
-                            checker: Parser,
-                            timeout: int,
-                            network: str,
-                            service: BaseService,
-                            tran_opt: BaseServerTransportOption,
-                            target: str = '') -> None:
+    def add_listen_endpoint(self, opts: BaseServerTransportOption, network: str) -> None:
         """Append one listen endpoint the worker will bind itself.
 
         Called from ``transport.listen_and_serve`` during ``Service.run``.
@@ -113,18 +114,19 @@ class TrpcServerEngine(BaseTrpcServerEngine):
         binds are both accepted.
 
         Args:
-            address: ``(host, port)`` to listen on.
-            socket_type: Socket family (unix vs net).
-            handler: Per-request handler for this listen endpoint.
-            checker: Frame-integrity parser for inbound connections.
-            timeout: Idle/request timeout in milliseconds.
-            network: Network protocol (tcp/http/udp).
-            service: Service adapter bound to that endpoint.
-            tran_opt: Transport options for that endpoint.
-            target: Optional custom address stored beside the bind address.
+            opts: Transport options of this endpoint. Every field the
+                ``process_info`` tables need is read off this object, and the
+                object itself is stored as the endpoint's transport options.
+            network: Network protocol (tcp/http/udp). Passed separately
+                because it is not always ``opts.network``: an HTTP service is
+                configured as ``network: tcp`` plus ``protocol: http``, and
+                the worker picks its front end by this value, so the HTTP
+                transport has to register the endpoint as ``http``.
         """
+        address = (opts.address, opts.port)
+
         # check socket info valid
-        if is_unix_socket(socket_type):
+        if is_unix_socket(opts.socket_type):
             if not unix_path_valid(address[0]):
                 logger.error("[Master Engine] cannot unlink unix address %s", address[0])
                 exit()
@@ -142,17 +144,22 @@ class TrpcServerEngine(BaseTrpcServerEngine):
                 exit()
 
         self.process_info.add_address(address)
-        self.process_info.add_socket_type(socket_type)
-        self.process_info.add_handler(handler)
-        self.process_info.add_checker(checker)
-        self.process_info.add_timeout(timeout)
+        self.process_info.add_socket_type(opts.socket_type)
+        self.process_info.add_handler(opts.handle)
+        self.process_info.add_checker(opts.checker)
+        self.process_info.add_timeout(opts.idle_timeout)
         self.process_info.add_network(network)
-        self.process_info.add_service(service)
-        self.process_info.add_transport_opt(tran_opt)
-        self.process_info.add_target(target)
+        self.process_info.add_service(opts.service)
+        self.process_info.add_transport_opt(opts)
+        self.process_info.add_target(opts.target)
 
     def send_msg_to_worker(self, from_id: int, to: int, data: str) -> Optional[bool]:
         """Send an inter-worker message, or broadcast when ``to`` is negative.
+
+        Only available when this process actually forked workers, which means
+        ``worker_process_list`` is filled: the message pipes it holds are the
+        transport. ``merge`` and ``separate`` leave the list empty, so there is
+        no peer to address and the call is dropped with a warning.
 
         Out-of-range unicast (``to`` past the last worker) returns ``False``
         and sends nothing. A successful unicast or broadcast returns
@@ -166,8 +173,14 @@ class TrpcServerEngine(BaseTrpcServerEngine):
                 target's message pipe.
 
         Returns:
-            ``False`` if ``to`` is out of range; otherwise ``None``.
+            ``False`` if this process has no worker children or ``to`` is out
+            of range; otherwise ``None``.
         """
+        if not self.worker_process_list:
+            logger.warning("[server engine] drop worker msg from %s to %s: mode %s forks no worker process", from_id,
+                           to, self.opts.mode if self.opts else "")
+            return False
+
         if len(self.worker_process_list) <= to:
             return False
 
@@ -179,11 +192,20 @@ class TrpcServerEngine(BaseTrpcServerEngine):
     def broadcast_msg_to_worker(self, from_id: int, data: str) -> None:
         """Write ``data`` to every worker except the sender.
 
+        Like :meth:`send_msg_to_worker`, this needs a mode that forked workers;
+        an empty ``worker_process_list`` is reported rather than silently
+        iterating over nothing.
+
         Args:
             from_id: Sending worker id; that worker is skipped.
             data: Payload forwarded through each remaining worker's
                 message pipe.
         """
+        if not self.worker_process_list:
+            logger.warning("[server engine] drop worker broadcast from %s: mode %s forks no worker process", from_id,
+                           self.opts.mode if self.opts else "")
+            return
+
         for worker in self.worker_process_list:
             if worker.id == from_id:
                 continue

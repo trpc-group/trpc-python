@@ -59,7 +59,7 @@ class TaskStatusCode(IntEnum):
 
     ``IntEnum`` keeps the comparisons against the raw ``ret_code`` the C
     queue writes back valid without a cast. Mirrors the ``TaskStatusCode``
-    enum in ``_cython/_c_task_queue.pxd``; the two definitions must stay
+    enum in ``_cython/_task_queue.pxd``; the two definitions must stay
     numerically aligned.
     """
 

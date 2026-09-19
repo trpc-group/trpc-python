@@ -7,7 +7,7 @@
 """Unary tRPC client invoke path.
 
 Consumes the :class:`Options` built by :mod:`trpc_sdk.client._options`,
-copies them onto the outbound :class:`~trpc_sdk.codec.Message`, selects a
+copies them onto the outbound :class:`~trpc_sdk.abc.TrpcMessage`, selects a
 downstream node, applies the client/server deadline, and runs the
 filter chain around encode / round-trip / decode.
 """
@@ -27,13 +27,10 @@ from typing import Union
 from trpc_sdk.abc import BaseClient
 from trpc_sdk.abc import Node
 from trpc_sdk.abc import TrpcContext
-from trpc_sdk.codec import Message
-from trpc_sdk.codec import compress
-from trpc_sdk.codec import decompress
-from trpc_sdk.codec import deserialize
-from trpc_sdk.codec import serialize
-from trpc_sdk.common import async_lib
+from trpc_sdk.abc import TrpcMessage
 from trpc_sdk.common import get_or_create_event_loop
+from trpc_sdk.compressor import compress
+from trpc_sdk.compressor import decompress
 from trpc_sdk.config import SocketType
 from trpc_sdk.exceptions import ClientConnectionError
 from trpc_sdk.exceptions import ClientEncodeError
@@ -44,9 +41,12 @@ from trpc_sdk.exceptions import TrpcException
 from trpc_sdk.exceptions import UnknownError
 from trpc_sdk.log import logger
 from trpc_sdk.naming import get_selector
+from trpc_sdk.pool import default_multiplexed_pool
+from trpc_sdk.serialization import deserialize
+from trpc_sdk.serialization import serialize
 from trpc_sdk.transport import ClientTimeoutReason
 from trpc_sdk.transport import RequestType
-from trpc_sdk.transport import default_multiplexed_pool
+from trpc_sdk.utils import asynclib
 from trpc_sdk.utils import now_ms
 from trpc_sdk.utils import singleton
 from ._options import Options
@@ -135,7 +135,7 @@ async def _invoke_backend(ctx: TrpcContext, req: Any, rsp: Any, opts: Options) -
     return rsp
 
 
-def update_message(msg: Message, opts: Options) -> None:
+def update_message(msg: TrpcMessage, opts: Options) -> None:
     """Copy caller-facing option fields onto the outbound message.
 
     Covers metadata, caller service name, serialization / compress types,
@@ -167,7 +167,7 @@ def update_message(msg: Message, opts: Options) -> None:
         msg.set_client_rsp_head(opts.rsp_head)
 
 
-async def select_node(msg: Message, opts: Options) -> Node:
+async def select_node(msg: TrpcMessage, opts: Options) -> Node:
     """Resolve the downstream node and copy its address onto ``msg``.
 
     Unix-socket calls rewrite ``opts.target`` first. An explicit
@@ -217,7 +217,7 @@ async def select_node(msg: Message, opts: Options) -> Node:
     return node
 
 
-def set_timeout(ctx: TrpcContext, msg: Message, opts: Options, begin: int) -> ClientTimeoutReason:
+def set_timeout(ctx: TrpcContext, msg: TrpcMessage, opts: Options, begin: int) -> ClientTimeoutReason:
     """Apply the tighter of the client timeout and the server deadline.
 
     When the client deadline is sooner (or the server set none), a later
@@ -318,7 +318,7 @@ class Client(BaseClient):
         try:
             loop = get_or_create_event_loop()
         except RuntimeError:
-            loop = async_lib.new_event_loop()
+            loop = asynclib.new_event_loop()
             asyncio.set_event_loop(loop)
 
         return loop.run_until_complete(self.invoke(ctx, req, rsp_cls, options))

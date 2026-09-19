@@ -26,8 +26,6 @@ from typing import Optional
 
 import automaxprocs
 
-from trpc_sdk.utils import UNIX_TYPE
-
 from ._constants import DEFAULT_BIND_INFO_FILE
 from ._constants import DEFAULT_CLIENT_DIAL_TIMEOUT_MS
 from ._constants import DEFAULT_CLIENT_IDLE_TIME_S
@@ -52,6 +50,7 @@ from ._constants import DEFAULT_TASK_QUEUE_SIZE
 from ._constants import DEFAULT_TASK_WAIT_INTERVAL_MS
 from ._constants import DEFAULT_THREAD_NUM_PER_CORE
 from ._constants import DEFAULT_WORKER_NUM_FALLBACK
+from ._constants import UNIX_TYPE
 
 
 @unique
@@ -201,7 +200,9 @@ class ServerConfig:
     network: str = ''
     protocol: str = ''
     mode: str = ''  # server running mode
-    worker_num: int = field(default_factory=_default_worker_num)  # default: CPU core count
+    worker_num: int = field(default_factory=_default_worker_num)  # retired; still sizes merge/separate when the new keys are absent
+    worker_thread_num: int = 0  # merge-mode event-loop threads; 0 means fall back to worker_num
+    rpc_task_num: int = 0  # separate-mode rpc task processes; 0 means fall back to worker_num
     thread_num: int = field(default_factory=_default_thread_num)  # default: cores * 5
     max_rbuf_size: int = field(default_factory=_default_max_read_buf_size)  # default: 8 MiB
     registry_delay: int = 0  # registry delay (ms)

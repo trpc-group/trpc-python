@@ -49,9 +49,7 @@ class TrpcServerTransport(BaseServerTransport):
         """
         self.opts = opts
         self.server_engine = server_engine
-        self.server_engine.add_listen_endpoint(
-            (self.opts.address, self.opts.port), self.opts.socket_type, self.opts.handle, self.opts.checker,
-            self.opts.idle_timeout, self.opts.network, self.opts.service, self.opts)
+        self.server_engine.add_listen_endpoint(self.opts, self.opts.network)
 
     def close(self) -> None:
         """Forward close to the engine so it can stop its children."""

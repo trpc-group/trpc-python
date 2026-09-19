@@ -11,10 +11,11 @@
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from dataclasses import dataclass
 
 
-class ClientStreamDesc(NamedTuple):
+@dataclass
+class ClientStreamDesc:
     """Describes one client-side streaming method.
 
     Attributes:

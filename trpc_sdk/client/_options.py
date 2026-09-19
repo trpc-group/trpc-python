@@ -27,21 +27,20 @@ from typing import Union
 from trpc_sdk.abc import BaseFilter
 from trpc_sdk.abc import Node
 from trpc_sdk.abc import SelectorOption
-from trpc_sdk.codec import CompressType
-from trpc_sdk.codec import Message
-from trpc_sdk.codec import SerializationType
+from trpc_sdk.abc import TrpcMessage
 from trpc_sdk.codec import get_client_checker
 from trpc_sdk.codec import get_client_codec
+from trpc_sdk.compressor import CompressType
 from trpc_sdk.config import SocketType
-from trpc_sdk.filters import FilterChain  # pylint: disable=no-name-in-module
-from trpc_sdk.filters import get_client_filter  # pylint: disable=no-name-in-module
+from trpc_sdk.filters import FilterChain
+from trpc_sdk.filters import get_client_filter
 from trpc_sdk.naming import TrpcSelector
+from trpc_sdk.pool import ConnPoolOptions
+from trpc_sdk.serialization import SerializationType
 from trpc_sdk.transport import ClientTransport
-from trpc_sdk.transport import ConnPoolOptions
 from trpc_sdk.transport import RoundTripOptions
 from trpc_sdk.transport import get_client_transport
 from trpc_sdk.transport import get_default_client_transport
-
 from ._config import get_client_backend_config
 
 
@@ -593,7 +592,7 @@ class Options:
         return self._record(apply)
 
 
-def _create_client_options(msg: Message) -> Options:
+def _create_client_options(msg: TrpcMessage) -> Options:
     """Build default options before YAML and caller overrides are applied."""
     opts = Options()
     opts.transport = get_default_client_transport()
@@ -604,7 +603,7 @@ def _create_client_options(msg: Message) -> Options:
     return opts
 
 
-def _update_namespace_of_option(msg: Message, opts: Options):
+def _update_namespace_of_option(msg: TrpcMessage, opts: Options):
     """Copy caller namespace / env fields from ``msg`` onto selector options."""
     if len(opts.selector_options.namespace) == 0:
         opts.selector_options.set_namespace(msg.namespace)
@@ -630,7 +629,7 @@ def normalize_options(
     return list(options)
 
 
-def get_options(msg: Message, options: Optional[Union[Options, Callable, Sequence]] = None) -> Options:
+def get_options(msg: TrpcMessage, options: Optional[Union[Options, Callable, Sequence]] = None) -> Options:
     """Build per-call options from defaults, YAML, then caller overrides.
 
     Caller-supplied ``options`` win last. If the caller set

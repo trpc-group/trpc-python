@@ -4,11 +4,11 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
-"""tRPC-over-HTTP codec: encode and decode between Message and HTTP.
+"""tRPC-over-HTTP codec: encode and decode between TrpcMessage and HTTP.
 
 The codec never talks to a socket. On the server it reads the aiohttp
 ``Request`` / ``Response`` from context meta, fills
-:class:`~trpc_sdk.codec.Message`, and writes status plus tRPC headers back
+:class:`~trpc_sdk.abc.TrpcMessage`, and writes status plus tRPC headers back
 onto the response. On the client it only fills caller identity and
 method defaults; :class:`~trpc_sdk.http.HttpClientTransport` builds the
 actual HTTP request.
@@ -33,13 +33,13 @@ from trpc_sdk.abc import BaseCodec
 from trpc_sdk.abc import BaseServerProtocolChecker
 from trpc_sdk.abc import PluginInitPos
 from trpc_sdk.abc import PluginType
-from trpc_sdk.codec import Message
-from trpc_sdk.codec import SerializationType
+from trpc_sdk.abc import TrpcMessage
 from trpc_sdk.exceptions import ClientInvokeError
 from trpc_sdk.exceptions import TrpcErrorCode
 from trpc_sdk.exceptions import TrpcErrorType
 from trpc_sdk.exceptions import TrpcException
 from trpc_sdk.plugin import register_plugin
+from trpc_sdk.serialization import SerializationType
 from ._constants import HTTP
 from ._constants import HTTP_REQ_KEY
 from ._constants import HTTP_RSP_KEY
@@ -54,7 +54,7 @@ from ._types import find_serialization_type
 from ._types import get_trpc_error_code
 
 
-@register_plugin(PluginType.SERVER_CHECKER, HTTP, init_pos=PluginInitPos.MASTER)
+@register_plugin(PluginType.SERVER_CHECKER, HTTP, init_pos=PluginInitPos.WORKER)
 class ServerHttpChecker(BaseServerProtocolChecker):
     """HTTP server frame checker.
 
@@ -63,7 +63,7 @@ class ServerHttpChecker(BaseServerProtocolChecker):
     """
 
 
-@register_plugin(PluginType.SERVER_CODEC, HTTP, init_pos=PluginInitPos.MASTER)
+@register_plugin(PluginType.SERVER_CODEC, HTTP, init_pos=PluginInitPos.WORKER)
 class ServerHttpCodec(BaseCodec):
     """Server codec: pack RPC results into an aiohttp response.
 
@@ -73,7 +73,7 @@ class ServerHttpCodec(BaseCodec):
     """
 
     @classmethod
-    def encode(cls, message: Message, body: bytes) -> bytes:
+    def encode(cls, message: TrpcMessage, body: bytes) -> bytes:
         """Write status, Content-Type and tRPC headers onto the response.
 
         Does not wrap ``body``; aiohttp sends it as-is after
@@ -123,7 +123,7 @@ class ServerHttpCodec(BaseCodec):
         return body
 
     @classmethod
-    def encode_trpc_rsp_header(cls, message: Message, rsp_headers: CIMultiDictProxy) -> None:
+    def encode_trpc_rsp_header(cls, message: TrpcMessage, rsp_headers: CIMultiDictProxy) -> None:
         """Write tRPC call-type / request-id / trans_info onto ``rsp_headers``.
 
         Args:
@@ -151,7 +151,7 @@ class ServerHttpCodec(BaseCodec):
         rsp_headers[HTTP_TRPC_HEADER.trpc_trans_info] = json.dumps(trans_info)
 
     @classmethod
-    async def decode(cls, message: Message, _: bytes) -> bytes:
+    async def decode(cls, message: TrpcMessage, _: bytes) -> bytes:
         """Read path, tRPC headers and body from the aiohttp request.
 
         GET uses the query string as the body and Form serialization;
@@ -191,8 +191,8 @@ class ServerHttpCodec(BaseCodec):
         return req_body
 
     @classmethod
-    def decode_trpc_req_header(cls, message: Message, request: HttpRequest) -> None:
-        """Fill ``trpc_pb2.RequestProtocol`` and Message identity from HTTP headers.
+    def decode_trpc_req_header(cls, message: TrpcMessage, request: HttpRequest) -> None:
+        """Fill ``trpc_pb2.RequestProtocol`` and TrpcMessage identity from HTTP headers.
 
         Args:
             message: Server-side tRPC message.
@@ -258,7 +258,7 @@ class ServerHttpCodec(BaseCodec):
         message.set_server_req_head(trpc_req)
 
 
-@register_plugin(PluginType.CLIENT_CHECKER, HTTP, init_pos=PluginInitPos.MASTER)
+@register_plugin(PluginType.CLIENT_CHECKER, HTTP, init_pos=PluginInitPos.WORKER)
 class ClientHttpChecker(BaseClientProtocolChecker):
     """HTTP client frame checker.
 
@@ -267,7 +267,7 @@ class ClientHttpChecker(BaseClientProtocolChecker):
     """
 
 
-@register_plugin(PluginType.CLIENT_CODEC, HTTP, init_pos=PluginInitPos.MASTER)
+@register_plugin(PluginType.CLIENT_CODEC, HTTP, init_pos=PluginInitPos.WORKER)
 class ClientHttpCodec(BaseCodec):
     """Client codec: fill method/caller defaults and decode HTTP errors.
 
@@ -280,7 +280,7 @@ class ClientHttpCodec(BaseCodec):
     """
 
     @classmethod
-    def encode(cls, message: Message, body: bytes) -> bytes:
+    def encode(cls, message: TrpcMessage, body: bytes) -> bytes:
         """Fill default method and caller identity when the caller omitted them.
 
         Args:
@@ -304,7 +304,7 @@ class ClientHttpCodec(BaseCodec):
         return body
 
     @classmethod
-    def decode(cls, message: Message, _: bytes) -> bytes:
+    def decode(cls, message: TrpcMessage, _: bytes) -> bytes:
         """Map HTTP status and tRPC error headers onto ``client_rsp_err``.
 
         Args:

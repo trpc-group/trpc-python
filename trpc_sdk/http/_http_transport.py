@@ -14,6 +14,7 @@ The aiohttp-to-tRPC request bridge lives in
 
 from __future__ import annotations
 
+from trpc_sdk.abc import BasePluginFactory
 from trpc_sdk.abc import BaseServerTransport
 from trpc_sdk.abc import BaseServerTransportOption
 from trpc_sdk.abc import BaseTrpcServerEngine
@@ -33,6 +34,7 @@ class HttpServerTransport(BaseServerTransport):
     """
 
     def __init__(self) -> None:
+        super().__init__()
         self.opts = None
         self.loop = None
         self.server_engine = None
@@ -49,28 +51,19 @@ class HttpServerTransport(BaseServerTransport):
 
         self.loop = get_or_create_event_loop()
 
-        self.server_engine.add_listen_endpoint(
-            (self.opts.address, self.opts.port),
-            self.opts.socket_type,
-            self.opts.handle,
-            self.opts.checker,
-            self.opts.idle_timeout,
-            HTTP,
-            self.opts.service,
-            self.opts,
-        )
+        # Registered as ``http`` rather than ``opts.network``: the YAML entry
+        # of an HTTP service says ``network: tcp``, and the worker would start
+        # a plain TCP front end for it.
+        self.server_engine.add_listen_endpoint(self.opts, HTTP)
 
     def close(self) -> None:
         """Close the engine that owns this transport."""
         self.server_engine.close()
 
 
-@register_plugin(PluginType.SERVER_TRANSPORT, HTTP, init_pos=PluginInitPos.MASTER)
-class HttpServerTransportFactory:
+@register_plugin(PluginType.SERVER_TRANSPORT, HTTP, init_pos=PluginInitPos.WORKER)
+class HttpServerTransportFactory(BasePluginFactory):
     """Plugin factory that produces :class:`HttpServerTransport`."""
-
-    def __init__(self) -> None:
-        pass
 
     def create(self) -> HttpServerTransport:
         """Create a new :class:`HttpServerTransport`.

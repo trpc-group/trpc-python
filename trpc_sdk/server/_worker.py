@@ -36,6 +36,7 @@ import signal
 import sys
 import threading
 from functools import partial
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import Callable
 from typing import Dict
@@ -43,28 +44,30 @@ from typing import List
 from typing import Optional
 from typing import Tuple
 
-from trpc_sdk._inner import MemoryInspector
-from trpc_sdk.plugin import plugin
+from trpc_sdk.abc import BaseServerProtocolChecker
 from trpc_sdk.abc import BaseServerTransportOption
 from trpc_sdk.common import ProcessType
 from trpc_sdk.common import execute_after_in_child
 from trpc_sdk.common import execute_before_loop_run_in_child
 from trpc_sdk.common import get_or_create_event_loop
 from trpc_sdk.config import TrpcConfig
+from trpc_sdk.ipc import PipeConnection
 from trpc_sdk.log import logger
 from trpc_sdk.plugin import init_worker_plugins
 from trpc_sdk.task import TaskStreamClientMap
 from trpc_sdk.task import register_task_conn
-from trpc_sdk.transport import WorkerCTaskConnection
 from trpc_sdk.transport import WorkerMessageConnection
 from trpc_sdk.transport import WorkerTaskConnection
 from trpc_sdk.utils import TimerExecutor
-from ._pipe import PipeConnection
+from trpc_sdk.utils import asynclib
 from ._signals import run_worker_signal_handle
 from ._types import ChildRecord
 from ._types import TaskInfo
 from ._types import WorkerInfo
-from ._task import TaskIpcMesh
+
+if TYPE_CHECKING:
+    from trpc_sdk._inner import MemoryInspector
+    from ._task import TaskIpcMesh
 
 
 _current_worker: Optional[WorkerInfo] = None
@@ -200,8 +203,9 @@ class BaseWorker:
         # "tcp,http") for each listen address. Only used by workers that bind
         # the addresses themselves.
         self.networks: List[str] = []
-        # Frame checker/parser for each listen address.
-        self.checkers: List[Any] = []
+        # Frame checker/parser for each listen address. ``None`` where no
+        # checker plugin is registered for the service protocol.
+        self.checkers: List[Optional[BaseServerProtocolChecker]] = []
         # Service adapter for each listen address; carries the protocol and
         # service name.
         self.services: List[Any] = []
@@ -266,9 +270,9 @@ class BaseWorker:
 
         self.enable_memory_inspection = TrpcConfig.server_config().memory_inspection.enabled
         if self.enable_memory_inspection:
-            # Import lazily: ``MemoryInspecter`` pulls in tracemalloc and
+            # Import lazily: ``MemoryInspector`` pulls in tracemalloc and
             # its hash tables, which cost memory even when unused.
-            from trpc_sdk._inner import MemoryInspecter
+            from trpc_sdk._inner import MemoryInspector
             # Writes allocation snapshots to a file on SIGUSR2.
             self.memory_inspector = MemoryInspector(
                 TrpcConfig.server_config().memory_inspection.filename_prefix,
@@ -570,9 +574,10 @@ class BaseWorker:
         """Attach this worker's end of a non-stream task IPC pipe to a loop.
 
         Drops the unused socketpair end inherited across fork, wraps the
-        remaining fd in ``CTaskConnection`` or ``TaskConnection``, and
-        registers the transport under ``task_info.name`` so handlers can
-        produce to that task.
+        remaining fd in
+        :class:`~trpc_sdk.transport.WorkerTaskConnection`, and registers the
+        transport under ``task_info.name`` so handlers can produce to that
+        task.
 
         A coroutine rather than a blocking call because a merge worker sets its
         task pipes up from inside each serving loop, where that loop is already
@@ -583,18 +588,15 @@ class BaseWorker:
         Args:
             pipe_conn: This worker's ``PipeEnd.RIGHT`` end of the producer <->
                 task socketpair. Must not be ``None``.
-            task_info: The task this pipe talks to; ``use_c_task`` selects
-                the protocol class.
+            task_info: The task this pipe talks to; supplies the name the
+                transport is registered under.
             loop: Loop that will own the transport, and therefore the only one
                 allowed to write it. Defaults to this worker's main loop; a
                 merge worker passes each serving thread's loop instead.
         """
         loop = loop or self.loop
         pipe_conn.close_extra_conn()
-        if task_info.use_c_task:
-            coros = loop.create_connection(WorkerCTaskConnection, sock=pipe_conn.get_socket())
-        else:
-            coros = loop.create_connection(WorkerTaskConnection, sock=pipe_conn.get_socket())
+        coros = loop.create_connection(WorkerTaskConnection, sock=pipe_conn.get_socket())
         (transport, _) = await coros
         register_task_conn(task_info.name, transport)
 

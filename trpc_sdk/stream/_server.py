@@ -26,18 +26,18 @@ from typing import Optional
 
 from trpc_sdk.abc import BaseServerStream
 from trpc_sdk.abc import TrpcContext
-from trpc_sdk.codec import Message
-from trpc_sdk.codec import clone_context_and_message
-from trpc_sdk.codec import compress
-from trpc_sdk.codec import create_frame_head
-from trpc_sdk.codec import decompress
-from trpc_sdk.codec import deserialize
-from trpc_sdk.codec import get_message
-from trpc_sdk.codec import serialize
+from trpc_sdk.abc import TrpcMessage
+from trpc_sdk.abc import clone_context_and_message
+from trpc_sdk.abc import create_frame_head
+from trpc_sdk.abc import get_message
 from trpc_sdk.common import get_or_create_event_loop
+from trpc_sdk.compressor import compress
+from trpc_sdk.compressor import decompress
 from trpc_sdk.exceptions import ServerSystemError
 from trpc_sdk.exceptions import TrpcErrorCode
 from trpc_sdk.log import logger
+from trpc_sdk.serialization import deserialize
+from trpc_sdk.serialization import serialize
 from trpc_sdk.utils import Queue
 from trpc_sdk._inner import trpc_pb2
 from ._flow_control import ReceiveControl
@@ -83,7 +83,7 @@ class ServerStream(BaseServerStream):
         buf_data = self.opts.codec.encode(msg, None)
         self.opts.stream_transport.send(ctx, buf_data, self.stream_id)
 
-    def set_send_control(self, msg: Message) -> int:
+    def set_send_control(self, msg: TrpcMessage) -> int:
         """Install send-side flow control from the client's INIT window.
 
         A client window of ``0`` means the client opted out: both
@@ -112,11 +112,11 @@ class ServerStream(BaseServerStream):
             self.s_control = SendControl(init_window_size)
         return init_window_size
 
-    def compress_and_serialize(self, msg: Message, body: object) -> bytes:
+    def compress_and_serialize(self, msg: TrpcMessage, body: object) -> bytes:
         """Serialize then compress ``body`` using ``msg`` (or option overrides).
 
         Args:
-            msg: Message supplying serialization / compress types.
+            msg: TrpcMessage supplying serialization / compress types.
             body: Object to encode as a DATA payload.
 
         Returns:
@@ -304,7 +304,7 @@ class StreamDispatcher:
         Raises:
             ServerSystemError: That pair is already in the map.
         """
-        msg: Message = get_message(ctx)
+        msg: TrpcMessage = get_message(ctx)
         session_id, stream_id = msg.session_id, msg.stream_id
         if stream_id in self.stream_to_ss[session_id]:
             raise ServerSystemError(self._error_msg("[server stream] duplicate", session_id, stream_id))
@@ -316,7 +316,7 @@ class StreamDispatcher:
         Args:
             ctx: TrpcContext whose message carries the ids to remove.
         """
-        msg: Message = get_message(ctx)
+        msg: TrpcMessage = get_message(ctx)
         session_id, stream_id = msg.session_id, msg.stream_id
         if stream_id not in self.stream_to_ss[session_id]:
             logger.error(self._error_msg("[server stream] delete stream error, not found", session_id, stream_id))
@@ -337,7 +337,7 @@ class StreamDispatcher:
         Raises:
             ServerSystemError: No stream for that pair.
         """
-        msg: Message = get_message(ctx)
+        msg: TrpcMessage = get_message(ctx)
         session_id, stream_id = msg.session_id, msg.stream_id
         if stream_id not in self.stream_to_ss[session_id]:
             info = f"[server stream] get stream error, frame_state: {msg.frame_head.frame_state}"
@@ -405,7 +405,7 @@ class StreamDispatcher:
             ctx: INIT context.
             stream_handle: Business coroutine scheduled on the event loop.
         """
-        msg: Message = get_message(ctx)
+        msg: TrpcMessage = get_message(ctx)
         stream_id = msg.stream_id
         server_stream = ServerStream(ctx, stream_id, self.opts)
         self.store_server_stream(ctx, server_stream)
@@ -453,7 +453,7 @@ class StreamDispatcher:
         """
         server_stream: ServerStream = self.get_server_stream(ctx)
         server_stream.client_close = True
-        msg: Message = get_message(ctx)
+        msg: TrpcMessage = get_message(ctx)
         if msg.server_rsp_err.code != TrpcErrorCode.TRPC_INVOKE_SUCCESS:
             server_stream.push_to_recv_queue((None, msg.server_rsp_err))
             return
@@ -523,7 +523,7 @@ class StreamDispatcher:
         Raises:
             ServerSystemError: No frame head and no ``server_rsp_err``.
         """
-        msg: Message = get_message(ctx)
+        msg: TrpcMessage = get_message(ctx)
         if msg.frame_head is None:
             if msg.server_rsp_err:
                 return self.handle_error(ctx, req_buf)

@@ -12,7 +12,6 @@ including unary round-trips and client-side streaming transport operations.
 
 from __future__ import annotations
 
-from abc import ABC
 from abc import abstractmethod
 from dataclasses import dataclass
 from socket import socket
@@ -23,8 +22,9 @@ from typing import Tuple
 from ._cython import BaseClientProtocolChecker
 from ._cython import BaseCodec
 from ._cython import BaseServerProtocolChecker
+from ._cython import BaseService
 from ._cython import TrpcContext
-from ._server import BaseService
+from ._plugin import BasePlugin
 from ._server import BaseTrpcServerEngine
 
 AddrType = Tuple[str, int]
@@ -46,6 +46,7 @@ class BaseServerTransportOption:
         handle: Optional unary service handler.
         network: Network type such as ``tcp`` or ``udp``.
         service_name: Logical service name exposed by this listener.
+        socket_type: Socket family label such as ``net`` or ``unix``.
         worker_num: Number of worker processes or threads.
         mode: Transport runtime mode identifier.
         idle_timeout: Idle connection timeout in seconds.
@@ -61,6 +62,7 @@ class BaseServerTransportOption:
     handle: Optional[ServiceHandler] = None
     network: str = "tcp"
     service_name: str = ""
+    socket_type: str = ""
     worker_num: int = 2
     mode: str = ""
     idle_timeout: float = 0
@@ -77,8 +79,52 @@ class BaseServerTransportOption:
         self.address = address_info[0]
         self.port = int(address_info[1])
 
+    def set_service(self, service: Optional[BaseService]) -> None:
+        """Bind the service instance this listener will dispatch into."""
+        self.service = service
 
-class BaseServerTransport(ABC):
+    def set_service_name(self, service_name: str) -> None:
+        """Set the logical service name exposed by this listener."""
+        self.service_name = service_name
+
+    def set_socket_type(self, socket_type: str) -> None:
+        """Set the socket family label, e.g. ``net`` or ``unix``."""
+        self.socket_type = socket_type
+
+    def set_network(self, network: str) -> None:
+        """Set the listen network, e.g. ``tcp`` or ``udp``."""
+        self.network = network
+
+    def set_idle_timeout(self, timeout: float) -> None:
+        """Set the idle-connection timeout copied from ``service.timeout``."""
+        self.idle_timeout = timeout
+
+    def set_checker(self, checker: Optional[BaseServerProtocolChecker]) -> None:
+        """Install the protocol frame checker for this listener."""
+        self.checker = checker
+
+    def set_worker_num(self, worker_num: int) -> None:
+        """Copy process-model worker count onto this listener."""
+        self.worker_num = worker_num
+
+    def set_mode(self, mode: str) -> None:
+        """Copy ``server.mode`` onto this listener."""
+        self.mode = mode
+
+    def set_tls_key(self, tls_key: str) -> None:
+        """Set the TLS private key path; empty disables TLS."""
+        self.tls_key = tls_key
+
+    def set_tls_cert(self, tls_cert: str) -> None:
+        """Set the TLS certificate path; empty disables TLS."""
+        self.tls_cert = tls_cert
+
+    def set_target(self, target: str) -> None:
+        """Set an optional backend target name for this listener."""
+        self.target = target
+
+
+class BaseServerTransport(BasePlugin):
     """Define server transport lifecycle operations."""
 
     @abstractmethod
@@ -131,7 +177,7 @@ class BaseClientTransportOption:
     sock: Optional[socket] = None
 
 
-class BaseClientTransport(ABC):
+class BaseClientTransport(BasePlugin):
     """Define unary client transport round-trips."""
 
     @abstractmethod
@@ -154,7 +200,7 @@ class BaseClientTransport(ABC):
         ...
 
 
-class BaseClientStreamTransport(ABC):
+class BaseClientStreamTransport(BasePlugin):
     """Define client-side streaming transport operations."""
 
     @abstractmethod
@@ -219,8 +265,11 @@ class BaseClientStreamTransport(ABC):
         ...
 
     @abstractmethod
-    async def start(self, ctx: TrpcContext, options: BaseClientTransportOption):
+    async def start_stream(self, ctx: TrpcContext, options: BaseClientTransportOption):
         """Initialize a new client stream session.
+
+        Named apart from :meth:`~trpc_sdk.abc.BasePlugin.start`, which the
+        plugin manager calls with no arguments once per process.
 
         Args:
             ctx: Stream-scoped RPC context.

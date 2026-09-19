@@ -39,3 +39,4 @@ cdef class TrpcContext:
     cpdef void with_meta_data(self, object key, object value) except *
     cpdef object get_meta_data(self, object key, object default=*)
     cpdef object pop_meta_data(self, object key, object default=*)
+    cpdef object get_client_message(self)

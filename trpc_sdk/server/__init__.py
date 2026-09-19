@@ -28,12 +28,13 @@ The package is split by responsibility:
 
 - :mod:`~trpc_sdk.server._option` — ``ServerOption`` (process model) and
   ``ServiceOption`` (one listen endpoint), both filled from YAML
-- :mod:`~trpc_sdk.server._service` — ``Service``: method registry, filter chain,
-  and the per-request handler path
+- :mod:`~trpc_sdk.server._cython` — ``Service``: method registry, filter chain,
+  the per-request handler path, and :func:`create_service`
 - :mod:`~trpc_sdk.server._registry` — ``RegistryThread``: background
   naming-service register / heartbeat / deregister on its own event loop
-- :mod:`~trpc_sdk.server._server` — ``Server``: config, service table, and the
-  startup order that forks children before creating a loop
+- :mod:`~trpc_sdk.server._server` — ``Server``: config, service table,
+  :func:`create_server`, and the startup order that forks children before
+  creating a loop
 - :mod:`~trpc_sdk.server._modes`, :mod:`~trpc_sdk.server._compat` — internal
   mode lookup, and translation of retired YAML values during the migration
   window
@@ -44,15 +45,16 @@ The package is split by responsibility:
 - :mod:`~trpc_sdk.server._separate_worker` — separate mode and its rpc tasks
 - :mod:`~trpc_sdk.server._task` — task children and the pre-fork socketpair
   mesh
-- :mod:`~trpc_sdk.server._constants`, :mod:`~trpc_sdk.server._features`,
-  :mod:`~trpc_sdk.server._pipe`, :mod:`~trpc_sdk.server._process_info`,
-  :mod:`~trpc_sdk.server._signals`, :mod:`~trpc_sdk.server._types` — shared
-  defaults, runtime switches, IPC primitives and metadata used across
-  processes
+- :mod:`~trpc_sdk.server._constants`,
+  :mod:`~trpc_sdk.server._runtime_switches`,
+  :mod:`~trpc_sdk.server._process_info`, :mod:`~trpc_sdk.server._signals`,
+  :mod:`~trpc_sdk.server._types` — shared defaults, runtime switches, and
+  metadata used across processes. The socketpair primitives those tables hold
+  live in :mod:`trpc_sdk.ipc`
 - :mod:`~trpc_sdk.server._healthy_checker` — worker/child heartbeat monitoring
 
-Application code normally reaches this package through :func:`trpc.new`, which
-returns a :class:`Server`. Generated stub code uses :class:`Server`,
+Application code normally reaches this package through :func:`create_server`,
+which returns a :class:`Server`. Generated stub code uses :class:`Server`,
 :class:`Method`, :class:`ServiceDesc` and :class:`StreamDesc` to register
 handlers.
 """
@@ -66,25 +68,21 @@ from . import _engine as _engine_module
 from ._constants import MODE_MERGE
 from ._constants import MODE_SEPARATE
 from ._constants import Network
-from ._constants import PipeEnd
-from ._constants import PipeKind
 from ._engine import TrpcServerEngine
-from ._features import use_c_task
 from ._merge_worker import MergeWorker
 from ._option import ServerOption
 from ._option import ServiceOption
-from ._pipe import PipeConnection
-from ._pipe import create_pipe
 from ._process_info import ProcessInfo
 from ._process_info import ProcessTaskInfo
+from ._runtime_switches import use_c_task
 from ._separate_worker import RpcTaskProcess
 from ._separate_worker import SeparateWorker
-from ._server import AbstractServer
 from ._server import Server
-from ._service import Service
+from ._server import create_server
+from ._cython import Service
+from ._cython import create_service
 from ._signals import set_signal_handle
 from ._task import BaseTaskProcess
-from ._task import CTaskProcess
 from ._task import TaskProcess
 from ._types import TaskInfo
 from ._types import WorkerInfo
@@ -95,26 +93,20 @@ from ._worker import current_worker
 # package to be importable.
 from ._healthy_checker import register_timeout_callback
 
-# Historical YAML-name exports; members of :class:`Network`.
-NETWORK_HTTP = Network.HTTP
-NETWORK_TCP = Network.TCP
-NETWORK_UDP = Network.UDP
-
-
 __all__ = [
     # Entry points
-    "AbstractServer",
     "Server",
     "ServerOption",
     "Service",
     "ServiceOption",
+    "create_server",
+    "create_service",
     # Handler-facing types, used by generated stub code
     "TrpcContext",
     "Method",
     "ServiceDesc",
     "StreamDesc",
     # Process model
-    "CTaskProcess",
     "MergeWorker",
     "ProcessInfo",
     "ProcessTaskInfo",
@@ -126,10 +118,6 @@ __all__ = [
     "WorkerInfo",
     "BaseTaskProcess",
     "BaseWorker",
-    "PipeConnection",
-    "PipeEnd",
-    "PipeKind",
-    "create_pipe",
     # Config values shared with the YAML schema
     "MODE_MERGE",
     "MODE_SEPARATE",
@@ -139,7 +127,6 @@ __all__ = [
     "Network",
     # Lifecycle hooks
     "register_timeout_callback",
-    "send_msg_worker",
     "set_signal_handle",
     # Runtime feature switches
     "use_c_task",

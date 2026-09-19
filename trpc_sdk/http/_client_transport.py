@@ -4,7 +4,7 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
-"""HTTP client transport: turn a Message into an aiohttp round trip.
+"""HTTP client transport: turn a TrpcMessage into an aiohttp round trip.
 
 :class:`HttpClientTransport.round_trip` is the plugin behind protocol
 ``http``. It resolves the URL (logical scheme such as ``polaris://``
@@ -28,11 +28,11 @@ from trpc_sdk.abc import BaseClientTransport
 from trpc_sdk.abc import PluginInitPos
 from trpc_sdk.abc import PluginType
 from trpc_sdk.abc import TrpcContext
-from trpc_sdk.codec import Message
-from trpc_sdk.codec import SerializationType
+from trpc_sdk.abc import TrpcMessage
 from trpc_sdk.exceptions import ClientInvokeError
 from trpc_sdk.exceptions import ClientTimeoutError
 from trpc_sdk.plugin import register_plugin
+from trpc_sdk.serialization import SerializationType
 from trpc_sdk.transport import RoundTripOptions
 from trpc_sdk.utils import now_ms
 from ._constants import DEFAULT_SESSION_NAME
@@ -65,7 +65,7 @@ def register_http_session_params(params: dict, name: str = DEFAULT_SESSION_NAME)
     _http_session_params[name] = params
 
 
-@register_plugin(PluginType.CLIENT_TRANSPORT, HTTP, init_pos=PluginInitPos.MASTER)
+@register_plugin(PluginType.CLIENT_TRANSPORT, HTTP, init_pos=PluginInitPos.WORKER)
 class HttpClientTransport(BaseClientTransport):
     """aiohttp-backed client transport registered as protocol ``http``.
 
@@ -88,7 +88,7 @@ class HttpClientTransport(BaseClientTransport):
         return cls._aio_sessions[name].instance
 
     @staticmethod
-    def _get_url(req_header: HttpClientReqHeader, opts: RoundTripOptions, msg: Message):
+    def _get_url(req_header: HttpClientReqHeader, opts: RoundTripOptions, msg: TrpcMessage):
         """Resolve a logical URL into an aiohttp-ready HTTP URL.
 
         Non-http schemes (or a missing ``parsed_url``) use
@@ -120,7 +120,7 @@ class HttpClientTransport(BaseClientTransport):
         return req_header.url_parser.get_http_url(req_header.headers, addr)
 
     @staticmethod
-    def _get_headers(msg: Message, req_header: HttpClientReqHeader):
+    def _get_headers(msg: TrpcMessage, req_header: HttpClientReqHeader):
         """Copy caller/callee/timeout/content-type/trans_info onto headers.
 
         Args:

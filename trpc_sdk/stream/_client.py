@@ -26,22 +26,22 @@ from typing import Optional
 
 from trpc_sdk.abc import BaseClientStream
 from trpc_sdk.abc import TrpcContext
+from trpc_sdk.abc import TrpcMessage
+from trpc_sdk.abc import clone_context_and_message
+from trpc_sdk.abc import create_frame_head
 from trpc_sdk.client import Options
 from trpc_sdk.client import create_stream
 from trpc_sdk.client import create_task_client_stream
 from trpc_sdk.client import get_options
 from trpc_sdk.client import normalize_options
 from trpc_sdk.client import update_message
-from trpc_sdk.codec import Message
-from trpc_sdk.codec import clone_context_and_message
-from trpc_sdk.codec import create_frame_head
-from trpc_sdk.codec import decompress
-from trpc_sdk.codec import deserialize
 from trpc_sdk.common import get_or_create_event_loop
+from trpc_sdk.compressor import decompress
 from trpc_sdk.exceptions import ClientDecodeError
 from trpc_sdk.exceptions import ClientTimeoutError
 from trpc_sdk.exceptions import ServerSystemError
 from trpc_sdk.log import logger
+from trpc_sdk.serialization import deserialize
 from trpc_sdk.utils import Queue
 from trpc_sdk._inner import trpc_pb2
 from ._constants import DEFAULT_INIT_WINDOW_SIZE
@@ -175,7 +175,7 @@ class ClientStream(BaseClientStream):
             ctx: Context whose client message holds the decoded frame head.
             rsp_data: DATA payload, ignored for CLOSE / FEEDBACK.
         """
-        msg: Message = ctx.get_client_message()
+        msg: TrpcMessage = ctx.get_client_message()
         frame_state = msg.frame_head.frame_state
 
         if frame_state == trpc_pb2.TRPC_STREAM_FRAME_DATA:
@@ -195,11 +195,11 @@ class ClientStream(BaseClientStream):
         if frame_state == trpc_pb2.TRPC_STREAM_FRAME_FEEDBACK:
             self.handle_feedback(msg)
 
-    def handle_feedback(self, msg: Message) -> None:
+    def handle_feedback(self, msg: TrpcMessage) -> None:
         """Apply a FEEDBACK frame to the send window.
 
         Args:
-            msg: Message whose ``stream_frame`` must be
+            msg: TrpcMessage whose ``stream_frame`` must be
                 :class:`trpc_pb2.TrpcStreamFeedBackMeta`.
 
         Raises:

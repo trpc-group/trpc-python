@@ -16,7 +16,7 @@ is the key type used when a manager indexes a pool by socket or
 from __future__ import annotations
 
 import socket
-from typing import NamedTuple
+from dataclasses import dataclass
 from typing import Union
 
 from trpc_sdk.abc import AddrType
@@ -24,7 +24,8 @@ from trpc_sdk.abc import AddrType
 ConnAddress = Union[AddrType, socket.socket]
 
 
-class ConnPoolOptions(NamedTuple):
+@dataclass
+class ConnPoolOptions:
     """Tunables for one address-scoped connection pool.
 
     Attributes:

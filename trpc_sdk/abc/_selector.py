@@ -23,6 +23,7 @@ from typing import Tuple
 
 from ._cython import TrpcContext  # pyright: ignore[reportMissingModuleSource]
 from ._node import Node
+from ._plugin import BasePlugin
 
 
 @dataclass
@@ -248,7 +249,7 @@ class SelectorOption:
         self.service_router_opt.metadata = metadata
 
 
-class BaseSelector(ABC):
+class BaseSelector(BasePlugin):
     """Define service endpoint selection and call-result reporting."""
 
     @abstractmethod
@@ -279,7 +280,7 @@ class BaseSelector(ABC):
         ...
 
 
-class BaseServiceRouter(ABC):
+class BaseServiceRouter(BasePlugin):
     """Filter a discovered node list before load balancing.
 
     Implementations must not mutate the incoming ``nodes`` list unless

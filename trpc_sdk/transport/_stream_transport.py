@@ -30,12 +30,12 @@ from typing import Dict
 from trpc_sdk.abc import BaseServerTransportOption
 from trpc_sdk.abc import BaseTrpcServerEngine
 from trpc_sdk.abc import TrpcContext
-from trpc_sdk.codec import Message
-from trpc_sdk.codec import get_message
+from trpc_sdk.abc import TrpcMessage
+from trpc_sdk.abc import get_message
 from trpc_sdk.config import TrpcConfig
 from trpc_sdk.exceptions import ServerSystemError
 from trpc_sdk.log import logger
-from ._c_ipc_codec import inner_encode_rsp
+from ._cython import inner_encode_rsp
 from ._transport import TrpcServerTransport
 
 
@@ -82,7 +82,7 @@ class TrpcServerStreamTransport(TrpcServerTransport):
             ServerSystemError: A handle for this (session, stream) already
                 exists.
         """
-        msg: Message = get_message(ctx)
+        msg: TrpcMessage = get_message(ctx)
         session_id, stream_id = msg.session_id, msg.stream_id
         if stream_id in self.stream_conns[session_id]:
             err_msg = self._format_error("failed to store stream conn error, duplicate", session_id, stream_id)
@@ -106,7 +106,7 @@ class TrpcServerStreamTransport(TrpcServerTransport):
         Args:
             ctx: Request context whose message carries session / stream ids.
         """
-        msg: Message = get_message(ctx)
+        msg: TrpcMessage = get_message(ctx)
         session_id, stream_id = msg.session_id, msg.stream_id
         if stream_id not in self.stream_conns[session_id]:
             logger.error(self._format_error("failed to delete stream conn: not found", session_id, stream_id))
@@ -137,7 +137,7 @@ class TrpcServerStreamTransport(TrpcServerTransport):
         Raises:
             ValueError: No handle is stored for this (session, stream).
         """
-        msg: Message = get_message(ctx)
+        msg: TrpcMessage = get_message(ctx)
         session_id, stream_id = msg.session_id, msg.stream_id
         if stream_id not in self.stream_conns[session_id]:
             err_msg = self._format_error("the stream does not exist or has been closed", session_id, stream_id)
@@ -187,7 +187,7 @@ class TaskServerStreamTransport(TrpcServerStreamTransport):
         Raises:
             ValueError: No handle is stored for this (session, stream).
         """
-        msg: Message = get_message(ctx)
+        msg: TrpcMessage = get_message(ctx)
         session_id, stream_id = msg.session_id, msg.stream_id
         if stream_id not in self.stream_conns[session_id]:
             err_msg = self._format_error("task stream does not exist or has been closed", session_id, stream_id)
