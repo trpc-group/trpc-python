@@ -4,6 +4,47 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
-from .pb import trpc_pb2
+"""Private inner symbols re-exported for the rest of the SDK.
 
-__all__ = ["trpc_pb2"]
+:class:`MemoryInspector` is resolved lazily: it pulls in tracemalloc,
+and :mod:`trpc_sdk.exceptions` imports ``trpc_pb2`` from this package
+while logging is still initializing.
+"""
+
+from __future__ import annotations
+
+from importlib import import_module
+
+from .pb import trpc_pb2
+from .share_memory import register_spinlock
+from .share_memory import remove_lock_file
+from .share_memory import wait_notify_in_io
+from .share_memory import warm_up
+
+__all__ = [
+    "MemoryInspector",
+    "register_spinlock",
+    "remove_lock_file",
+    "trpc_pb2",
+    "wait_notify_in_io",
+    "warm_up",
+]
+
+
+def __getattr__(name: str):
+    """Load :class:`MemoryInspector` on first access.
+
+    Args:
+        name: Attribute requested on this package.
+
+    Returns:
+        The requested symbol.
+
+    Raises:
+        AttributeError: If ``name`` is not a public export.
+    """
+    if name == "MemoryInspector":
+        value = getattr(import_module(".memory_inspection", package=__name__), name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
