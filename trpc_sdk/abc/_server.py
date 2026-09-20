@@ -71,36 +71,16 @@ class ServiceDesc:
     stream_handler: Any = None
 
 
-class BaseService(ABC):
-    """Define request handling and service registration."""
+class BaseServer(ABC):
+    """Define the server interface: start serving and block."""
 
     @abstractmethod
-    async def handle(self, context: TrpcContext, request: bytes) -> bytes:
-        """Handle one request and return its encoded response.
+    def serve(self) -> None:
+        """Start the server and run until shutdown.
 
         Args:
-            context: Request-scoped RPC context.
-            request: Encoded inbound request bytes.
-
-        Returns:
-            Encoded outbound response bytes.
+            None.
         """
-        ...
-
-    @abstractmethod
-    def register(self, service_desc: ServiceDesc, fix_rpc_name: bool) -> None:
-        """Register unary and streaming handlers for a service.
-
-        Args:
-            service_desc: Service methods and streams to publish.
-            fix_rpc_name: Whether RPC names should be normalized on register.
-        """
-        ...
-
-    @abstractmethod
-    def run(self) -> None:
-        """Start serving registered methods."""
-        ...
 
 
 class BaseServerStream(ABC):

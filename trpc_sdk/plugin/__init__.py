@@ -16,6 +16,7 @@ from ._registry import register_plugin
 from ._registry import register_task
 from ._registry import get_plugin
 from ._registry import get_plugin_class
+from ._registry import get_registered_tasks
 from ._registry import set_plugin_order
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "register_task",
     "get_plugin",
     "get_plugin_class",
+    "get_registered_tasks",
     "set_plugin_order",
     "DEFAULT_PLUGIN_MANAGER",
 ]

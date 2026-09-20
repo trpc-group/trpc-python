@@ -16,7 +16,6 @@ from typing import Any
 from typing import Callable
 from typing import Dict
 from typing import List
-from typing import NamedTuple
 from typing import Optional
 
 
@@ -39,8 +38,10 @@ class TaskInfo:
         on_fork: Optional hook invoked after the worker process forks.
         task_num: Number of worker processes or task instances to start.
         pause_heartbeat: Whether heartbeats should be paused for this task.
-        task_stream_handler: Optional streaming handler descriptor. When set,
-            ``use_c_task`` is forced to ``False``.
+        task_stream_handler: Optional streaming handler descriptor. The
+            runtime type is ``trpc_sdk.task.TaskStreamHandler``; ``Any``
+            avoids a reverse import from ``abc`` into ``trpc_sdk.task``.
+            When set, ``use_c_task`` is forced to ``False``.
     """
 
     name: str
@@ -55,7 +56,7 @@ class TaskInfo:
     on_fork: Optional[Callable[[None], None]] = None
     task_num: int = 1
     pause_heartbeat: bool = False
-    task_stream_handler: Optional[NamedTuple] = None
+    task_stream_handler: Optional[Any] = None
 
     def __post_init__(self):
         """Disable the C-task driver when a stream handler is configured."""

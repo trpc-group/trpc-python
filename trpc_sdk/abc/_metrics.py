@@ -11,7 +11,6 @@ abstract metrics reporter used by pluggable monitoring backends.
 """
 from __future__ import annotations
 
-from abc import ABC
 from abc import abstractmethod
 from dataclasses import dataclass
 from dataclasses import field
@@ -20,6 +19,8 @@ from enum import IntEnum
 from enum import unique
 from typing import Dict
 from typing import List
+
+from ._plugin import BasePlugin
 
 
 @unique
@@ -145,7 +146,7 @@ class CustomData:
     tags: Dict[str, str] = field(default_factory=dict)
 
 
-class BaseMetrics(ABC):
+class BaseMetrics(BasePlugin):
     """Define caller, callee, attribute, and custom metric reporting."""
 
     @abstractmethod

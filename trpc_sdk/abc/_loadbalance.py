@@ -7,14 +7,14 @@
 """Load balancing service selection."""
 from __future__ import annotations
 
-from abc import ABC
 from abc import abstractmethod
 from typing import List
 
 from ._node import Node
+from ._plugin import BasePlugin
 
 
-class BaseLoadBalance(ABC):
+class BaseLoadBalance(BasePlugin):
     """Define load balancing service selection."""
 
     @abstractmethod

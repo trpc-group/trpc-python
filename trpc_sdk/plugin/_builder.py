@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from trpc_sdk.abc import BasePlugin
 from trpc_sdk.abc import PluginInitPos
 from trpc_sdk.abc import PluginType
 
@@ -36,15 +37,21 @@ def init_plugins(pos: Optional[PluginInitPos] = None, without_user_define: bool 
                     continue
                 try:
                     plugin_instance = plugin_info.cls()
-                    plugin_instance.init()
-                    if not plugin_instance.name:
-                        plugin_instance._name = plugin_info.plugin_name
-                    if plugin_instance.type == PluginType.UNKNOWN:
-                        plugin_instance._type = plugin_info.plugin_type
-                    if plugin_instance.init_pos == PluginInitPos.UNKNOWN:
-                        plugin_instance._init_pos = plugin_info.init_pos
-                    plugin_instance.start()
-                    DEFAULT_PLUGIN_MANAGER.set_instance(plugin_instance)
+                    # Only a BasePlugin carries the init/start lifecycle and
+                    # the name/type/init_pos slots. A slot filled by a factory
+                    # function or a Cython extension type has neither, and is
+                    # complete as soon as it is built.
+                    if isinstance(plugin_instance, BasePlugin):
+                        plugin_instance.init()
+                        if not plugin_instance.name:
+                            plugin_instance._name = plugin_info.plugin_name
+                        if plugin_instance.type == PluginType.UNKNOWN:
+                            plugin_instance._type = plugin_info.plugin_type
+                        if plugin_instance.init_pos == PluginInitPos.UNKNOWN:
+                            plugin_instance._init_pos = plugin_info.init_pos
+                        plugin_instance.start()
+                    DEFAULT_PLUGIN_MANAGER.set_instance(plugin_info.plugin_type, plugin_info.plugin_name,
+                                                        plugin_instance)
                 except PluginInitError:
                     # if plugin init error, raise exception
                     raise

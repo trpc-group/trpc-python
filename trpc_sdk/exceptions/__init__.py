@@ -12,10 +12,12 @@ from ._trpc_exception import TrpcException
 from ._trpc_exception import UnknownError
 from ._trpc_exception import create_business_error
 from ._trpc_exception import create_frame_error
+from ._server_exceptions import ServerDecodeError
 from ._server_exceptions import ServerEncodeError
 from ._server_exceptions import ServerFuncNotFoundError
 from ._server_exceptions import ServerSystemError
 from ._server_exceptions import ServerTimeoutError
+from ._exceptions import TaskHandleError
 from ._client_exceptions import ClientConnectionError
 from ._client_exceptions import ClientDecodeError
 from ._client_exceptions import ClientEncodeError
@@ -33,10 +35,12 @@ __all__ = [
     "UnknownError",
     "create_frame_error",
     "create_business_error",
+    "ServerDecodeError",
     "ServerEncodeError",
     "ServerFuncNotFoundError",
     "ServerTimeoutError",
     "ServerSystemError",
+    "TaskHandleError",
     "ClientTimeoutError",
     "ClientConnectionError",
     "ClientEncodeError",

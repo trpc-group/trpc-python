@@ -6,14 +6,18 @@
 
 # cython: language_level=3, boundscheck=False, wraparound=False
 
-from abc import ABC
 from abc import abstractmethod
 from typing import Any
+
+# Imported from the submodule rather than the ``trpc_sdk.abc`` package so
+# this module can be pulled in while that package's ``__init__`` is still
+# executing.
+from trpc_sdk.abc._plugin import BasePlugin
 
 from ._context cimport TrpcContext
 
 
-class BaseCodec(ABC):
+class BaseCodec(BasePlugin):
     """Define the context-first protocol codec interface.
 
     The context owns the message and provides request-scoped metadata. Internal
@@ -47,6 +51,7 @@ class BaseCodec(ABC):
         """
         ...
 
+
 cdef class BaseServerProtocolChecker:
     """Maintain a reusable byte buffer for incremental frame parsing.
 
@@ -70,7 +75,7 @@ cdef class BaseServerProtocolChecker:
         self._buffer.clear()
 
 
-class BaseClientProtocolChecker(ABC):
+class BaseClientProtocolChecker(BasePlugin):
     """Define asynchronous client-side frame reading."""
 
     @abstractmethod

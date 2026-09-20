@@ -9,7 +9,7 @@ from trpc_sdk import config
 from trpc_sdk import plugin
 from trpc_sdk.plugin import PluginType
 from trpc_sdk.plugin import PluginInitPos
-from trpc_sdk.utils.loop_lib import asynclib
+from trpc_sdk.utils import asynclib
 
 
 def getLoglevel(logger):
@@ -50,7 +50,7 @@ def on_worker_start(func):
     return func
 
 
-@plugin.register_plugin(PluginType.ADMIN, 'admin', init_pos=PluginInitPos.MASTER)
+@plugin.register_plugin(PluginType.ADMIN, 'admin', init_pos=PluginInitPos.WORKER)
 class AdminPlugin(plugin.BasePlugin):
 
     def get_config(self, master):

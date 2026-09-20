@@ -3,6 +3,7 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
+
 """TRPC Framework Exception Definitions
 This file contains all exception classes and error codes used in the TRPC framework
 """
@@ -25,6 +26,20 @@ class ServerEncodeError(TrpcException):
             msg: Description of the encode failure
         """
         super().__init__(TrpcErrorType.FRAMEWORK, TrpcErrorCode.TRPC_SERVER_ENCODE_ERR, msg)
+
+
+class ServerDecodeError(TrpcException):
+    """Exception raised when server fails to decode incoming request data"""
+
+    def __init__(self, msg):
+        """
+        Initialize the decode error
+        
+        Args:
+            msg: Description of the decode failure
+        """
+        super().__init__(TrpcErrorType.FRAMEWORK, TrpcErrorCode.TRPC_SERVER_DECODE_ERR, msg)
+
 
 class ServerFuncNotFoundError(TrpcException):
     """Exception raised when requested function/method is not found in service"""

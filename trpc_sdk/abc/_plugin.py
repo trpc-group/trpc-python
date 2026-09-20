@@ -7,18 +7,36 @@
 
 from __future__ import annotations
 
-from abc import ABC 
+from abc import ABC
+from abc import abstractmethod
 from enum import IntEnum
 from enum import unique
 
 
+@unique
 class PluginInitPos(IntEnum):
-    """Plugin start position"""
+    """Process stage that eagerly initializes a plugin.
+
+    A position is only a hint about *when* the plugin manager builds the
+    instance up front. Whatever is not covered by an eager pass is still
+    built on demand the first time ``get_plugin`` asks for it.
+
+    Attributes:
+        UNKNOWN: Not declared. Instances are only built lazily.
+        WORKER: Initialized by ``init_worker_plugins()``, which runs in
+            processes that execute user handlers.
+        TASK: Initialized by ``init_task_plugins()``. Shared by task
+            children and the dispatcher, neither of which runs user
+            handlers, so user-defined plugins are skipped there.
+        TIMER: Reserved for the timer child. Nothing registers or
+            initializes this position today.
+    """
 
     UNKNOWN = 0
     WORKER = 1
     TASK = 2
     TIMER = 3
+
 
 @unique
 class PluginType(IntEnum):
@@ -50,6 +68,8 @@ class PluginType(IntEnum):
     SERVER_FILTER_COMPONENT = 12
 
     CLIENT_FILTER_COMPONENT = 13
+
+    POOL = 14
 
     # plugin - log
     LOG = 50
@@ -138,3 +158,22 @@ class BasePlugin(ABC):
     def stop(self):
         """Stop plugin"""
         return
+
+
+class BasePluginFactory(BasePlugin):
+    """Plugin that hands out per-use instances instead of being one.
+
+    Some plugin slots cannot be filled by a shared singleton: a server
+    transport is bound to one listening socket, and a protocol checker
+    buffers bytes across reads so it belongs to a single connection. The
+    factory itself is what the plugin manager stores and initializes;
+    callers ask it for a fresh object through :meth:`create`.
+    """
+
+    @abstractmethod
+    def create(self):
+        """Return a new instance for the caller to own.
+
+        Returns:
+            A newly built object of whatever type this slot provides.
+        """

@@ -6,6 +6,18 @@
 
 # cython: language_level=3, boundscheck=False, wraparound=False
 
+"""Frame-header parsing and the context / message clone helpers.
+
+The server receive path calls :func:`create_message`, client stubs call
+:func:`clone_client_message`, and stream frames call
+:func:`clone_context_and_message`. Every clone helper returns a
+``(context, message)`` pair and back-fills ``message.context`` so the
+message-first codec interfaces can still reach the context.
+
+Assigning message fields directly bypasses the derived-field setters; the
+copy helpers below go through ``_set_*`` wherever a derived field exists.
+"""
+
 import copy
 
 from libc.stdint cimport uint8_t
@@ -21,12 +33,24 @@ from ._message cimport TrpcMessage
 cdef Py_ssize_t _FRAME_HEAD_SIZE = 16
 
 
-cpdef TrpcFrameHead new_frame_head(
+cpdef TrpcFrameHead create_frame_head(
     uint8_t frame_type,
     uint8_t frame_state,
     uint32_t stream_id,
 ):
-    """Create a frame header with the supplied routing fields."""
+    """Create a frame header with the supplied routing fields.
+
+    ``stx``, ``package_len``, and ``head_len`` stay 0; the pack paths fill
+    them when the frame is serialized.
+
+    Args:
+        frame_type: ``TrpcDataFrameType`` value.
+        frame_state: ``TrpcStreamFrameType`` value, or 0 on unary.
+        stream_id: Stream identifier; 0 on unary.
+
+    Returns:
+        A zeroed header with those three fields set.
+    """
     cdef TrpcFrameHead frame_head = TrpcFrameHead()
     frame_head.frame_type = frame_type
     frame_head.frame_state = frame_state
@@ -92,7 +116,11 @@ cdef inline void _copy_common_message(
     TrpcMessage source,
     TrpcMessage target,
 ) except *:
-    """Copy fields shared by all message-cloning paths."""
+    """Copy fields shared by all message-cloning paths.
+
+    Caller / callee identity, client metadata, and errors are left to the
+    direction-specific helpers below.
+    """
     if source.frame_head is None:
         target.frame_head = None
     else:
@@ -126,6 +154,7 @@ cdef inline void _copy_server_to_client_message(
     else:
         target.client_meta_data = source.server_meta_data.copy()
 
+    # The old callee becomes the caller of the downstream RPC.
     target._set_caller_service_name(source.get_callee_service_name())
     target.caller_app = source.callee_app
     target.caller_server = source.callee_server
@@ -137,7 +166,10 @@ cdef inline void _copy_message(
     TrpcMessage source,
     TrpcMessage target,
 ) except *:
-    """Copy caller and callee routing state for server-side streaming."""
+    """Copy caller and callee routing state without flipping them.
+
+    Successive frames of one stream keep the same identity on both sides.
+    """
     target._set_caller_service_name(source.get_caller_service_name())
     target.caller_app = source.caller_app
     target.caller_server = source.caller_server
@@ -151,45 +183,100 @@ cdef inline void _copy_message(
     target.callee_method = source.callee_method
 
 
-cpdef TrpcContext create_new_context(TrpcContext context):
-    """Clone a context and its message for server-side streaming."""
-    cdef TrpcContext new_context = copy.copy(context)
-    cdef TrpcMessage new_message = TrpcMessage()
-    cdef TrpcMessage source = context.msg
+cpdef tuple create_message(TrpcContext context):
+    """Attach a fresh empty message to ``context`` (server receive entry).
 
-    new_context.msg = new_message
-    if source is None:
-        return new_context
+    Always overwrites ``context.msg``, unlike :func:`get_message`.
 
-    _copy_common_message(source, new_message)
-    _copy_message(source, new_message)
-    return new_context
+    Args:
+        context: Server request context.
 
-
-cpdef TrpcContext create_client_context_from_server(TrpcContext context):
-    """Create a client context and message from a server context."""
-    cdef TrpcContext new_context = copy.copy(context)
-    cdef TrpcMessage new_message = TrpcMessage()
-    cdef TrpcMessage source = context.msg
-
-    new_context.msg = new_message
-    if source is None:
-        return new_context
-
-    _copy_common_message(source, new_message)
-    _copy_server_to_client_message(source, new_message)
-    return new_context
+    Returns:
+        ``(context, message)`` with the same context instance.
+    """
+    cdef TrpcMessage message = TrpcMessage()
+    context.msg = message
+    message.context = context
+    return context, message
 
 
-cpdef TrpcMessage get_or_create_message(TrpcContext context):
-    """Return the context message, creating it on first access."""
+cpdef TrpcMessage get_message(TrpcContext context):
+    """Return ``context.msg``, creating the message on first access.
+
+    Args:
+        context: Context that should own the message.
+
+    Returns:
+        The existing or newly created message.
+    """
+    cdef TrpcMessage message
+
     if context.msg is None:
-        context.msg = TrpcMessage()
+        message = TrpcMessage()
+        context.msg = message
+        message.context = context
     return context.msg
 
 
-cpdef TrpcMessage create_new_message_for_context(TrpcContext context):
-    """Create and attach a new empty message to a context."""
-    cdef TrpcMessage message = TrpcMessage()
-    context.msg = message
-    return message
+cpdef tuple clone_context_and_message(TrpcContext context):
+    """Clone context and message for another frame of the same stream.
+
+    Caller and callee identity are preserved, so the new message describes
+    the same RPC rather than a downstream one.
+
+    Args:
+        context: Source context.
+
+    Returns:
+        ``(new_context, new_message)``; the context is a shallow copy.
+    """
+    cdef TrpcContext new_context = copy.copy(context)
+    cdef TrpcMessage new_message = TrpcMessage()
+    cdef TrpcMessage source = context.msg
+
+    new_context.msg = new_message
+    new_message.context = new_context
+    if source is None:
+        return new_context, new_message
+
+    _copy_common_message(source, new_message)
+    _copy_message(source, new_message)
+    return new_context, new_message
+
+
+cpdef tuple clone_message(TrpcContext context):
+    """Clone context and message for an outbound downstream call.
+
+    The old callee becomes the new caller, so the clone describes the RPC
+    this process is about to issue rather than the one it is serving.
+
+    Args:
+        context: Source context.
+
+    Returns:
+        ``(new_context, new_message)``; the context is a shallow copy.
+    """
+    cdef TrpcContext new_context = copy.copy(context)
+    cdef TrpcMessage new_message = TrpcMessage()
+    cdef TrpcMessage source = context.msg
+
+    new_context.msg = new_message
+    new_message.context = new_context
+    if source is None:
+        return new_context, new_message
+
+    _copy_common_message(source, new_message)
+    _copy_server_to_client_message(source, new_message)
+    return new_context, new_message
+
+
+cpdef tuple clone_client_message(TrpcContext context):
+    """Clone for a client stub; the name generated stubs call.
+
+    Args:
+        context: Source context.
+
+    Returns:
+        The same pair as :func:`clone_message`.
+    """
+    return clone_message(context)
