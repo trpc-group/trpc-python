@@ -1,80 +1,74 @@
-# Tencent is pleased to support the open source community by making tRPC-Agent-Python available.
+# Tencent is pleased to support the open source community by making tRPC-Python available.
 #
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
-# tRPC-Agent-Python is licensed under Apache-2.0.
+# tRPC-Python is licensed under Apache-2.0.
+
+"""Process-local singleton decorator.
+
+:func:`singleton` stores the first constructed instance in a closure
+dict and returns that object on later calls. It is not thread-safe:
+two concurrent first calls can both miss the dict and create two
+instances. Arguments on the second and later calls are ignored, so
+this is not suitable for classes that must vary by constructor args.
 """
-Singleton decorator implementation.
-This module provides a decorator to make a class follow the singleton pattern.
-"""
+
+from __future__ import annotations
+
 from typing import Any
-from typing import Dict
+from typing import Callable
 from typing import Type
+from typing import TypeVar
+
+_T = TypeVar('_T')
 
 
-def singleton(cls):
-    """Decorator function that turns a class into a singleton.
+def singleton(cls: Type[_T]) -> Callable[..., _T]:
+    """Return a factory that constructs ``cls`` at most once.
 
     Args:
-        cls: The class to be decorated as a singleton.
+        cls: Class to wrap. The first call to the factory runs
+            ``cls(*args, **kw)``; later calls return that instance
+            and ignore new arguments.
 
     Returns:
-        A function that controls the instantiation of the class, ensuring only one instance exists.
+        Callable with the same positional / keyword signature as
+        ``cls.__init__`` (minus ``self``).
+
+    Example:
+        @singleton
+        class DatabaseConnection:
+            def __init__(self, connection_string):
+                self.connection_string = connection_string
+
+        db1 = DatabaseConnection("mysql://localhost")
+        db2 = DatabaseConnection("postgres://localhost")
+        assert db1 is db2
+        assert db1.connection_string == "mysql://localhost"
     """
     instances = {}
 
-    def get_instance(*args, **kw):
-        """Inner function that manages the singleton instance.
-
+    def get_instance(*args: Any, **kw: Any) -> _T:
+        """
+        Creates or returns the singleton instance of the decorated class.
+        
+        The first call creates the instance with provided arguments. Subsequent
+        calls ignore the arguments and return the existing instance.
+        
         Args:
-            *args: Positional arguments to pass to the class constructor.
-            **kw: Keyword arguments to pass to the class constructor.
-
+            *args: Positional arguments for the class constructor (only used on first call)
+            **kw: Keyword arguments for the class constructor (only used on first call)
+            
         Returns:
-            The single instance of the decorated class.
+            The singleton instance of the decorated class
+            
+        Note:
+            If called with different arguments after first instantiation,
+            the original instance will still be returned and new arguments
+            will be ignored.
         """
         if cls not in instances:
             instances[cls] = cls(*args, **kw)
         return instances[cls]
 
     return get_instance
-
-
-class SingletonMeta(type):
-    """Metaclass for implementing singleton pattern.
-
-    This metaclass ensures that only one instance exists for each child class.
-    Thread-safe implementation using double-checked locking pattern.
-    """
-
-    _instances: Dict[Type[Any], Any] = {}
-
-    def __call__(cls, *args: Any, **kwargs: Any) -> Any:
-        """Override __call__ to control instance creation.
-
-        Args:
-            *args: Positional arguments for initialization
-            **kwargs: Keyword arguments for initialization
-
-        Returns:
-            The single instance of the class
-        """
-        if cls not in cls._instances:
-            if cls not in cls._instances:
-                instance = super().__call__(*args, **kwargs)
-                cls._instances[cls] = instance
-        return cls._instances[cls]
-
-
-class SingletonBase(metaclass=SingletonMeta):
-    """Base class for singleton implementation.
-
-    Any class inheriting from this will automatically become a singleton.
-    """
-
-    def __init__(self) -> None:
-        """Initialize the singleton instance.
-
-        Note: This will only be called once per child class.
-        """
-        pass
