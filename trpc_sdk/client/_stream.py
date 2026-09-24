@@ -59,7 +59,7 @@ class Stream(BaseClientStreamConnection):
         set_timeout(ctx, msg, self.opts, begin)
 
         rsp = await self.opts.transport.recv(ctx, self.opts.call_options)
-        rsp_body_buf = self.opts.codec.decode(msg, rsp)
+        rsp_body_buf = self.opts.codec.decode_data(ctx, rsp)
         return rsp_body_buf
 
     async def send(self, ctx: TrpcContext, req: object):
@@ -88,7 +88,7 @@ class Stream(BaseClientStreamConnection):
         if req is not None and self.opts.s_control is not None:
             await self.opts.s_control.acquire_window(len(req_body))
 
-        req_buff = self.opts.codec.encode(msg, req_body)
+        req_buff = self.opts.codec.encode_data(ctx, req_body)
 
         self.opts.transport.send(ctx, req_buff, self.opts.call_options)
 

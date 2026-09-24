@@ -19,10 +19,15 @@ Unlike unary :func:`trpc_sdk.codec._cython._codec._common_pack`, this module's
 ``_common_pack`` writes ``head_len = 0`` at offset 8: stream meta lives
 in the body slot, not as a separate protocol head.
 
+``encode_stream`` / ``decode_stream`` are the entry points: they
+branch on ``frame_head.frame_state`` and call one of the per-frame
+methods below. They only pack and unpack; the server INIT meta cache
+stays in :class:`trpc_sdk.codec.ServerCodec`.
+
 ``encode_init_frame`` / ``encode_close_frame`` / ``encode_feedback_frame``
 ignore the ``body`` argument. The payload is ``message.stream_frame``
 serialized. The signature stays aligned with ``encode_data_frame`` so
-:mod:`trpc_sdk.codec._codec` can dispatch all four the same way.
+``encode_stream`` can dispatch all four the same way.
 
 Decode parameters are named ``body`` but are the **complete frame**,
 including the 16-byte head; every decoder slices
@@ -45,6 +50,7 @@ from trpc_sdk.exceptions import ClientEncodeError
 from trpc_sdk.exceptions import ServerEncodeError
 from trpc_sdk.exceptions import TrpcErrorType
 from trpc_sdk.exceptions import TrpcException
+from trpc_sdk.abc._cython cimport _Codec
 from trpc_sdk.abc._cython cimport TrpcFrameHead
 from trpc_sdk.abc._cython cimport TrpcMessage
 from .._constants import DYEING_KEY as _PY_DYEING_KEY
@@ -78,8 +84,66 @@ cdef uint endian_byte_swapper_uint(uint src):
     return (src & 0x000000FFU) << 24 | (src & 0x0000FF00U) << 8 | (src & 0x00FF0000U) >> 8 | (src & 0xFF000000U) >> 24
 
 
-cdef class CClientStreamCodec:
-    """Client-side stream codec: INIT / DATA / CLOSE / FEEDBACK."""
+cdef class _ClientStreamCodec(_Codec):
+    """Client-side stream codec: INIT / DATA / CLOSE / FEEDBACK.
+
+    Stream-only: the entry points are ``encode_stream`` /
+    ``decode_stream``, and ``encode`` / ``decode`` keep the ``_Codec``
+    default. The Python :class:`~trpc_sdk.codec.ClientCodec` plugin holds
+    one instance as ``self.stream_codec``.
+    """
+
+    cpdef object encode_stream(self, TrpcMessage message, object body):
+        """Pack one client stream frame by ``frame_state``.
+
+        Args:
+            message: RPC state; ``frame_head.frame_state`` selects INIT /
+                DATA / CLOSE / FEEDBACK.
+            body: Used for DATA; INIT / CLOSE / FEEDBACK read
+                ``message.stream_frame`` instead.
+
+        Returns:
+            Complete stream frame including the 16-byte head.
+
+        Raises:
+            ValueError: ``frame_state`` is not a known stream sub-type.
+        """
+        frame_state = message.frame_head.frame_state
+        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_INIT:
+            return self.encode_init_frame(message, body)
+        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_DATA:
+            return self.encode_data_frame(message, body)
+        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_CLOSE:
+            return self.encode_close_frame(message, body)
+        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_FEEDBACK:
+            return self.encode_feedback_frame(message, body)
+        raise ValueError(f"client encode_stream unknown stream frame type {frame_state}")
+
+    cpdef object decode_stream(self, TrpcMessage message, object buffer):
+        """Unpack one client stream frame by ``frame_state``.
+
+        Args:
+            message: RPC state; ``frame_head.frame_state`` must already
+                be set from ``buffer``.
+            buffer: Complete stream frame, head included.
+
+        Returns:
+            Stream payload after the 16-byte head, or empty bytes for
+            INIT / CLOSE / FEEDBACK after meta is stored on ``message``.
+
+        Raises:
+            ValueError: ``frame_state`` is not a known stream sub-type.
+        """
+        frame_state = message.frame_head.frame_state
+        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_INIT:
+            return self.decode_init_frame(message, buffer)
+        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_DATA:
+            return self.decode_data_frame(message, buffer)
+        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_CLOSE:
+            return self.decode_close_frame(message, buffer)
+        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_FEEDBACK:
+            return self.decode_feedback_frame(message, buffer)
+        raise ValueError(f"client decode_stream unknown stream frame type {frame_state}")
 
     cpdef bytes encode_init_frame(self, TrpcMessage message, bytes body):
         """Pack a client INIT frame from ``message.stream_frame``.
@@ -95,7 +159,7 @@ cdef class CClientStreamCodec:
             message: Outbound stream state; request_meta is filled from
                 caller / callee / func / trans_info / dyeing / env.
             body: Unused; kept so the four encode methods share a
-                signature for :mod:`trpc_sdk.codec._codec` dispatch.
+                signature for ``encode_stream`` dispatch.
 
         Returns:
             Complete stream frame with ``head_len`` written as 0.
@@ -301,8 +365,67 @@ cdef class CClientStreamCodec:
         return b''
 
 
-cdef class CServerStreamCodec:
-    """Server-side stream codec: INIT / DATA / CLOSE / FEEDBACK."""
+cdef class _ServerStreamCodec(_Codec):
+    """Server-side stream codec: INIT / DATA / CLOSE / FEEDBACK.
+
+    Stream-only: the entry points are ``encode_stream`` /
+    ``decode_stream``, and ``encode`` / ``decode`` keep the ``_Codec``
+    default. The Python :class:`~trpc_sdk.codec.ServerCodec` plugin holds
+    one instance as ``self.stream_codec`` and maintains the INIT meta
+    cache around these calls; nothing here touches that cache.
+    """
+
+    cpdef object encode_stream(self, TrpcMessage message, object body):
+        """Pack one server stream frame by ``frame_state``.
+
+        Args:
+            message: RPC state; ``frame_head.frame_state`` selects INIT /
+                DATA / CLOSE / FEEDBACK.
+            body: Used for DATA; INIT / CLOSE / FEEDBACK read
+                ``message.stream_frame`` instead.
+
+        Returns:
+            Complete stream frame including the 16-byte head.
+
+        Raises:
+            ValueError: ``frame_state`` is not a known stream sub-type.
+        """
+        frame_state = message.frame_head.frame_state
+        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_INIT:
+            return self.encode_init_frame(message, body)
+        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_DATA:
+            return self.encode_data_frame(message, body)
+        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_CLOSE:
+            return self.encode_close_frame(message, body)
+        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_FEEDBACK:
+            return self.encode_feedback_frame(message, body)
+        raise ValueError(f"server encode_stream unknown stream frame type {frame_state}")
+
+    cpdef object decode_stream(self, TrpcMessage message, object buffer):
+        """Unpack one server stream frame by ``frame_state``.
+
+        Args:
+            message: RPC state; ``frame_head.frame_state`` must already
+                be set from ``buffer``.
+            buffer: Complete stream frame, head included.
+
+        Returns:
+            Stream payload after the 16-byte head, or empty bytes for
+            INIT / CLOSE / FEEDBACK.
+
+        Raises:
+            ValueError: ``frame_state`` is not a known stream sub-type.
+        """
+        frame_state = message.frame_head.frame_state
+        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_INIT:
+            return self.decode_init_frame(message, buffer)
+        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_DATA:
+            return self.decode_data_frame(message, buffer)
+        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_CLOSE:
+            return self.decode_close_frame(message, buffer)
+        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_FEEDBACK:
+            return self.decode_feedback_frame(message, buffer)
+        raise ValueError(f"server decode_stream unknown stream frame type {frame_state}")
 
     cpdef bytes encode_init_frame(self, TrpcMessage message, bytes body):
         """Pack a server INIT reply from ``message.stream_frame``.

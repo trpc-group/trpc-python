@@ -9,8 +9,8 @@
 The package holds both halves of the wire path.
 
 The **client half** turns an encoded request into a round trip over a pooled
-connection: :class:`ClientTransport` picks TCP (single-shot or multiplexed) or
-UDP from :class:`RoundTripOptions`, and :class:`ClientConn` keeps the frame
+connection: :class:`ClientTransport` picks TCP or UDP from
+:class:`RoundTripOptions`, and :class:`ClientConn` keeps the frame
 queue for streaming calls.
 
 The **server half** never accepts connections itself. It tells
@@ -35,6 +35,9 @@ The package is split by responsibility:
   ``_client_transport_udp`` and ``_client_transport_stream``
 - :mod:`~trpc_sdk.transport._options` — ``RoundTripOptions`` the client half
   fills per call
+- :mod:`~trpc_sdk.transport._pool` — client connection pools the TCP round
+  trip dials through; a tRPC-Python extension with no cross-language
+  counterpart, so it is scoped to the client transport half
 - :mod:`~trpc_sdk.transport._udp_connection` — datagram endpoint helpers used
   by the UDP round trip
 - :mod:`~trpc_sdk.transport._transport` — ``TrpcServerTransport``:
@@ -87,6 +90,11 @@ from ._factory import TrpcServerTransportFactory
 from ._factory import get_server_transport
 from ._features import is_uvloop_enabled
 from ._options import RoundTripOptions
+from ._pool import ConnAddress
+from ._pool import ConnPoolOptions
+from ._pool import ConnectionPoolManager
+from ._pool import PooledConnection
+from ._pool import get_pool_connection
 from ._scheduler import get_next_worker
 from ._scheduler import register_dispatcher_worker_func
 from ._socket import create_inet_socket
@@ -113,6 +121,12 @@ __all__ = [
     "RequestType",
     "ClientTimeoutReason",
     "RoundTripOptions",
+    # Client connection pool
+    "ConnAddress",
+    "ConnPoolOptions",
+    "ConnectionPoolManager",
+    "PooledConnection",
+    "get_pool_connection",
     # Datagram endpoint helpers
     "open_datagram_endpoint",
     "PacketConnection",

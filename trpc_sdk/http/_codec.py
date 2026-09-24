@@ -21,6 +21,7 @@ import http
 import json
 import os
 import sys
+from typing import Any
 
 from aiohttp import hdrs
 from aiohttp.web_request import CIMultiDictProxy
@@ -33,7 +34,9 @@ from trpc_sdk.abc import BaseCodec
 from trpc_sdk.abc import BaseServerProtocolChecker
 from trpc_sdk.abc import PluginInitPos
 from trpc_sdk.abc import PluginType
+from trpc_sdk.abc import TrpcContext
 from trpc_sdk.abc import TrpcMessage
+from trpc_sdk.abc import get_message
 from trpc_sdk.exceptions import ClientInvokeError
 from trpc_sdk.exceptions import TrpcErrorCode
 from trpc_sdk.exceptions import TrpcErrorType
@@ -41,8 +44,6 @@ from trpc_sdk.exceptions import TrpcException
 from trpc_sdk.plugin import register_plugin
 from trpc_sdk.serialization import SerializationType
 from ._constants import HTTP
-from ._constants import HTTP_REQ_KEY
-from ._constants import HTTP_RSP_KEY
 from ._constants import TRANS_INFO_BASE64_KEY
 from ._context import pop_http_ok_codes
 from ._http_request import HttpClientReqHeader
@@ -67,13 +68,12 @@ class ServerHttpChecker(BaseServerProtocolChecker):
 class ServerHttpCodec(BaseCodec):
     """Server codec: pack RPC results into an aiohttp response.
 
-    ``encode`` writes Content-Type, tRPC error headers and trans_info
-    onto the response already stored on the context. ``decode`` reads
-    the request path, tRPC headers and body (or query string for GET).
+    Overrides the context-first ``encode_data`` / ``decode_data`` pair
+    because both need the aiohttp request / response stored on the
+    context's message. There is no message-first ``encode`` / ``decode``.
     """
 
-    @classmethod
-    def encode(cls, message: TrpcMessage, body: bytes) -> bytes:
+    def encode_data(self, context: TrpcContext, body: bytes) -> bytes:
         """Write status, Content-Type and tRPC headers onto the response.
 
         Does not wrap ``body``; aiohttp sends it as-is after
@@ -81,14 +81,16 @@ class ServerHttpCodec(BaseCodec):
         ``response.body``.
 
         Args:
-            message: Server-side tRPC message.
+            context: Server request context whose message holds the aiohttp
+                request and response as ``server_raw_req`` / ``server_raw_rsp``.
             body: Already-serialized response body.
 
         Returns:
             ``body`` unchanged.
         """
-        request: HttpRequest = message.context.get_meta_data(HTTP_REQ_KEY)
-        response: HttpResponse = message.context.get_meta_data(HTTP_RSP_KEY)
+        message: TrpcMessage = get_message(context)
+        request: HttpRequest = message.server_raw_req
+        response: HttpResponse = message.server_raw_rsp
 
         content_type = response.headers.get(hdrs.CONTENT_TYPE, "")
         if content_type == "":
@@ -118,20 +120,27 @@ class ServerHttpCodec(BaseCodec):
                     http_code = http.HTTPStatus.OK
             response.set_status(http_code.value, http_code.phrase)
 
-        cls.encode_trpc_rsp_header(message, response.headers)
+        self.encode_trpc_rsp_header(context, message, response.headers)
 
         return body
 
     @classmethod
-    def encode_trpc_rsp_header(cls, message: TrpcMessage, rsp_headers: CIMultiDictProxy) -> None:
+    def encode_trpc_rsp_header(
+        cls,
+        context: TrpcContext,
+        message: TrpcMessage,
+        rsp_headers: CIMultiDictProxy,
+    ) -> None:
         """Write tRPC call-type / request-id / trans_info onto ``rsp_headers``.
 
         Args:
+            context: Server request context; supplies the
+                ``TRANS_INFO_BASE64_KEY`` flag.
             message: Server-side tRPC message.
             rsp_headers: aiohttp response headers to mutate.
         """
         trans_info = message.server_meta_data or {}
-        is_base64 = message.context.get_meta_data(TRANS_INFO_BASE64_KEY, False)
+        is_base64 = context.get_meta_data(TRANS_INFO_BASE64_KEY, False)
         if isinstance(message.server_rsp_head, trpc_pb2.ResponseProtocol):
             trpc_rsp: trpc_pb2.ResponseProtocol = message.server_rsp_head
             rsp_headers[HTTP_TRPC_HEADER.trpc_call_type] = str(trpc_rsp.call_type)
@@ -150,8 +159,7 @@ class ServerHttpCodec(BaseCodec):
             trans_info[key] = value
         rsp_headers[HTTP_TRPC_HEADER.trpc_trans_info] = json.dumps(trans_info)
 
-    @classmethod
-    async def decode(cls, message: TrpcMessage, _: bytes) -> bytes:
+    async def decode_data(self, context: TrpcContext, _: bytes) -> bytes:
         """Read path, tRPC headers and body from the aiohttp request.
 
         GET uses the query string as the body and Form serialization;
@@ -159,18 +167,20 @@ class ServerHttpCodec(BaseCodec):
         from Content-Type.
 
         Args:
-            message: Server-side tRPC message.
-            _: Unused; HTTP body is read from the request on ``ctx``.
+            context: Server request context whose message holds the aiohttp
+                request as ``server_raw_req``.
+            _: Unused; HTTP body is read from that request.
 
         Returns:
             Request body bytes (query string for GET).
         """
-        request: HttpRequest = message.context.get_meta_data(HTTP_REQ_KEY)
+        message: TrpcMessage = get_message(context)
+        request: HttpRequest = message.server_raw_req
 
         url_path = request.path
         message.set_server_rpc_name(url_path)
 
-        cls.decode_trpc_req_header(message, request)
+        self.decode_trpc_req_header(context, message, request)
         trpc_req = message.server_req_head
 
         if request.method == hdrs.METH_GET:
@@ -191,10 +201,17 @@ class ServerHttpCodec(BaseCodec):
         return req_body
 
     @classmethod
-    def decode_trpc_req_header(cls, message: TrpcMessage, request: HttpRequest) -> None:
+    def decode_trpc_req_header(
+        cls,
+        context: TrpcContext,
+        message: TrpcMessage,
+        request: HttpRequest,
+    ) -> None:
         """Fill ``trpc_pb2.RequestProtocol`` and TrpcMessage identity from HTTP headers.
 
         Args:
+            context: Server request context; supplies the
+                ``TRANS_INFO_BASE64_KEY`` flag.
             message: Server-side tRPC message.
             request: Incoming aiohttp request.
         """
@@ -239,7 +256,7 @@ class ServerHttpCodec(BaseCodec):
         message.set_dyeing((trpc_req.message_type & trpc_pb2.TRPC_DYEING_MESSAGE) != 0)
 
         trpc_trans_info = headers.get(HTTP_TRPC_HEADER.trpc_trans_info, None)
-        is_base64 = message.context.get_meta_data(TRANS_INFO_BASE64_KEY, False)
+        is_base64 = context.get_meta_data(TRANS_INFO_BASE64_KEY, False)
         if trpc_trans_info:
             trpc_trans_info: dict = json.loads(trpc_trans_info)
             if is_base64:
@@ -266,22 +283,39 @@ class ClientHttpChecker(BaseClientProtocolChecker):
     plugin registration that occupies the ``http`` checker slot.
     """
 
+    async def read_frame(self, connection: Any) -> bytes:
+        """Never called: aiohttp already delivers whole HTTP responses.
+
+        Args:
+            connection: Unused.
+
+        Raises:
+            NotImplementedError: Always; the HTTP client transport reads
+                the response through aiohttp instead of framing bytes.
+        """
+        raise NotImplementedError("HTTP frames are read by aiohttp, not by ClientHttpChecker")
+
 
 @register_plugin(PluginType.CLIENT_CODEC, HTTP, init_pos=PluginInitPos.WORKER)
 class ClientHttpCodec(BaseCodec):
     """Client codec: fill method/caller defaults and decode HTTP errors.
 
-    ``encode`` does not build an HTTP packet. It only creates a
-    :class:`HttpClientReqHeader` when missing (GET for empty body, else
-    POST) and a ``trpc.http.<script>.service`` caller name when the
-    caller identity was never set. ``decode`` maps ``trpc-ret`` /
-    ``trpc-func-ret`` and a non-OK HTTP status onto
-    ``message.client_rsp_err``.
+    ``encode`` is message-first and does not build an HTTP packet: it
+    only creates a :class:`HttpClientReqHeader` when missing (GET for
+    empty body, else POST) and a ``trpc.http.<script>.service`` caller
+    name when the caller identity was never set. Callers go through
+    the base ``encode_data``. ``decode_data`` is context-first because
+    it must ``pop_http_ok_codes`` from the context; there is no
+    matching message-first ``decode``.
     """
 
     @classmethod
     def encode(cls, message: TrpcMessage, body: bytes) -> bytes:
         """Fill default method and caller identity when the caller omitted them.
+
+        Message-first: this method only reads ``client_req_head`` and
+        ``caller_service``, so it does not need the context. The base
+        ``encode_data`` pulls the message and forwards here.
 
         Args:
             message: Client-side tRPC message.
@@ -303,12 +337,15 @@ class ClientHttpCodec(BaseCodec):
 
         return body
 
-    @classmethod
-    def decode(cls, message: TrpcMessage, _: bytes) -> bytes:
+    def decode_data(self, context: TrpcContext, _: bytes) -> bytes:
         """Map HTTP status and tRPC error headers onto ``client_rsp_err``.
 
+        Context-first because the accepted status codes live on the
+        context, not the message.
+
         Args:
-            message: Client-side tRPC message.
+            context: Client call context; the accepted status codes are
+                popped from its meta.
             _: Unused; the body lives on ``client_rsp_head``.
 
         Returns:
@@ -317,6 +354,7 @@ class ClientHttpCodec(BaseCodec):
         Raises:
             ClientInvokeError: ``client_rsp_head`` is missing.
         """
+        message: TrpcMessage = get_message(context)
         rsp_header: HttpClientRspHeader = message.client_rsp_head
         if not rsp_header:
             raise ClientInvokeError("no rsp header")
@@ -344,7 +382,7 @@ class ClientHttpCodec(BaseCodec):
                     headers.get(HTTP_TRPC_HEADER.trpc_error_message, "business error"),
                 ))
 
-        codec_ok = pop_http_ok_codes(message.context)
+        codec_ok = pop_http_ok_codes(context)
         codec_ok.add(http.HTTPStatus.OK)
         if rsp_header.status_code not in codec_ok:
             message.set_client_rsp_err(

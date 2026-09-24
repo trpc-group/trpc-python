@@ -4,12 +4,12 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
-"""Dial a TCP or Unix :class:`~trpc_sdk.pool.Connection`.
+"""Dial a TCP or Unix :class:`~trpc_sdk.transport._pool.Connection`.
 
 :func:`dial_connection` is the shared connect path used by
-:class:`~trpc_sdk.pool.ConnectionPoolManager` (as
+:class:`~trpc_sdk.transport._pool.ConnectionPoolManager` (as
 ``ConnectionPoolManager.dial``) and by
-:class:`~trpc_sdk.pool.ShortConnFactory`. Keeping it
+:class:`~trpc_sdk.transport._pool.ShortConnFactory`. Keeping it
 in this module avoids a cycle between those two files.
 """
 
@@ -31,7 +31,7 @@ async def dial_connection(
         options: BaseClientTransportOption,
         timeout: float,
         loop: BaseEventLoop) -> Connection:
-    """Open a TCP or Unix :class:`~trpc_sdk.pool.Connection`.
+    """Open a TCP or Unix :class:`~trpc_sdk.transport._pool.Connection`.
 
     A connected ``socket.socket`` is adopted. A ``(host, port)``
     pair dials Unix, IPv6, or IPv4 from ``socket_type`` / address
@@ -40,10 +40,10 @@ async def dial_connection(
     Args:
         options: Remote address or connected sock, plus bind hints.
         timeout: Seconds to wait for the connect coroutine.
-        loop: Event loop used by ``open_connection``.
+        loop: Event loop recorded on the new connection.
 
     Returns:
-        A connected :class:`~trpc_sdk.pool.Connection`.
+        A connected :class:`~trpc_sdk.transport._pool.Connection`.
 
     Raises:
         AssertionError: ``address`` is neither a socket nor a

@@ -6,6 +6,9 @@
 
 # cython: language_level=3, boundscheck=False, wraparound=False
 
+from trpc_sdk.utils cimport ms_to_sec
+from trpc_sdk.utils cimport ms_to_us
+
 
 cdef class RpczData:
     """Store RPC scheduling and I/O timestamps in microseconds."""
@@ -64,6 +67,22 @@ cdef class TrpcContext:
             The :class:`TrpcMessage`, or ``None`` before one is attached.
         """
         return self.msg
+
+    cpdef long get_timeout_ms(self):
+        """Return ``timeout`` in milliseconds (the unit it is stored in).
+
+        Pure unit accessor: ``<= 0`` is returned as-is and still means
+        "no limit" to callers.
+        """
+        return self.timeout
+
+    cpdef long get_timeout_us(self):
+        """Return ``timeout`` in microseconds; ``<= 0`` means no limit."""
+        return ms_to_us(self.timeout)
+
+    cpdef double get_timeout_sec(self):
+        """Return ``timeout`` in seconds; ``<= 0`` means no limit."""
+        return ms_to_sec(self.timeout)
 
     def __copy__(self):
         """Return a shallow copy without copying the owned message."""

@@ -11,7 +11,7 @@ from typing import Optional
 
 from trpc_sdk.abc import BaseService
 from .._option import ServiceOption
-from .._registry import RegistryThread
+from .._registry import ServiceRegistrar
 from .._types import QueueWindow
 
 
@@ -22,7 +22,7 @@ class Service(BaseService):
     unary_handlers: Dict[str, Any]  # rpc name -> trpc_sdk.abc.Method
     stream_handlers: Dict[str, Any]  # rpc name -> trpc_sdk.abc.StreamDesc
     queue_window: QueueWindow
-    registry_thread: Optional[RegistryThread]
+    registrar: Optional[ServiceRegistrar]
 
     def __init__(self, service_option: ServiceOption) -> None: ...
 
@@ -40,7 +40,7 @@ class Service(BaseService):
         """HTTP route path; returns the filter-chain result, not a tRPC frame.
 
         Uses ``opt.filters`` directly: the request is already on
-        ``ctx.get_meta_data("request")``, so ``_prepare_filter_chain``
+        ``ctx.msg.server_raw_req``, so ``_prepare_filter_chain``
         (decompress + deserialize) is skipped.
         ``ctx`` is ``trpc_sdk.abc.TrpcContext``.
         """
@@ -60,12 +60,8 @@ class Service(BaseService):
         """Blocking ``listen_and_serve`` on this service's transport."""
         ...
 
-    def start_registry(self) -> None:
-        """No-op if ``opt.registry`` is None; otherwise start a ``RegistryThread``."""
-        ...
-
     def close(self) -> None:
-        """Stop the registry thread if one is running; always returns None."""
+        """Stop ``registrar`` if one was started; always returns None."""
         ...
 
 
@@ -75,14 +71,5 @@ def create_service(service_name: str, service_option: ServiceOption) -> Service:
     Fills in the default transport and transport option when the caller
     omitted them, installs :meth:`Service.handle` unless a handler is
     already set, and binds the service onto ``transport_option``.
-    """
-    ...
-
-
-def start_service_registry(server: Any) -> None:
-    """Start naming-service registration for every service on ``server``.
-
-    :func:`create_server` registers this as a fork hook. ``registry_after_fork``
-    decides whether it runs in the parent before or after fork.
     """
     ...

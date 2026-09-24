@@ -23,6 +23,7 @@ address".
 from __future__ import annotations
 
 import socket
+from typing import Any
 from typing import List
 from typing import Optional
 from typing import Tuple
@@ -63,6 +64,23 @@ class IpDiscovery(BaseDiscovery):
         ip, port = resolve_host(service_name)
         node = Node(service_name=service_name, ip=ip, port=port)
         return [node]
+
+    async def select_node(self, service_name: str, opt: Any) -> Optional[Node]:
+        """Decline direct selection so the selector falls back to :meth:`list`.
+
+        ``service_name`` already is the single address, so there is nothing
+        to pick here. Returning ``None`` makes
+        :class:`~trpc_sdk.naming._trpc_selector.TrpcSelector` run the
+        list, service-router and load-balancer path instead.
+
+        Args:
+            service_name: Ignored.
+            opt: Ignored.
+
+        Returns:
+            Always ``None``.
+        """
+        return None
 
 
 def _safe_gethostbyname(host: str) -> Optional[str]:

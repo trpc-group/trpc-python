@@ -20,6 +20,7 @@ from typing import Dict
 from ._plugin import PluginType
 from ._plugin import BasePlugin
 
+
 class BaseConfig(BasePlugin):
     """Define configuration loading and value access.
 

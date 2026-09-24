@@ -18,7 +18,9 @@ from __future__ import annotations
 HTTP = "http"
 HTTPS = "https"
 
-# Context meta keys that stash the aiohttp Request / Response on a call.
+# Deprecated: the aiohttp Request / Response now live on the message as
+# server_raw_req / server_raw_rsp and are no longer written to context meta.
+# Use get_http_request / get_http_response instead.
 HTTP_REQ_KEY = "request"
 HTTP_RSP_KEY = "response"
 
@@ -46,5 +48,6 @@ HTTP_RSP_OK_CODE_KEY = "__trpc_rsp_http_ok_code"
 # Name of the process-wide reusable aiohttp ClientSession.
 DEFAULT_SESSION_NAME = "default"
 
-# Sentinel dict key used by dict_to_protobuf for protobuf extensions.
-EXTENSION_CONTAINER = "___X"
+# Characters ``str.splitlines`` treats as line boundaries; used by the SSE
+# decoder to tell whether a chunk ends on a complete line.
+SSE_NEWLINE_CHARS = "\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029"

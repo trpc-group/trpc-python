@@ -10,6 +10,7 @@ from ._compatible import wait_for_by_loop
 from ._compatible import sleep_by_loop
 from ._compatible import create_object_with_loop
 from ._compatible import TransportSocket
+from ._maxprocs import get_max_procs
 from ._process_hook import register_at_fork
 from ._process_hook import register_child_callback
 from ._process_hook import execute_before
@@ -30,6 +31,7 @@ __all__ = [
     "sleep_by_loop",
     "create_object_with_loop",
     "TransportSocket",
+    "get_max_procs",
     "register_at_fork",
     "register_child_callback",
     "execute_before",

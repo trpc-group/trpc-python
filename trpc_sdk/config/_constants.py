@@ -41,7 +41,7 @@ DEFAULT_MEMORY_INSPECTION_LINE_LIMIT: int = 50
 # Filename prefix for memory-inspection debug dumps.
 DEFAULT_MEMORY_INSPECTION_FILENAME_PREFIX: str = "tracemalloc"
 
-# Worker count used when automaxprocs cannot determine the CPU quota.
+# Worker count used when neither the cgroup CPU quota nor the CPU count is known.
 DEFAULT_WORKER_NUM_FALLBACK: int = 2
 # Thread count multiplier applied to the resolved CPU core / worker count.
 DEFAULT_THREAD_NUM_PER_CORE: int = 5

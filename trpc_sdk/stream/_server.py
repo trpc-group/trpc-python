@@ -80,7 +80,7 @@ class ServerStream(BaseServerStream):
         feedback_meta.window_size_increment = window
         msg.set_stream_frame(feedback_meta)
 
-        buf_data = self.opts.codec.encode(msg, None)
+        buf_data = self.opts.codec.encode_data(ctx, None)
         self.opts.stream_transport.send(ctx, buf_data, self.stream_id)
 
     def set_send_control(self, msg: TrpcMessage) -> int:
@@ -172,7 +172,7 @@ class ServerStream(BaseServerStream):
         if buf is not None and self.s_control is not None:
             await self.s_control.acquire_window(len(buf))
 
-        buf_data = self.opts.codec.encode(new_msg, buf)
+        buf_data = self.opts.codec.encode_data(new_ctx, buf)
         self.opts.stream_transport.send(new_ctx, buf_data, self.stream_id)
 
     async def recv_msg(self, body: object):
@@ -218,7 +218,7 @@ class ServerStream(BaseServerStream):
         close.msg = str.encode(ret_msg)
         new_msg.set_stream_frame(close)
 
-        buf_data = self.opts.codec.encode(new_msg, None)
+        buf_data = self.opts.codec.encode_data(new_ctx, None)
         self.opts.stream_transport.send(new_ctx, buf_data, self.stream_id)
 
     def context(self) -> TrpcContext:
@@ -429,7 +429,7 @@ class StreamDispatcher:
             init_meta.init_window_size = server_window
         new_msg.set_stream_frame(init_meta)
 
-        rsp_buf = self.opts.codec.encode(new_msg, None)
+        rsp_buf = self.opts.codec.encode_data(new_ctx, None)
         self.opts.stream_transport.send(new_ctx, rsp_buf, stream_id)
 
         loop = get_or_create_event_loop()

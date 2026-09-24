@@ -54,6 +54,8 @@ cdef class TrpcMessage:
         public object server_rsp_head        # Protocol-specific outbound response header.
         public object client_req_head        # Protocol-specific downstream request header.
         public object client_rsp_head        # Protocol-specific downstream response header.
+        public object server_raw_req         # Protocol-native inbound request object (e.g. aiohttp Request).
+        public object server_raw_rsp         # Protocol-native outbound response object (e.g. aiohttp Response).
         public str caller_app
         public str caller_server
         public str caller_service
@@ -76,11 +78,6 @@ cdef class TrpcMessage:
         public int session_id                # Stateful transport session identifier.
         public bytes request_attachment      # Opaque request attachment.
         public bytes response_attachment     # Opaque response attachment.
-
-        # Transitional back-reference to the owning TrpcContext. Runtime
-        # ownership is one-way (context owns message); this field only exists
-        # until the codec interfaces take a TrpcContext instead of a message.
-        public object context
 
         # These source names require semantic setters because changing them also
         # updates parsed or derived fields. Their backing storage remains private.
@@ -131,6 +128,8 @@ cdef class TrpcMessage:
     cpdef void set_server_rsp_head(self, object server_rsp_head) except *
     cpdef void set_client_req_head(self, object client_req_head) except *
     cpdef void set_client_rsp_head(self, object client_rsp_head) except *
+    cpdef void set_server_raw_req(self, object server_raw_req) except *
+    cpdef void set_server_raw_rsp(self, object server_raw_rsp) except *
     cpdef void set_local_addr(self, str local_addr) except *
     cpdef void set_remote_addr(self, str remote_addr) except *
     cpdef void set_logger(self, str logger) except *

@@ -328,7 +328,9 @@ class ServiceOption:
         """Set how long a request may wait in the server queue.
 
         Args:
-            queue_wait_timeout: Timeout in milliseconds; 0 disables the check.
+            queue_wait_timeout: Timeout in milliseconds; 0 falls back to the
+                merged handler timeout, so the check is off only when that
+                is unlimited too.
         """
         self.queue_wait_timeout = queue_wait_timeout
 

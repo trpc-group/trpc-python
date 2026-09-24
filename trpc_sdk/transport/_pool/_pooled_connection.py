@@ -4,13 +4,13 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
-"""Pooled wrapper around a :class:`~trpc_sdk.pool.Connection`.
+"""Pooled wrapper around a :class:`~trpc_sdk.transport._pool.Connection`.
 
 Callers receive a :class:`PooledConnection` from
-:func:`~trpc_sdk.pool.get_pool_connection`. ``close()`` returns it
-to the pool; ``force_close()`` tears down the socket. ``read`` /
-``write`` failures call ``pool.put(self, True)`` before re-raising so a
-broken conn is not reused.
+:func:`~trpc_sdk.transport._pool.get_pool_connection`. ``close()``
+returns it to the pool; ``force_close()`` tears down the socket.
+``read`` / ``write`` failures call ``pool.put(self, True)`` before
+re-raising so a broken conn is not reused.
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ from __future__ import annotations
 import time
 
 from trpc_sdk.abc import AddrType
-from trpc_sdk.abc import BasePool
 from trpc_sdk.exceptions import ClientPoolConnClosedError
 from trpc_sdk.log import logger
 from trpc_sdk.telemetry import report_attr
@@ -26,6 +25,7 @@ from trpc_sdk.utils import close_socket
 from trpc_sdk.utils import is_close_wait
 from trpc_sdk.utils import is_valid_socket
 
+from ._base import BasePool
 from ._tcp_connection import Connection
 
 
@@ -37,7 +37,8 @@ class PooledConnection:
     and used for ``max_conn_lifetime``.
 
     Args:
-        conn: Underlying stream connection from :mod:`trpc_sdk.pool._tcp_connection`.
+        conn: Underlying stream connection from
+            :mod:`trpc_sdk.transport._pool._tcp_connection`.
         pool: Pool (or short-conn factory) that will take this conn
             back on ``close`` / I/O error.
         address: Remote this conn was dialed to, used in close logs.
@@ -67,7 +68,7 @@ class PooledConnection:
 
     @property
     def stream_conn(self) -> Connection:
-        """Underlying :class:`~trpc_sdk.pool.Connection`."""
+        """Underlying :class:`~trpc_sdk.transport._pool.Connection`."""
         return self._conn
 
     def check_remote_error(self) -> bool:

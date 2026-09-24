@@ -10,8 +10,8 @@
 
 Packs ``trpc_pb2.RequestProtocol`` / ``trpc_pb2.ResponseProtocol`` after the 16-byte frame
 head. Stream frames live in :mod:`trpc_sdk.codec._cython._codec_stream`. Python
-:class:`~trpc_sdk.codec.ClientCodec` / ``ServerCodec`` dispatch unary
-here and stream there.
+:class:`~trpc_sdk.codec.ClientCodec` / ``ServerCodec`` hold one codec of
+each kind and dispatch unary here and stream there.
 
 Wire layout produced by :func:`_common_pack`::
 
@@ -34,6 +34,7 @@ from trpc_sdk.exceptions import ClientEncodeError
 from trpc_sdk.exceptions import ServerDecodeError
 from trpc_sdk.exceptions import TrpcErrorType
 from trpc_sdk.exceptions import TrpcException
+from trpc_sdk.abc._cython cimport _Codec
 from trpc_sdk.abc._cython cimport TrpcFrameHead
 from trpc_sdk.abc._cython cimport TrpcMessage
 from trpc_sdk.abc._cython cimport parse_frame_head
@@ -53,15 +54,20 @@ ctypedef unsigned short ushort
 ctypedef unsigned char uchar
 
 
-cdef class CClientCodec:
+cdef class _ClientCodec(_Codec):
     """Client-side unary codec: request encode and response decode.
+
+    Handles unary frames only. The Python
+    :class:`~trpc_sdk.codec.ClientCodec` plugin holds one instance as
+    ``self.codec`` and sends stream frames to the stream codec instead,
+    so ``encode_stream`` / ``decode_stream`` keep the ``_Codec`` default.
 
     ``request_id`` is a per-instance counter incremented on each
     ``encode``. It wraps at ``UINT32_MAX_VALUE`` and is not unique
     across processes or codec instances.
     """
 
-    cpdef bytes encode(self, TrpcMessage message, bytes body):
+    cpdef object encode(self, TrpcMessage message, object body):
         """Pack a client request body into a unary tRPC frame.
 
         If ``message.client_req_head`` is already a
@@ -160,7 +166,7 @@ cdef class CClientCodec:
         return _common_pack(req_head, message.frame_head, body, message.request_attachment)
 
 
-    cpdef bytes decode(self, TrpcMessage message, bytes buffer):
+    cpdef object decode(self, TrpcMessage message, object buffer):
         """Unpack a unary response frame into the message and body.
 
         Reuses ``message.client_rsp_head`` when the caller already
@@ -252,7 +258,7 @@ cdef class CClientCodec:
     cpdef void update_msg_by_msg(self, TrpcMessage origin_message, TrpcMessage target_message):
         """Copy a decoded response from a temporary message onto the request.
 
-        Multiplexed receive builds a scratch message, then moves the
+        For callers that decode into a scratch message and then move the
         head, frame, compress / serialize types, trans_info, error, and
         attachment onto the original request message. Equivalent to the
         second half of ``_unpack`` without touching the body.
@@ -285,10 +291,15 @@ cdef class CClientCodec:
         return
     
 
-cdef class CServerCodec:
-    """Server-side unary codec: request decode and response encode."""
+cdef class _ServerCodec(_Codec):
+    """Server-side unary codec: request decode and response encode.
 
-    cpdef bytes encode(self, TrpcMessage message, bytes body):
+    Handles unary frames only. The Python
+    :class:`~trpc_sdk.codec.ServerCodec` plugin holds one instance as
+    ``self.codec``; stream frames and the INIT meta cache live elsewhere.
+    """
+
+    cpdef object encode(self, TrpcMessage message, object body):
         """Pack a server response body into a unary tRPC frame.
 
         ``server_rsp_err`` is mapped onto the protocol head:
@@ -325,7 +336,7 @@ cdef class CServerCodec:
         return _common_pack(rsp_head, message.frame_head, body, message.response_attachment)
 
 
-    cpdef bytes decode(self, TrpcMessage message, bytes buffer):
+    cpdef object decode(self, TrpcMessage message, object buffer):
         """Unpack a unary request frame and seed the response head.
 
         After ``_unpack``, a ``trpc_pb2.ResponseProtocol`` is built by copying

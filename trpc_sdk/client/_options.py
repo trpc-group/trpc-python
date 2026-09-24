@@ -35,9 +35,9 @@ from trpc_sdk.config import SocketType
 from trpc_sdk.filters import FilterChain
 from trpc_sdk.filters import get_client_filter
 from trpc_sdk.naming import TrpcSelector
-from trpc_sdk.pool import ConnPoolOptions
 from trpc_sdk.serialization import SerializationType
 from trpc_sdk.transport import ClientTransport
+from trpc_sdk.transport import ConnPoolOptions
 from trpc_sdk.transport import RoundTripOptions
 from trpc_sdk.transport import get_client_transport
 from trpc_sdk.transport import get_default_client_transport
@@ -81,7 +81,6 @@ class Options:
         self.call_options = RoundTripOptions()
 
         self.codec = None
-        self.enable_multiplexed: bool = False
 
         self.current_serialization_type: int = -1
         self.serialization_type: int = -1
@@ -385,14 +384,6 @@ class Options:
 
         def apply(opts: Options):
             opts.call_options.set_disable_reuse_http_session(disable_reuse_http_session)
-
-        return self._record(apply)
-
-    def set_enable_multiplexed(self, enable: bool) -> "Options":
-        """Enable or disable connection multiplexing."""
-
-        def apply(opts: Options):
-            opts.enable_multiplexed = enable
 
         return self._record(apply)
 

@@ -6,10 +6,13 @@
 
 """Unary/stream dispatch layer for the ``"trpc"`` codec plugins.
 
-``ClientCodec`` and ``ServerCodec`` own no packing logic of their own:
-they read ``frame_head.frame_type`` / ``frame_state`` and forward to the
-Cython unary codec in :mod:`trpc_sdk.codec._cython._codec` or the stream codec in
-:mod:`trpc_sdk.codec._cython._codec_stream`.
+``ClientCodec`` and ``ServerCodec`` own no packing logic of their own.
+Each subclasses :class:`~trpc_sdk.abc.BaseCodec` only and holds two Cython
+codecs by composition: ``self.codec`` for unary frames
+(:mod:`trpc_sdk.codec._cython._codec`) and ``self.stream_codec`` for stream
+frames (:mod:`trpc_sdk.codec._cython._codec_stream`). This layer reads
+``frame_head.frame_type`` to choose between them; the stream codec branches
+on ``frame_state`` itself. The server INIT meta cache lives here.
 
 Protocol checkers and the ``get_*`` plugin lookups live in
 :mod:`trpc_sdk.codec._factory`.
@@ -18,43 +21,49 @@ Protocol checkers and the ``get_*`` plugin lookups live in
 from typing import Dict
 
 from trpc_sdk._inner import trpc_pb2
+from trpc_sdk.abc import BaseCodec
 from trpc_sdk.abc import PluginInitPos
 from trpc_sdk.abc import PluginType
 from trpc_sdk.abc import TrpcFrameHead
 from trpc_sdk.abc import TrpcMessage
 from trpc_sdk.abc import parse_frame_head
 from trpc_sdk.exceptions import ClientDecodeError
+from trpc_sdk.exceptions import ServerDecodeError
 from trpc_sdk.exceptions import ServerSystemError
 from trpc_sdk.plugin import register_plugin
 from ._constants import FRAME_HEAD_LEN
-from ._cython import CClientCodec
-from ._cython import CClientStreamCodec
-from ._cython import CServerCodec
-from ._cython import CServerStreamCodec
+from ._cython import _ClientCodec
+from ._cython import _ClientStreamCodec
+from ._cython import _ServerCodec
+from ._cython import _ServerStreamCodec
 from ._types import StreamInitMeta
 
 
-ClientCodecImpl = CClientCodec
-
-
 @register_plugin(PluginType.CLIENT_CODEC, "trpc", init_pos=PluginInitPos.WORKER)
-class ClientCodec(CClientCodec):
+class ClientCodec(BaseCodec):
     """Client-side ``"trpc"`` codec: unary vs stream dispatch.
 
     Owns no packing logic. ``frame_head.frame_type`` selects
-    :class:`CClientCodec` (unary) or :class:`CClientStreamCodec`
-    (INIT / DATA / CLOSE / FEEDBACK).
+    ``self.codec`` (:class:`_ClientCodec`, unary) or ``self.stream_codec``
+    (:class:`_ClientStreamCodec`, INIT / DATA / CLOSE / FEEDBACK).
+    ``request_id`` / ``update_msg_by_msg`` live on ``self.codec``, not on
+    this plugin.
+
+    :meth:`encode` / :meth:`decode` stay message-first. Callers use the
+    :class:`BaseCodec` ``encode_data`` / ``decode_data`` entry points,
+    which pull the message from the context.
     """
 
     def __init__(self):
-        self.codec = CClientCodec()
-        self.stream_codec = CClientStreamCodec()
+        super().__init__()
+        self.codec = _ClientCodec()
+        self.stream_codec = _ClientStreamCodec()
 
     def encode(self, message: TrpcMessage, body: bytes) -> bytes:
         """Dispatch unary or stream encode for an outbound client frame.
 
-        Unary frames go to :class:`CClientCodec`. Stream frames go to
-        :meth:`encode_stream`, which branches on ``frame_state``.
+        Unary frames go to ``self.codec``. Stream frames go to
+        :meth:`encode_stream`.
 
         Args:
             message: RPC state; ``frame_head.frame_type`` selects the path.
@@ -73,7 +82,7 @@ class ClientCodec(CClientCodec):
         return self.codec.encode(message, body)
 
     def encode_stream(self, message: TrpcMessage, body: bytes) -> bytes:
-        """Pack one client stream frame by ``frame_state``.
+        """Pack one client stream frame via ``self.stream_codec``.
 
         Args:
             message: RPC state; ``frame_head.frame_state`` selects INIT /
@@ -87,23 +96,14 @@ class ClientCodec(CClientCodec):
         Raises:
             ValueError: ``frame_state`` is not a known stream sub-type.
         """
-        frame_state = message.frame_head.frame_state
-        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_INIT:
-            return self.stream_codec.encode_init_frame(message, body)
-        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_DATA:
-            return self.stream_codec.encode_data_frame(message, body)
-        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_CLOSE:
-            return self.stream_codec.encode_close_frame(message, body)
-        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_FEEDBACK:
-            return self.stream_codec.encode_feedback_frame(message, body)
-        raise ValueError(f"client encode_stream unknown stream frame type {frame_state}")
+        return self.stream_codec.encode_stream(message, body)
 
     def decode(self, message: TrpcMessage, body: bytes) -> bytes:
         """Dispatch unary or stream decode for an inbound client frame.
 
         The first 16 bytes are parsed so a stream reply can set
         ``frame_head`` / ``stream_id`` before :meth:`decode_stream`.
-        Unary frames go to :class:`CClientCodec`.
+        Unary frames go to ``self.codec``.
 
         Args:
             message: RPC state updated from the frame head and protocol.
@@ -128,7 +128,7 @@ class ClientCodec(CClientCodec):
         return self.codec.decode(message, body)
 
     def decode_stream(self, message: TrpcMessage, body: bytes) -> bytes:
-        """Unpack one client stream frame by ``frame_state``.
+        """Unpack one client stream frame via ``self.stream_codec``.
 
         Args:
             message: RPC state; ``frame_head.frame_state`` must already
@@ -142,32 +142,29 @@ class ClientCodec(CClientCodec):
         Raises:
             ValueError: ``frame_state`` is not a known stream sub-type.
         """
-        frame_state = message.frame_head.frame_state
-        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_INIT:
-            return self.stream_codec.decode_init_frame(message, body)
-        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_DATA:
-            return self.stream_codec.decode_data_frame(message, body)
-        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_CLOSE:
-            return self.stream_codec.decode_close_frame(message, body)
-        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_FEEDBACK:
-            return self.stream_codec.decode_feedback_frame(message, body)
-        raise ValueError(f"client decode_stream unknown stream frame type {frame_state}")
+        return self.stream_codec.decode_stream(message, body)
 
 
 @register_plugin(PluginType.SERVER_CODEC, "trpc", init_pos=PluginInitPos.WORKER)
-class ServerCodec(CServerCodec):
+class ServerCodec(BaseCodec):
     """Server-side ``"trpc"`` codec: unary vs stream dispatch.
 
-    Owns no packing logic. Unary frames go to :class:`CServerCodec`.
-    Stream frames go to :class:`CServerStreamCodec`. INIT meta is
-    cached per ``session_id`` / ``stream_id`` so later DATA / CLOSE /
-    FEEDBACK frames can restore ``server_rpc_name``. A successful
-    CLOSE encode drops that cache entry.
+    Owns no packing logic. Unary frames go to ``self.codec``
+    (:class:`_ServerCodec`); stream frames go to ``self.stream_codec``
+    (:class:`_ServerStreamCodec`). INIT meta is cached here per
+    ``session_id`` / ``stream_id`` so later DATA / CLOSE / FEEDBACK
+    frames can restore ``server_rpc_name``. A successful CLOSE encode
+    drops that cache entry.
+
+    :meth:`encode` / :meth:`decode` stay message-first, as do the
+    meta-cache helpers. Callers use the :class:`BaseCodec`
+    ``encode_data`` / ``decode_data`` entry points.
     """
 
     def __init__(self):
-        self.codec = CServerCodec()
-        self.stream_codec = CServerStreamCodec()
+        super().__init__()
+        self.codec = _ServerCodec()
+        self.stream_codec = _ServerStreamCodec()
         self.init_metas: Dict[int, Dict[int, StreamInitMeta]] = {}
 
     def store_init_meta(self, msg: TrpcMessage, init_meta: StreamInitMeta):
@@ -230,7 +227,7 @@ class ServerCodec(CServerCodec):
     def encode(self, message: TrpcMessage, body: bytes) -> bytes:
         """Dispatch unary or stream encode for an outbound server frame.
 
-        Unary frames go to :class:`CServerCodec`. Stream frames go to
+        Unary frames go to ``self.codec``. Stream frames go to
         :meth:`encode_stream`.
 
         Args:
@@ -250,7 +247,7 @@ class ServerCodec(CServerCodec):
         return self.codec.encode(message, body)
 
     def encode_stream(self, message: TrpcMessage, body: bytes) -> bytes:
-        """Pack one server stream frame by ``frame_state``.
+        """Pack one server stream frame via ``self.stream_codec``.
 
         A successful CLOSE pack also calls :meth:`delete_init_meta`.
 
@@ -266,18 +263,10 @@ class ServerCodec(CServerCodec):
         Raises:
             ValueError: ``frame_state`` is not a known stream sub-type.
         """
-        frame_state = message.frame_head.frame_state
-        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_INIT:
-            return self.stream_codec.encode_init_frame(message, body)
-        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_DATA:
-            return self.stream_codec.encode_data_frame(message, body)
-        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_CLOSE:
-            rsp = self.stream_codec.encode_close_frame(message, body)
+        rsp = self.stream_codec.encode_stream(message, body)
+        if message.frame_head.frame_state == trpc_pb2.TRPC_STREAM_FRAME_CLOSE:
             self.delete_init_meta(message)
-            return rsp
-        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_FEEDBACK:
-            return self.stream_codec.encode_feedback_frame(message, body)
-        raise ValueError(f"server encode_stream unknown stream frame type {frame_state}")
+        return rsp
 
     async def decode(self, message: TrpcMessage, body: bytes) -> bytes:
         """Dispatch unary or stream decode for an inbound server frame.
@@ -295,12 +284,12 @@ class ServerCodec(CServerCodec):
             Decoded application body (unary) or stream payload.
 
         Raises:
-            ClientDecodeError: Frame shorter than 16 bytes.
+            ServerDecodeError: Frame shorter than 16 bytes.
             ValueError: Stream ``frame_state`` is not INIT / DATA / CLOSE /
                 FEEDBACK.
         """
         if len(body) < FRAME_HEAD_LEN:
-            raise ClientDecodeError("client decode rsp buf len invalid")
+            raise ServerDecodeError("server decode req buf len invalid")
 
         frame_head: TrpcFrameHead = parse_frame_head(body[:16])
         if frame_head.frame_type != trpc_pb2.TRPC_UNARY_FRAME:
@@ -311,7 +300,7 @@ class ServerCodec(CServerCodec):
         return self.codec.decode(message, body)
 
     def decode_stream(self, message: TrpcMessage, body: bytes) -> bytes:
-        """Unpack one server stream frame by ``frame_state``.
+        """Unpack one server stream frame via ``self.stream_codec``.
 
         INIT stores ``message.stream_frame`` in the cache. DATA / CLOSE /
         FEEDBACK restore ``server_rpc_name`` via :meth:`set_init_meta`.
@@ -329,21 +318,9 @@ class ServerCodec(CServerCodec):
             ServerSystemError: DATA / CLOSE / FEEDBACK with no cached INIT.
             ValueError: ``frame_state`` is not a known stream sub-type.
         """
-        frame_state = message.frame_head.frame_state
-        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_INIT:
-            rsp = self.stream_codec.decode_init_frame(message, body)
+        rsp = self.stream_codec.decode_stream(message, body)
+        if message.frame_head.frame_state == trpc_pb2.TRPC_STREAM_FRAME_INIT:
             self.store_init_meta(message, message.stream_frame)
-            return rsp
-        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_DATA:
-            rsp = self.stream_codec.decode_data_frame(message, body)
+        else:
             self.set_init_meta(message)
-            return rsp
-        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_CLOSE:
-            rsp = self.stream_codec.decode_close_frame(message, body)
-            self.set_init_meta(message)
-            return rsp
-        if frame_state == trpc_pb2.TRPC_STREAM_FRAME_FEEDBACK:
-            rsp = self.stream_codec.decode_feedback_frame(message, body)
-            self.set_init_meta(message)
-            return rsp
-        raise ValueError(f"server decode_stream unknown stream frame type {frame_state}")
+        return rsp

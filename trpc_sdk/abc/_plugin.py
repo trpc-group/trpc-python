@@ -69,8 +69,6 @@ class PluginType(IntEnum):
 
     CLIENT_FILTER_COMPONENT = 13
 
-    POOL = 14
-
     # plugin - log
     LOG = 50
 

@@ -46,4 +46,16 @@ class TrpcContext:
 
     def get_client_message(self) -> Optional[TrpcMessage]: ...
 
+    def get_timeout_ms(self) -> int:
+        """``timeout`` in milliseconds; ``<= 0`` means no limit."""
+        ...
+
+    def get_timeout_us(self) -> int:
+        """``timeout`` in microseconds; ``<= 0`` means no limit."""
+        ...
+
+    def get_timeout_sec(self) -> float:
+        """``timeout`` in seconds; ``<= 0`` means no limit."""
+        ...
+
     def __copy__(self) -> "TrpcContext": ...

@@ -7,7 +7,7 @@
 """``application/x-www-form-urlencoded`` serializer.
 
 GET query strings and form bodies are parsed with ``parse_qs`` and
-written onto a protobuf message via :func:`dict_to_protobuf`.
+written onto a protobuf message via :func:`trpc_sdk.utils.dict_to_protobuf`.
 Serialize reuses the JSON serializer so the response side stays
 JSON-shaped.
 """
@@ -25,7 +25,7 @@ from trpc_sdk.exceptions import ServerDecodeError
 from trpc_sdk.plugin import register_plugin
 from trpc_sdk.serialization import SerializationType
 from trpc_sdk.serialization import get_serializer
-from ._dict_pb_convertor import dict_to_protobuf
+from trpc_sdk.utils import dict_to_protobuf
 
 
 @register_plugin(PluginType.SERIALIZATION, SerializationType.Form, init_pos=PluginInitPos.WORKER)

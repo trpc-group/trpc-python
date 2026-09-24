@@ -59,7 +59,7 @@ from ._option import ServerOption
 from ._option import ServiceOption
 from ._cython import Service
 from ._cython import create_service
-from ._cython import start_service_registry
+from ._registry import start_service_registry
 from ._signals import run_server_signal_handle
 from ._utils import save_bind_info
 

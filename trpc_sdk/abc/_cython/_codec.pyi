@@ -6,19 +6,57 @@
 
 from abc import abstractmethod
 from typing import Any
+from typing import Optional
 
 from trpc_sdk.abc import BasePlugin
 from ._context import TrpcContext
+from ._message import TrpcMessage
 
 
-class BaseCodec(BasePlugin):
-    """Context-first protocol codec interface."""
+class _Codec:
+    """Private C-level codec root; framework Cython codecs inherit it.
 
-    @abstractmethod
-    def encode_data(self, context: TrpcContext, body: bytes) -> bytes: ...
+    Every hook raises ``NotImplementedError`` until a subclass overrides
+    it. Unary codecs implement ``encode`` / ``decode``; stream codecs
+    implement ``encode_stream`` / ``decode_stream``. Not exported from
+    ``trpc_sdk.abc``.
+    """
 
-    @abstractmethod
-    def decode_data(self, context: TrpcContext, buffer: bytes) -> bytes: ...
+    def encode(self, message: TrpcMessage, body: Optional[bytes]) -> Any: ...
+
+    def decode(self, message: TrpcMessage, buffer: Optional[bytes]) -> Any: ...
+
+    def encode_stream(self, message: TrpcMessage, body: Optional[bytes]) -> Any: ...
+
+    def decode_stream(self, message: TrpcMessage, buffer: Optional[bytes]) -> Any: ...
+
+
+class BaseCodec(_Codec, BasePlugin):
+    """Public codec plugin base, message-first hooks plus context-first entries.
+
+    The message-first hooks, including the stream pair, come from
+    :class:`_Codec`. No method is abstract: ``encode_data`` /
+    ``decode_data`` have working defaults that forward to the
+    message-first pair, and a codec that implements only one half of
+    either pair stays constructible with the missing half raising
+    ``NotImplementedError`` when first called. ``decode`` /
+    ``decode_data`` may also be coroutine functions; the caller decides
+    whether to ``await`` them.
+    """
+
+    def __init__(self) -> None: ...
+
+    def encode(self, message: TrpcMessage, body: Optional[bytes]) -> bytes: ...
+
+    def decode(self, message: TrpcMessage, buffer: Optional[bytes]) -> Any: ...
+
+    def encode_stream(self, message: TrpcMessage, body: Optional[bytes]) -> bytes: ...
+
+    def decode_stream(self, message: TrpcMessage, buffer: Optional[bytes]) -> Any: ...
+
+    def encode_data(self, context: TrpcContext, body: Optional[bytes]) -> bytes: ...
+
+    def decode_data(self, context: TrpcContext, buffer: Optional[bytes]) -> Any: ...
 
 
 class BaseServerProtocolChecker:

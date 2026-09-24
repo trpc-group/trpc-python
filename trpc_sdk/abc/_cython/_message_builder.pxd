@@ -27,8 +27,8 @@ cpdef TrpcFrameHead create_frame_head(
 )
 cpdef TrpcFrameHead parse_frame_head(bytes data)
 
-# Every clone returns a (context, message) tuple and back-fills
-# message.context; get_message returns the message alone.
+# Every clone returns a (context, message) tuple; get_message returns the
+# message alone, attaching one to the context on first access.
 cpdef tuple create_message(TrpcContext context)
 cpdef TrpcMessage get_message(TrpcContext context)
 cpdef tuple clone_context_and_message(TrpcContext context)

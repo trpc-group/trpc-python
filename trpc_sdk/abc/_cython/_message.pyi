@@ -28,13 +28,8 @@ class TrpcFrameHead:
 
 
 class TrpcMessage:
-    """Protocol-independent RPC message data.
+    """Protocol-independent RPC message data."""
 
-    ``context`` is transitional and disappears once the codec interfaces take
-    a ``TrpcContext`` instead of a message.
-    """
-
-    context: Any
     frame_head: TrpcFrameHead
     timeout: int
     serialization_type: int
@@ -50,6 +45,8 @@ class TrpcMessage:
     server_rsp_head: Any
     client_req_head: Any
     client_rsp_head: Any
+    server_raw_req: Any
+    server_raw_rsp: Any
     caller_app: str
     caller_server: str
     caller_service: str
@@ -124,6 +121,8 @@ class TrpcMessage:
     def set_server_rsp_head(self, server_rsp_head: Any) -> None: ...
     def set_client_req_head(self, client_req_head: Any) -> None: ...
     def set_client_rsp_head(self, client_rsp_head: Any) -> None: ...
+    def set_server_raw_req(self, server_raw_req: Any) -> None: ...
+    def set_server_raw_rsp(self, server_raw_rsp: Any) -> None: ...
     def set_local_addr(self, local_addr: str) -> None: ...
     def set_remote_addr(self, remote_addr: str) -> None: ...
     def set_logger(self, logger: str) -> None: ...

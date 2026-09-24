@@ -6,19 +6,53 @@
 
 """Type hints for the stream-frame Cython client / server codec.
 
-Python :class:`~trpc_sdk.codec.ClientCodec` / ``ServerCodec`` dispatch
-INIT / DATA / CLOSE / FEEDBACK here. Unary frames use
+Python :class:`~trpc_sdk.codec.ClientCodec` / ``ServerCodec`` hold one
+instance each as ``self.stream_codec`` and call ``encode_stream`` /
+``decode_stream``, which dispatch INIT / DATA / CLOSE / FEEDBACK. Unary frames use
 :mod:`trpc_sdk.codec._cython._codec`.
 """
 
 from __future__ import annotations
 
+from typing import Optional
+
 from trpc_sdk.abc import TrpcFrameHead
 from trpc_sdk.abc import TrpcMessage
+from trpc_sdk.abc._cython._codec import _Codec
 
 
-class CClientStreamCodec:
-    """Client-side stream codec: INIT / DATA / CLOSE / FEEDBACK."""
+class _ClientStreamCodec(_Codec):
+    """Client-side stream codec: INIT / DATA / CLOSE / FEEDBACK.
+
+    Stream-only; ``encode`` / ``decode`` keep the ``_Codec`` default.
+    """
+
+    def encode_stream(self, message: TrpcMessage, body: Optional[bytes]) -> bytes:
+        """Pack one client stream frame by ``frame_state``.
+
+        Args:
+            message: RPC state; ``frame_head.frame_state`` selects INIT /
+                DATA / CLOSE / FEEDBACK.
+            body: Used for DATA; INIT / CLOSE / FEEDBACK read
+                ``message.stream_frame`` instead.
+
+        Raises:
+            ValueError: ``frame_state`` is not a known stream sub-type.
+        """
+        ...
+
+    def decode_stream(self, message: TrpcMessage, buffer: bytes) -> bytes:
+        """Unpack one client stream frame by ``frame_state``.
+
+        Args:
+            message: RPC state; ``frame_head.frame_state`` must already
+                be set from ``buffer``.
+            buffer: Complete stream frame, head included.
+
+        Raises:
+            ValueError: ``frame_state`` is not a known stream sub-type.
+        """
+        ...
 
     def encode_init_frame(self, message: TrpcMessage, body: bytes) -> bytes:
         """Pack a client INIT frame from ``message.stream_frame``.
@@ -30,7 +64,7 @@ class CClientStreamCodec:
             message: Outbound stream state; request_meta is filled from
                 caller / callee / func / trans_info / dyeing / env.
             body: Unused; kept so the four encode methods share a
-                signature for :mod:`trpc_sdk.codec._codec` dispatch.
+                signature for ``encode_stream`` dispatch.
         """
         ...
 
@@ -107,8 +141,38 @@ class CClientStreamCodec:
         ...
 
 
-class CServerStreamCodec:
-    """Server-side stream codec: INIT / DATA / CLOSE / FEEDBACK."""
+class _ServerStreamCodec(_Codec):
+    """Server-side stream codec: INIT / DATA / CLOSE / FEEDBACK.
+
+    Stream-only; ``encode`` / ``decode`` keep the ``_Codec`` default.
+    """
+
+    def encode_stream(self, message: TrpcMessage, body: Optional[bytes]) -> bytes:
+        """Pack one server stream frame by ``frame_state``.
+
+        Args:
+            message: RPC state; ``frame_head.frame_state`` selects INIT /
+                DATA / CLOSE / FEEDBACK.
+            body: Used for DATA; INIT / CLOSE / FEEDBACK read
+                ``message.stream_frame`` instead.
+
+        Raises:
+            ValueError: ``frame_state`` is not a known stream sub-type.
+        """
+        ...
+
+    def decode_stream(self, message: TrpcMessage, buffer: bytes) -> bytes:
+        """Unpack one server stream frame by ``frame_state``.
+
+        Args:
+            message: RPC state; ``frame_head.frame_state`` must already
+                be set from ``buffer``.
+            buffer: Complete stream frame, head included.
+
+        Raises:
+            ValueError: ``frame_state`` is not a known stream sub-type.
+        """
+        ...
 
     def encode_init_frame(self, message: TrpcMessage, body: bytes) -> bytes:
         """Pack a server INIT reply from ``message.stream_frame``.

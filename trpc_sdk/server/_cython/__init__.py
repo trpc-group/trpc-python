@@ -8,10 +8,8 @@
 
 from ._service import Service  # pyright: ignore[reportMissingModuleSource]
 from ._service import create_service  # pyright: ignore[reportMissingModuleSource]
-from ._service import start_service_registry  # pyright: ignore[reportMissingModuleSource]
 
 __all__ = [
     "Service",
     "create_service",
-    "start_service_registry",
 ]

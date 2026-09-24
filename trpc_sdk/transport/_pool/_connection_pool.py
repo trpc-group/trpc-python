@@ -9,18 +9,21 @@
 :class:`ConnectionPool` holds idle conns for one remote.
 :class:`ConnectionPoolManager` maps a local+peer key onto those pools
 and runs a periodic idle sweep.
-:class:`~trpc_sdk.pool.ShortConnFactory` dials a
+:class:`~trpc_sdk.transport._pool.ShortConnFactory` dials a
 one-shot conn that is force-closed on return and never queued; it lives
-in :mod:`trpc_sdk.pool._short_conn_factory` and is re-exported here.
+in :mod:`trpc_sdk.transport._pool._short_conn_factory` and is
+re-exported here.
 :func:`get_pool_connection` is the entry used by client transport:
 short-conn options skip the manager; otherwise a per-loop manager is
 cached in :class:`PoolCache`.
 
 :class:`Pool` is a historical alias of :class:`ConnectionPoolManager`.
-Types and the pooled wrapper live in :mod:`trpc_sdk.pool._types` and
-:mod:`trpc_sdk.pool._pooled_connection`; the :class:`BasePool` contract
-lives in :mod:`trpc_sdk.abc`. Dialing lives in
-:mod:`trpc_sdk.pool._dial`.
+Types and the pooled wrapper live in
+:mod:`trpc_sdk.transport._pool._types` and
+:mod:`trpc_sdk.transport._pool._pooled_connection`; the
+:class:`BasePool` contract lives in
+:mod:`trpc_sdk.transport._pool._base`. Dialing lives in
+:mod:`trpc_sdk.transport._pool._dial`.
 """
 
 from __future__ import annotations
@@ -35,13 +38,13 @@ from typing import Dict
 from typing import Optional
 
 from trpc_sdk.abc import BaseClientTransportOption
-from trpc_sdk.abc import BasePool
 from trpc_sdk.common import create_object_with_loop
 from trpc_sdk.common import get_or_create_event_loop
 from trpc_sdk.exceptions import ClientPoolClosedError
 from trpc_sdk.exceptions import ClientPoolLimitError
 from trpc_sdk.log import logger
 
+from ._base import BasePool
 from ._dial import dial_connection
 from ._pooled_connection import PooledConnection
 from ._short_conn_factory import ShortConnFactory
@@ -59,7 +62,8 @@ class ConnectionPool(BasePool):
     Unix conn stays up.
 
     Args:
-        dial: Coroutine that opens a :class:`~trpc_sdk.pool.Connection`.
+        dial: Coroutine that opens a
+            :class:`~trpc_sdk.transport._pool.Connection`.
         trans_opt: Client transport options, including the remote
             address and the ``is_task_stream`` flag.
         options: Idle / active / lifetime tunables. Must not be
@@ -273,7 +277,7 @@ class ConnectionPoolManager:
 
     # Kept as a staticmethod so ``ConnectionPoolManager.dial`` and
     # ``ConnectionPool(dial=self.dial)`` keep working after the dial
-    # logic moved to :mod:`trpc_sdk.pool._dial`.
+    # logic moved to :mod:`trpc_sdk.transport._pool._dial`.
     dial = staticmethod(dial_connection)
 
     async def get(self, trans_opt: BaseClientTransportOption, timeout: float) -> PooledConnection:

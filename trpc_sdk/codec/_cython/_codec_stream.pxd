@@ -9,8 +9,10 @@
 # Stream-frame encode / decode. Unary frames are _codec.pxd.
 # Encode INIT / CLOSE / FEEDBACK ignore the body argument; the payload
 # is message.stream_frame. Decode "body" is the complete 16-byte-headed
-# frame. _common_pack writes head_len = 0.
+# frame. _common_pack writes head_len = 0. encode_stream / decode_stream
+# override _Codec and dispatch on frame_state to the per-frame methods.
 
+from trpc_sdk.abc._cython cimport _Codec
 from trpc_sdk.abc._cython cimport TrpcMessage
 
 
@@ -22,7 +24,10 @@ cdef extern from "arpa/inet.h":
     unsigned int htonl(unsigned int hostlong)
 
 
-cdef class CClientStreamCodec:
+cdef class _ClientStreamCodec(_Codec):
+    cpdef object encode_stream(self, TrpcMessage message, object body)
+    cpdef object decode_stream(self, TrpcMessage message, object buffer)
+
     # Encode: INIT / CLOSE / FEEDBACK serialize stream_frame; DATA uses body.
     cpdef bytes encode_init_frame(self, TrpcMessage message, bytes body)
     cpdef bytes encode_data_frame(self, TrpcMessage message, bytes body)
@@ -36,7 +41,10 @@ cdef class CClientStreamCodec:
     cpdef bytes decode_feedback_frame(self, TrpcMessage message, bytes body)
 
 
-cdef class CServerStreamCodec:
+cdef class _ServerStreamCodec(_Codec):
+    cpdef object encode_stream(self, TrpcMessage message, object body)
+    cpdef object decode_stream(self, TrpcMessage message, object buffer)
+
     # Encode: INIT / CLOSE / FEEDBACK serialize stream_frame; DATA uses body.
     cpdef bytes encode_init_frame(self, TrpcMessage message, bytes body)
     cpdef bytes encode_data_frame(self, TrpcMessage message, bytes body)

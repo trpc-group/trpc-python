@@ -6,17 +6,18 @@
 
 """Type hints for the unary Cython client / server codec.
 
-Python :class:`~trpc_sdk.codec.ClientCodec` / ``ServerCodec`` dispatch
-unary frames here. Stream frames use :mod:`trpc_sdk.codec._cython._codec_stream`.
+Python :class:`~trpc_sdk.codec.ClientCodec` / ``ServerCodec`` hold one
+instance each as ``self.codec`` and dispatch unary frames here. Stream frames use :mod:`trpc_sdk.codec._cython._codec_stream`.
 """
 
 from __future__ import annotations
 
 from trpc_sdk.abc import TrpcFrameHead
 from trpc_sdk.abc import TrpcMessage
+from trpc_sdk.abc._cython._codec import _Codec
 
 
-class CClientCodec:
+class _ClientCodec(_Codec):
     """Client-side unary codec: request encode and response decode.
 
     ``request_id`` is a per-instance counter incremented on each
@@ -79,7 +80,7 @@ class CClientCodec:
         """Copy a decoded response from a temporary message onto the request.
 
         Equivalent to the second half of ``_unpack`` without touching
-        the body. Used on the multiplexed receive path.
+        the body.
 
         Args:
             origin_message: Temporary message that already ran decode.
@@ -88,7 +89,7 @@ class CClientCodec:
         ...
 
 
-class CServerCodec:
+class _ServerCodec(_Codec):
     """Server-side unary codec: request decode and response encode."""
 
     def encode(self, message: TrpcMessage, body: bytes) -> bytes:

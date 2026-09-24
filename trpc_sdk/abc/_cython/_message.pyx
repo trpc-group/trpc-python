@@ -100,15 +100,9 @@ cdef class TrpcMessage:
     belongs to ``TrpcContext``. Independent fields are public for direct Cython
     access, while names with derived components use final C-level
     synchronization helpers.
-
-    ``context`` is a transitional exception to that ownership rule: the codec
-    ``encode`` / ``decode`` signatures still take a message rather than a
-    context, so the message has to carry the back-reference. It is removed once
-    those signatures become context-first.
     """
 
     def __cinit__(self):
-        self.context = None
         self.frame_head = TrpcFrameHead()
         self.timeout = 0
         self.serialization_type = 0
@@ -131,6 +125,8 @@ cdef class TrpcMessage:
         self.server_rsp_head = None
         self.client_req_head = None
         self.client_rsp_head = None
+        self.server_raw_req = None
+        self.server_raw_rsp = None
         self.caller_app = ""
         self.caller_server = ""
         self.caller_service = ""
@@ -412,6 +408,27 @@ cdef class TrpcMessage:
             client_rsp_head: Response protocol header returned by the callee.
         """
         self.client_rsp_head = client_rsp_head
+
+    cpdef void set_server_raw_req(self, object server_raw_req) except *:
+        """Set the protocol-native inbound request object.
+
+        Held in-process only; it is never serialized or propagated
+        downstream, unlike ``server_meta_data``.
+
+        Args:
+            server_raw_req: Complete request object of the inbound
+                protocol, e.g. the aiohttp ``Request`` for HTTP.
+        """
+        self.server_raw_req = server_raw_req
+
+    cpdef void set_server_raw_rsp(self, object server_raw_rsp) except *:
+        """Set the protocol-native outbound response object.
+
+        Args:
+            server_raw_rsp: Complete response object that the inbound
+                protocol sends back, e.g. the aiohttp ``Response`` for HTTP.
+        """
+        self.server_raw_rsp = server_raw_rsp
 
     cpdef void set_local_addr(self, str local_addr) except *:
         """Set the local network endpoint of this RPC.

@@ -26,7 +26,8 @@ offset 8 is left unwritten: stream meta lives in the body slot, with no
 separate ``RequestProtocol`` / ``ResponseProtocol``.
 
 Codecs interpret frames. Parsers only cut complete frames: the client
-parser reads asynchronously from a :class:`~trpc_sdk.pool.PooledConnection`;
+parser reads asynchronously from a
+:class:`~trpc_sdk.transport.PooledConnection`;
 the server parser scans a buffer for magic + ``package_len``.
 
 The server codec caches INIT meta by ``session_id + stream_id`` so later
@@ -41,7 +42,6 @@ __all__ = ['TaskStreamClientCodec', 'TaskStreamServerCodec', 'TaskStreamClientPa
 import socket
 import struct
 import sys
-from abc import ABC
 from abc import abstractmethod
 from collections import defaultdict
 from typing import TYPE_CHECKING
@@ -53,6 +53,7 @@ from google.protobuf.message import Message as PbMessage
 
 from trpc_sdk._inner import trpc_pb2
 from trpc_sdk.abc import BaseClientProtocolChecker
+from trpc_sdk.abc import BaseCodec
 from trpc_sdk.abc import PluginInitPos
 from trpc_sdk.abc import PluginType
 from trpc_sdk.abc import TrpcFrameHead
@@ -71,7 +72,7 @@ from ._types import StreamInitMeta
 from ._types import TaskStreamCodecRole
 
 if TYPE_CHECKING:
-    from trpc_sdk.pool import PooledConnection
+    from trpc_sdk.transport import PooledConnection
 
 
 def _fill_field(src: bytes, dst: bytearray, index: int) -> int:
@@ -150,11 +151,14 @@ def _common_pack(frame_head: TrpcFrameHead, body: bytes):
     return bytes(results)
 
 
-class _TaskStreamCodec(ABC):
+class _TaskStreamCodec(BaseCodec):
     """Private shared INIT / DATA / CLOSE / FEEDBACK encode and decode.
 
-    Not :class:`~trpc_sdk.abc.BaseCodec` (context-first TCP frames) and
-    not :class:`~trpc_sdk.abc.TaskCodec` (task body pickle). Callers
+    A :class:`~trpc_sdk.abc.BaseCodec`. :meth:`encode` / :meth:`decode`
+    and the eight ``_encode_*`` / ``_decode_*`` helpers stay
+    message-first; the context-first entry points are the base class
+    ``encode_data`` / ``decode_data``. Not
+    :class:`~trpc_sdk.abc.TaskCodec` (task body pickle). Callers
     construct :class:`TaskStreamClientCodec` or
     :class:`TaskStreamServerCodec`; this base only shares the dispatch
     maps. INIT encode is abstract: the client fills ``request_meta``,
@@ -170,6 +174,8 @@ class _TaskStreamCodec(ABC):
     """
 
     def __init__(self):
+        # BaseCodec.__init__ reaches BasePlugin and sets ``_name``.
+        super().__init__()
         self._encode_map = {
             trpc_pb2.TRPC_STREAM_FRAME_INIT: self._encode_init_frame,
             trpc_pb2.TRPC_STREAM_FRAME_DATA: self._encode_data_frame,
@@ -398,7 +404,7 @@ class _TaskStreamCodec(ABC):
             message: ``frame_head.frame_state`` selects INIT / DATA /
                 CLOSE / FEEDBACK.
             body: Used only for DATA; INIT / CLOSE / FEEDBACK read
-                ``message.stream_frame`` instead.
+                ``message.stream_frame`` instead and may pass ``None``.
 
         Returns:
             Complete stream frame bytes.

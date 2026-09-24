@@ -11,8 +11,10 @@ modules; callers should only ``from trpc_sdk.codec import ...``.
 
 The package is split by responsibility:
 
-- :mod:`~trpc_sdk.codec._codec` — Python ``ClientCodec`` / ``ServerCodec`` dispatch
-- :mod:`~trpc_sdk.codec._cython._codec` / :mod:`~trpc_sdk.codec._cython._codec_stream` — Cython unary / stream pack
+- :mod:`~trpc_sdk.codec._codec` — Python ``ClientCodec`` / ``ServerCodec`` plugins (``BaseCodec`` subclasses) that
+  hold a unary and a stream Cython codec and dispatch between them; the server INIT meta cache lives here
+- :mod:`~trpc_sdk.codec._cython._codec` / :mod:`~trpc_sdk.codec._cython._codec_stream` — private Cython unary /
+  stream codecs, both derived from the C-level ``_Codec`` root in :mod:`trpc_sdk.abc`
 - :mod:`~trpc_sdk.codec._cython._codec_parser` — TCP sticky-packet splitter (``TrpcServerParser``)
 - :mod:`~trpc_sdk.codec._factory` — plugin lookups and protocol checkers
 - :mod:`~trpc_sdk.codec._task_stream_codec` — inner worker-to-task stream protocol

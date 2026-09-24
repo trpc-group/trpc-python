@@ -13,6 +13,7 @@ The package is split by responsibility:
 
 - :mod:`~trpc_sdk.utils._constants` — :class:`ProcessType`, :class:`TcpState`,
   :class:`TimerType`, :data:`UNIX_TYPE`
+- :mod:`~trpc_sdk.utils._dict_to_pb` — fill a protobuf message from a dict
 - :mod:`~trpc_sdk.utils._types` — IP/port aliases and timer records
 - :mod:`~trpc_sdk.utils._address` — parse/format listen and peer addresses
 - :mod:`~trpc_sdk.utils._network` — IP conversion and port-availability probes
@@ -25,6 +26,8 @@ The package is split by responsibility:
 - :mod:`~trpc_sdk.utils._str_utils` — :func:`strtobool`
 - :mod:`~trpc_sdk.utils._singleton` — :func:`singleton`
 - :mod:`~trpc_sdk.utils._testing` — :func:`run_async_test`
+- :mod:`~trpc_sdk.utils._thread_pool` — process-wide ``ThreadPoolExecutor``
+  used to offload blocking calls off the event loop
 
 :class:`TimerHook` lives in :mod:`trpc_sdk.abc`.
 """
@@ -41,6 +44,9 @@ from ._constants import ProcessType
 from ._constants import TcpState
 from ._constants import TimerType
 from ._constants import UNIX_TYPE
+from ._dict_to_pb import EXTENSION_CONTAINER
+from ._dict_to_pb import TYPE_CALLABLE_MAP
+from ._dict_to_pb import dict_to_protobuf
 from ._loop_lib import asynclib
 from ._loop_lib import get_or_create_event_loop
 from ._multi_process import get_current_process_var
@@ -80,6 +86,8 @@ from ._queue import Queue
 from ._singleton import singleton
 from ._str_utils import strtobool
 from ._testing import run_async_test
+from ._thread_pool import init_thread_pool
+from ._thread_pool import submit
 from ._time_utils import now_ms
 from ._time_utils import now_us
 from ._timer import TimerExecutor
@@ -134,9 +142,14 @@ __all__ = [
     "set_tcp_keep_alive",
     "close_socket",
     "Queue",
+    "init_thread_pool",
+    "submit",
     "now_ms",
     "now_us",
     "strtobool",
+    "dict_to_protobuf",
+    "EXTENSION_CONTAINER",
+    "TYPE_CALLABLE_MAP",
     "singleton",
     "TimerTask",
     "TimerExecutor",

@@ -6,8 +6,9 @@
 
 """Background naming-service registration for one :class:`~trpc_sdk.server._cython._service.Service`.
 
-A service with a configured registry starts a :class:`RegistryThread` so
-register / heartbeat / deregister run on a dedicated event loop, not the
+:func:`start_service_registry` gives every service with a configured
+registry a :class:`ServiceRegistrar`, which runs register / heartbeat /
+deregister on a :class:`RegistryThread` with its own event loop, not the
 master's. The engine's ``registry_semaphore`` (initialised to
 ``service_num``) is the handshake that lets ``TrpcServerEngine.close``
 wait for deregister before SIGTERM.
@@ -18,10 +19,14 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from typing import Any
 from typing import Awaitable
 from typing import Callable
 from typing import Optional
 
+from trpc_sdk._inner import register_spinlock
+from trpc_sdk._inner import remove_lock_file
+from trpc_sdk._inner import warm_up
 from trpc_sdk.utils import asynclib
 
 
@@ -107,3 +112,81 @@ class RegistryThread(threading.Thread):
 
         self._loop.run_until_complete(asyncio.wait_for(self.deregister_coro_func(), 10))
         self.deregister_done.release()
+
+
+class ServiceRegistrar:
+    """Naming-service registration for one service endpoint.
+
+    Only built for a service whose ``opt.registry`` is set, so a service
+    without a registry never starts a thread and never consumes a
+    ``registry_semaphore`` permit. ``opt`` fields are read when the
+    coroutines run, not captured at construction.
+    """
+
+    def __init__(self, opt: Any) -> None:
+        """Record the endpoint options; no thread is started yet.
+
+        Args:
+            opt: The service's :class:`~trpc_sdk.server._option.ServiceOption`;
+                ``registry``, ``registry_option``, ``registry_delay``,
+                ``service_name``, ``address`` and ``app`` are read.
+        """
+        self.opt = opt
+        self.thread: Optional[RegistryThread] = None
+
+    def start(self) -> None:
+        """Start the :class:`RegistryThread`.
+
+        ``registry_option == 1`` warms shared-memory spinlocks before the
+        thread starts.
+        """
+        if self.opt.registry_option == 1:
+            warm_up()
+        self.thread = RegistryThread(self._register,
+                                     self._deregister,
+                                     self.opt.app.server_engine.registry_semaphore)
+        self.thread.start()
+
+    def stop(self) -> None:
+        """Cancel the registry thread; it still deregisters before exiting."""
+        if self.thread is not None:
+            self.thread.terminate()
+
+    async def _register(self) -> None:
+        """Register this service; runs on ``RegistryThread``'s loop.
+
+        ``registry_option == 1`` takes the shared-memory spinlock first;
+        otherwise the thread sleeps ``registry_delay`` milliseconds.
+        """
+        if self.opt.registry_option == 1:
+            await register_spinlock()
+        else:
+            await asyncio.sleep(self.opt.registry_delay / 1000)
+
+        await self.opt.registry.register(self.opt.service_name, self.opt.address)
+
+    async def _deregister(self) -> None:
+        """Deregister this service; runs on ``RegistryThread``'s loop."""
+        await self.opt.registry.deregister(self.opt.service_name, self.opt.address)
+        remove_lock_file()
+
+
+def start_service_registry(server: Any) -> None:
+    """Start naming-service registration for every service on ``server``.
+
+    :func:`create_server` registers this as a fork hook. When YAML
+    ``server.registry_after_fork`` is true it runs in the parent after
+    fork; otherwise it runs in the parent before fork, so children inherit
+    the already-started :class:`RegistryThread`. There is no master
+    process.
+
+    Args:
+        server: The :class:`~trpc_sdk.server.Server` whose ``services``
+            map is walked. Untyped to avoid importing ``_server``.
+    """
+    for service in server.services.values():
+        if service.opt.registry is None:
+            continue
+        registrar = ServiceRegistrar(service.opt)
+        registrar.start()
+        service.registrar = registrar

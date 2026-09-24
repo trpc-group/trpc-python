@@ -22,12 +22,10 @@ from trpc_sdk.abc import AddrType
 from trpc_sdk.abc import BaseClientProtocolChecker
 from trpc_sdk.abc import BaseClientTransportOption
 from trpc_sdk.abc import BaseCodec
-from trpc_sdk.abc import TrpcMessage
 from trpc_sdk.codec import TrpcClientParser
-from trpc_sdk.pool import ConnPoolOptions
-from trpc_sdk.pool import ConnectionPoolManager
-from trpc_sdk.pool import Multiplexed
 from ._constants import RequestType
+from ._pool import ConnPoolOptions
+from ._pool import ConnectionPoolManager
 
 
 class RoundTripOptions(BaseClientTransportOption):
@@ -35,7 +33,7 @@ class RoundTripOptions(BaseClientTransportOption):
 
     Constructed empty and filled by setters (or by assigning fields
     directly). The TCP / UDP helpers then read ``network``, ``address``,
-    ``req_type``, and the pool / multiplexed fields to pick a path.
+    ``req_type``, and the pool fields to pick a path.
 
     Attributes:
         checker: Frame parser used to split the response stream.
@@ -46,12 +44,6 @@ class RoundTripOptions(BaseClientTransportOption):
             ``pool`` is already set.
         req_type: :attr:`RequestType.SendAndRecv` waits for a response;
             :attr:`RequestType.SendOnly` writes and returns.
-        enable_multiplexed: When True, the TCP helper uses the multiplexed
-            virtual-connection path instead of a pooled one-shot conn.
-        multiplexed: Multiplexed pool instance used when
-            ``enable_multiplexed`` is True.
-        msg: Request :class:`~trpc_sdk.abc.TrpcMessage`; the multiplexed path
-            needs it to match responses by ``request_id``.
         ssl_context: TLS context for HTTPS.
         is_task_stream: When True, :class:`ClientConn` must not close the
             pooled connection after the stream ends; the task process
@@ -68,9 +60,6 @@ class RoundTripOptions(BaseClientTransportOption):
         self.pool_opts = None
 
         self.req_type = RequestType.SendAndRecv
-        self.enable_multiplexed = False
-        self.multiplexed = None
-        self.msg = None
 
         self.ssl_context = None
         self.is_task_stream = False
@@ -118,30 +107,6 @@ class RoundTripOptions(BaseClientTransportOption):
             pool_opts: Dial / size knobs for the built-in pool.
         """
         self.pool_opts = pool_opts
-
-    def set_enable_multiplexed(self, enable: bool):
-        """Switch the TCP helper onto the multiplexed virtual-connection path.
-
-        Args:
-            enable: True to multiplex many requests onto one TCP conn.
-        """
-        self.enable_multiplexed = enable
-
-    def set_multiplexed(self, multiplexed: Multiplexed):
-        """Set the multiplexed pool used when multiplexed mode is on.
-
-        Args:
-            multiplexed: Pool that vends :class:`VirtualConnection` objects.
-        """
-        self.multiplexed = multiplexed
-
-    def set_msg(self, msg: TrpcMessage):
-        """Attach the request message so multiplexed responses can be matched.
-
-        Args:
-            msg: Request message whose ``request_id`` keys the virtual conn.
-        """
-        self.msg = msg
 
     def set_checker(self, checker: Optional[BaseClientProtocolChecker]) -> None:
         """Install the protocol frame checker used to split the response.

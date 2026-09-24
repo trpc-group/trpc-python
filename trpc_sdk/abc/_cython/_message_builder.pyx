@@ -11,8 +11,8 @@
 The server receive path calls :func:`create_message`, client stubs call
 :func:`clone_client_message`, and stream frames call
 :func:`clone_context_and_message`. Every clone helper returns a
-``(context, message)`` pair and back-fills ``message.context`` so the
-message-first codec interfaces can still reach the context.
+``(context, message)`` pair; ownership is one-way, so callers that only
+hold the message cannot walk back to the context.
 
 Assigning message fields directly bypasses the derived-field setters; the
 copy helpers below go through ``_set_*`` wherever a derived field exists.
@@ -131,6 +131,8 @@ cdef inline void _copy_common_message(
     target._set_client_rpc_name(source.get_client_rpc_name())
     target.server_req_head = source.server_req_head
     target.server_rsp_head = source.server_rsp_head
+    target.server_raw_req = source.server_raw_req
+    target.server_raw_rsp = source.server_raw_rsp
     target.dyeing = source.dyeing
     target.dyeing_key = source.dyeing_key
     target.server_meta_data = source.server_meta_data
@@ -196,7 +198,6 @@ cpdef tuple create_message(TrpcContext context):
     """
     cdef TrpcMessage message = TrpcMessage()
     context.msg = message
-    message.context = context
     return context, message
 
 
@@ -214,7 +215,6 @@ cpdef TrpcMessage get_message(TrpcContext context):
     if context.msg is None:
         message = TrpcMessage()
         context.msg = message
-        message.context = context
     return context.msg
 
 
@@ -235,7 +235,6 @@ cpdef tuple clone_context_and_message(TrpcContext context):
     cdef TrpcMessage source = context.msg
 
     new_context.msg = new_message
-    new_message.context = new_context
     if source is None:
         return new_context, new_message
 
@@ -261,7 +260,6 @@ cpdef tuple clone_message(TrpcContext context):
     cdef TrpcMessage source = context.msg
 
     new_context.msg = new_message
-    new_message.context = new_context
     if source is None:
         return new_context, new_message
 

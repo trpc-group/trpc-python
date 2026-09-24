@@ -18,6 +18,8 @@ The package is split by responsibility:
 - :mod:`~trpc_sdk.http._client_transport` — aiohttp client round trip
 - :mod:`~trpc_sdk.http._client` — :class:`Client` with naming and filters
 - :mod:`~trpc_sdk.http._sse_client` — Server-Sent Events on top of Client
+- :mod:`~trpc_sdk.http._sse_event` — :class:`SSEEvent` model
+- :mod:`~trpc_sdk.http._sse_parser` — incremental event-stream decoder
 - :mod:`~trpc_sdk.http._routes` — ``@route`` and static-file prefixes
 - :mod:`~trpc_sdk.http._serialization_form` — form / query-string serializer
 - :mod:`~trpc_sdk.http._context` — HTTP request/response accessors on context
@@ -37,7 +39,6 @@ from ._codec import ClientHttpCodec
 from ._codec import ServerHttpChecker
 from ._codec import ServerHttpCodec
 from ._constants import DEFAULT_SESSION_NAME
-from ._constants import EXTENSION_CONTAINER
 from ._constants import HTTP
 from ._constants import HTTP_ARG_JSON
 from ._constants import HTTP_ARG_SSL
@@ -63,7 +64,6 @@ from ._context import set_http_ok_codes
 from ._context import set_http_rsp_header
 from ._ctx_manager import BaseRequestContextManager
 from ._ctx_manager import RequestContextManager
-from ._dict_pb_convertor import dict_to_protobuf
 from ._exceptions import InvalidURL
 from ._http_request import HttpClientReqHeader
 from ._http_response import HttpClientRspHeader
@@ -82,12 +82,11 @@ from ._routes import register_static
 from ._routes import route
 from ._serialization_form import FormSerializer
 from ._sse_client import SSEClient
-from ._sse_client import SSEEvent
 from ._sse_client import SSEEventSource
+from ._sse_event import SSEEvent
 from ._types import HTTP_TRPC_HEADER
 from ._types import HttpSession
 from ._types import HttpTrpcHeader
-from ._types import TYPE_CALLABLE_MAP
 from ._types import UrlParser
 from ._types import find_compress_type
 from ._types import find_content_encoding
@@ -163,12 +162,10 @@ __all__ = [
     "HTTP_RSP_HEADER_KEY",
     "HTTP_RSP_OK_CODE_KEY",
     "DEFAULT_SESSION_NAME",
-    "EXTENSION_CONTAINER",
     # Types and lookups
     "HTTP_TRPC_HEADER",
     "HttpTrpcHeader",
     "UrlParser",
-    "TYPE_CALLABLE_MAP",
     "get_trpc_error_code",
     "find_serialization_type",
     "find_content_type",

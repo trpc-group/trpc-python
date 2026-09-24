@@ -38,7 +38,7 @@ from ._constants import FRAME_HEAD_LEN
 from ._cython import CServerParser
 
 if TYPE_CHECKING:
-    from trpc_sdk.pool import PooledConnection
+    from trpc_sdk.transport import PooledConnection
 
 # Public name for the Cython stream splitter used as the server checker.
 TrpcServerParser = CServerParser

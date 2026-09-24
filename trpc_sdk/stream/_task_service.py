@@ -226,7 +226,7 @@ class TaskStreamServiceAdapter:
         session_id = ctx.get_meta_data("session_id", None)
         assert session_id is not None, "session_id is None"
         msg.set_session_id(int(session_id))
-        return self._codec.decode(msg, req_buf)
+        return self._codec.decode_data(ctx, req_buf)
 
     async def handle(self, ctx: TrpcContext, req_buf: bytes) -> bytes:
         """Dispatch one already-decoded stream frame.

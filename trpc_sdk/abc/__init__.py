@@ -7,12 +7,11 @@
 """tRPC-Python ABC module"""
 
 from ._circuit_breaker import BaseCircuitBreaker
-from ._codec import BaseCompress
-from ._codec import BaseSerializer
 from ._codec import TaskCodec
 from ._client import BaseClient
 from ._client import BaseClientStream
 from ._client import BaseClientStreamConnection
+from ._compress import BaseCompress
 from ._config import BaseConfig
 from ._config import BaseConfigProvider
 from ._config import BaseConfigDecoder
@@ -59,12 +58,12 @@ from ._plugin import BasePlugin
 from ._plugin import BasePluginFactory
 from ._plugin import PluginInitPos
 from ._plugin import PluginType
-from ._pool import BasePool
 from ._selector import BaseSelector
 from ._selector import BaseServiceRouter
 from ._selector import SelectorOption
 from ._selector import ServerRouterOption
 from ._selector import ServiceNameExtractor
+from ._serializer import BaseSerializer
 from ._server import BaseServer
 from ._server import BaseServerStream
 from ._server import BaseTrpcServerEngine
@@ -136,7 +135,6 @@ __all__ = [
     "Node",
     "BasePlugin",
     "BasePluginFactory",
-    "BasePool",
     "PluginInitPos",
     "PluginType",
     "OutputConfig",

@@ -7,8 +7,8 @@
 """One-shot TCP/Unix connections that are never returned to an idle queue.
 
 :class:`ShortConnFactory` duck-types the ``get`` / ``put`` surface of
-:class:`~trpc_sdk.abc.BasePool` so a
-:class:`~trpc_sdk.pool.PooledConnection` can still
+:class:`~trpc_sdk.transport._pool.BasePool` so a
+:class:`~trpc_sdk.transport._pool.PooledConnection` can still
 ``close`` through ``pool.put``. ``put`` always force-closes.
 """
 
@@ -38,7 +38,7 @@ class ShortConnFactory:
             options: BaseClientTransportOption,
             timeout: float,
             loop: BaseEventLoop) -> PooledConnection:
-        """Dial through :func:`~trpc_sdk.pool._dial.dial_connection` and wrap it.
+        """Dial through :func:`~trpc_sdk.transport._pool._dial.dial_connection`.
 
         Args:
             options: Transport options with the remote address / sock.

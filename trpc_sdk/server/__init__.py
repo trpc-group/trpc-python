@@ -30,8 +30,9 @@ The package is split by responsibility:
   ``ServiceOption`` (one listen endpoint), both filled from YAML
 - :mod:`~trpc_sdk.server._cython` — ``Service``: method registry, filter chain,
   the per-request handler path, and :func:`create_service`
-- :mod:`~trpc_sdk.server._registry` — ``RegistryThread``: background
-  naming-service register / heartbeat / deregister on its own event loop
+- :mod:`~trpc_sdk.server._registry` — ``ServiceRegistrar`` /
+  ``start_service_registry``: per-service naming-service register /
+  heartbeat / deregister on a ``RegistryThread`` with its own event loop
 - :mod:`~trpc_sdk.server._server` — ``Server``: config, service table,
   :func:`create_server`, and the startup order that forks children before
   creating a loop

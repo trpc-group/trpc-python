@@ -7,10 +7,11 @@
 """Abstract contract for a client connection pool.
 
 :class:`BasePool` is the get/put surface that
-:class:`~trpc_sdk.pool.PooledConnection` talks to when it is returned.
-:class:`~trpc_sdk.pool.ConnectionPool` is the idle-queue implementation;
-:class:`~trpc_sdk.pool.ShortConnFactory` duck-types the same ``put`` so a
-short-lived conn can still call ``close``.
+:class:`~trpc_sdk.transport._pool.PooledConnection` talks to when it is
+returned. :class:`~trpc_sdk.transport._pool.ConnectionPool` is the
+idle-queue implementation;
+:class:`~trpc_sdk.transport._pool.ShortConnFactory` duck-types the same
+``put`` so a short-lived conn can still call ``close``.
 """
 
 from __future__ import annotations
@@ -18,11 +19,14 @@ from __future__ import annotations
 from abc import ABC
 from abc import abstractmethod
 from asyncio import BaseEventLoop
+from typing import TYPE_CHECKING
 from typing import Optional
 
+from trpc_sdk.abc import AddrType
 from trpc_sdk.common import get_or_create_event_loop
 
-from ._transport import AddrType
+if TYPE_CHECKING:
+    from ._pooled_connection import PooledConnection
 
 
 class BasePool(ABC):
@@ -53,12 +57,8 @@ class BasePool(ABC):
         return self._loop
 
     @abstractmethod
-    async def get(self, timeout: float):
+    async def get(self, timeout: float) -> "PooledConnection":
         """Take one connection out of the pool, dialing if needed.
-
-        The concrete return type is :class:`~trpc_sdk.pool.PooledConnection`.
-        It is left unannotated because ``trpc_sdk.pool`` imports this
-        module, so naming it here would invert the dependency.
 
         Args:
             timeout: Dial timeout in seconds when a new conn is
@@ -70,7 +70,7 @@ class BasePool(ABC):
         """
 
     @abstractmethod
-    def put(self, pool_conn, force_close: bool = False) -> None:
+    def put(self, pool_conn: "PooledConnection", force_close: bool = False) -> None:
         """Return a connection to the pool, or drop it.
 
         This is a return, not a socket close. ``force_close=True``
@@ -78,9 +78,6 @@ class BasePool(ABC):
 
         Args:
             pool_conn: Connection previously obtained from :meth:`get`.
-                Its concrete type is
-                :class:`~trpc_sdk.pool.PooledConnection`, left
-                unannotated to avoid an ``abc`` -> ``pool`` cycle.
             force_close: If True, close the socket instead of caching
                 it as idle.
         """

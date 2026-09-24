@@ -10,12 +10,10 @@ This is not a TCP connection pool. It wraps a
 :class:`concurrent.futures.ThreadPoolExecutor` so an async handler can
 ``await`` a blocking or CPU-heavy callable without stalling the loop.
 
-Registered as the ``"thread"`` plugin under :attr:`PluginType.POOL`.
-The default ``init_pos`` is ``WORKER``, so the executor is built in the
-worker process after fork; parent-process threads do not survive
-``fork``. Pool size comes from ``server.thread_num`` (default about
-CPU cores × 5), which is unrelated to merge-mode
-``server.worker_thread_num``.
+:func:`init_thread_pool` runs in the worker process after fork, because
+parent-process threads do not survive ``fork``. Pool size comes from
+``server.thread_num`` (default about CPU cores x 5), which is unrelated
+to merge-mode ``server.worker_thread_num``.
 """
 
 from __future__ import annotations
@@ -24,10 +22,7 @@ import concurrent.futures
 from typing import Any
 from typing import Callable
 
-from trpc_sdk.abc import PluginType
 from trpc_sdk.common import get_or_create_event_loop
-from trpc_sdk.config import TrpcConfig
-from trpc_sdk.plugin import register_plugin
 
 # Process-wide executor. ``None`` means it has not been created yet.
 # After fork the child must set this back to ``None`` before
@@ -35,29 +30,19 @@ from trpc_sdk.plugin import register_plugin
 GlobalThreadPool = None
 
 
-@register_plugin(PluginType.POOL, "thread")
-def setup() -> None:
-    """Build the executor when the plugin manager initializes this plugin.
-
-    ``PluginManager`` calls ``cls()`` at the WORKER stage. Here ``cls``
-    is this function, so the side effect is :func:`init_thread_pool`.
-
-    Args:
-        None.
-    """
-    init_thread_pool()
-
-
 def init_thread_pool() -> None:
     """Replace :data:`GlobalThreadPool` with a new executor.
 
     Size is ``TrpcConfig.server_config().thread_num`` in the current
-    process. Called from :func:`setup` and from the lazy path in
+    process. Called from worker startup and from the lazy path in
     :func:`submit`.
 
     Args:
         None.
     """
+    # Imported here because ``trpc_sdk.config`` builds on ``trpc_sdk.utils``.
+    from trpc_sdk.config import TrpcConfig  # pylint: disable=import-outside-toplevel
+
     global GlobalThreadPool
     GlobalThreadPool = concurrent.futures.ThreadPoolExecutor(
         TrpcConfig.server_config().thread_num)

@@ -12,7 +12,7 @@ imports it eagerly so the slot is filled as soon as
 ``trpc_sdk.transport`` loads.
 
 Unary calls go through :meth:`ClientTransport.round_trip`, which picks
-TCP (one-shot or multiplexed) or UDP from :class:`RoundTripOptions`.
+TCP or UDP from :class:`RoundTripOptions`.
 Streaming calls never use ``round_trip``: :meth:`ClientTransport.start`
 takes a pooled connection, stores a :class:`ClientConn` under the
 message ``stream_id``, and later :meth:`send` / :meth:`recv` /
@@ -34,13 +34,12 @@ from trpc_sdk.abc import TrpcContext
 from trpc_sdk.exceptions import ServerSystemError
 from trpc_sdk.plugin import get_plugin
 from trpc_sdk.plugin import register_plugin
-from trpc_sdk.pool import get_pool_connection
 from ._client_transport_stream import ClientConn as ClientStreamConn
 from ._client_transport_tcp import get_remain_time
-from ._client_transport_tcp import tcp_multiplexed
 from ._client_transport_tcp import tcp_round_trip
 from ._client_transport_udp import udp_round_trip
 from ._options import RoundTripOptions
+from ._pool import get_pool_connection
 
 
 @register_plugin(PluginType.CLIENT_TRANSPORT, "trpc", init_pos=PluginInitPos.WORKER)
@@ -68,11 +67,9 @@ class ClientTransport(BaseClientStreamTransport):
     async def round_trip(self, ctx: TrpcContext, req_data: bytes, options: RoundTripOptions):
         """Send ``req_data`` and optionally wait for one response.
 
-        Branch is ``options.network`` then ``options.enable_multiplexed``:
+        Branch is ``options.network``:
 
-        - ``tcp`` + multiplexed: :func:`tcp_multiplexed` (virtual conn;
-          the real TCP stays open for other requests)
-        - ``tcp`` otherwise: :func:`tcp_round_trip` (pooled one-shot;
+        - ``tcp``: :func:`tcp_round_trip` (pooled one-shot;
           ``close()`` in ``finally`` returns the conn to the pool)
         - ``udp``: :func:`udp_round_trip`
 
@@ -80,7 +77,7 @@ class ClientTransport(BaseClientStreamTransport):
             ctx: Client context; timestamps and RPCz sizes are written
                 inside the TCP / UDP helpers.
             req_data: Encoded request bytes.
-            options: Address, network, pool, and multiplexed knobs.
+            options: Address, network, and pool knobs.
 
         Returns:
             Response frame bytes, or empty bytes for ``SendOnly``.
@@ -91,9 +88,6 @@ class ClientTransport(BaseClientStreamTransport):
             ClientInvokeError: Any other I/O failure.
         """
         if options.network == 'tcp':
-            if options.enable_multiplexed:
-                # Multiplexed path: one TCP, many in-flight request ids.
-                return await tcp_multiplexed(ctx, req_data, options)
             return await tcp_round_trip(ctx, req_data, options)
         if options.network == 'udp':
             return await udp_round_trip(ctx, req_data, options)

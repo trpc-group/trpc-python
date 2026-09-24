@@ -40,3 +40,6 @@ cdef class TrpcContext:
     cpdef object get_meta_data(self, object key, object default=*)
     cpdef object pop_meta_data(self, object key, object default=*)
     cpdef object get_client_message(self)
+    cpdef long get_timeout_ms(self)
+    cpdef long get_timeout_us(self)
+    cpdef double get_timeout_sec(self)

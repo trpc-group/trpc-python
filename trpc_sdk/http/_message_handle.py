@@ -27,8 +27,6 @@ from trpc_sdk.abc import get_message
 from trpc_sdk.utils import now_ms
 from trpc_sdk.utils import set_addr_to_ctx_from_transport
 from ._codec import ServerHttpCodec
-from ._constants import HTTP_REQ_KEY
-from ._constants import HTTP_RSP_KEY
 from ._constants import LOCAL_ADDR
 from ._constants import TRANS_INFO_BASE64_KEY
 from ._constants import USER_ROUTE_KEY
@@ -74,11 +72,11 @@ class HttpMessageHandle:
         self._addr = f"{self._process_info.addresses[self._index][0]}:{self._process_info.addresses[self._index][1]}"
 
     def _init_request_context(self, ctx: TrpcContext, request: Request) -> web.Response:
-        """Stash timeout, request/response and TrpcMessage onto ``ctx``.
+        """Stash timeout and TrpcMessage onto ``ctx``, with request/response on the message.
 
-        The returned ``web.Response`` is the same object stored under
-        ``HTTP_RSP_KEY``, so later header/body writes are what aiohttp
-        sends.
+        The returned ``web.Response`` is the same object stored as
+        ``message.server_raw_rsp``, so later header/body writes are what
+        aiohttp sends.
 
         Args:
             ctx: Fresh tRPC context for this request.
@@ -91,12 +89,12 @@ class HttpMessageHandle:
         ctx.recv_time = now_ms()
 
         response = web.Response()
-        ctx.with_meta_data(HTTP_REQ_KEY, request)
-        ctx.with_meta_data(HTTP_RSP_KEY, response)
         ctx.with_meta_data(TRANS_INFO_BASE64_KEY, self._is_base64)
         ctx.with_meta_data(LOCAL_ADDR, self._addr)
 
-        get_message(ctx)
+        message = get_message(ctx)
+        message.set_server_raw_req(request)
+        message.set_server_raw_rsp(response)
         set_addr_to_ctx_from_transport(ctx, request.transport)
 
         return response
@@ -167,4 +165,4 @@ class HttpMessageHandle:
         """
         message = get_message(ctx)
         message.set_server_rpc_name(request.path)
-        ServerHttpCodec.decode_trpc_req_header(message, request)
+        ServerHttpCodec.decode_trpc_req_header(ctx, message, request)

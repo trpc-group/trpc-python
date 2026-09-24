@@ -60,6 +60,7 @@ from trpc_sdk.transport import WorkerMessageConnection
 from trpc_sdk.transport import WorkerTaskConnection
 from trpc_sdk.utils import TimerExecutor
 from trpc_sdk.utils import asynclib
+from trpc_sdk.utils import init_thread_pool
 from ._signals import run_worker_signal_handle
 from ._types import ChildRecord
 from ._types import TaskInfo
@@ -633,8 +634,13 @@ class BaseWorker:
         This process runs user handlers, so filters, naming, metrics and the
         rest must be fully set up. Infrastructure roles that never execute
         user code narrow this to ``init_task_plugins()``.
+
+        The thread pool is not a plugin, but it is built here for the same
+        reason: it must be created after fork, in the process that will
+        ``submit`` blocking work from a handler.
         """
         init_worker_plugins()
+        init_thread_pool()
 
     def _prepare_to_serve(self) -> None:
         """Wire task IPC, the message pipe, the request source, then timers.

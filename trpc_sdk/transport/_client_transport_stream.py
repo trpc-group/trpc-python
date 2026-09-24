@@ -25,10 +25,10 @@ from trpc_sdk.abc import TrpcContext
 from trpc_sdk.exceptions import ClientInvokeError
 from trpc_sdk.exceptions import ClientTimeoutError
 from trpc_sdk.log import logger
-from trpc_sdk.pool import PooledConnection
 from trpc_sdk.utils import Queue
 from ._client_transport_tcp import get_remain_time
 from ._options import RoundTripOptions
+from ._pool import PooledConnection
 
 
 class ClientConn:

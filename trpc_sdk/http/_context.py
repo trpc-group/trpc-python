@@ -7,7 +7,7 @@
 """HTTP request/response accessors on :class:`~trpc_sdk.abc.TrpcContext`.
 
 Handlers use these functions to reach the aiohttp ``Request`` /
-``Response`` stashed on a context, and the HTTP client uses them to
+``Response`` held on a context's message, and the HTTP client uses them to
 pull status and headers off a :class:`~trpc_sdk.http.TrpcHttpResponse`.
 Extra response headers and accepted status codes travel through
 dedicated meta keys so codec encode can merge them after the user
@@ -24,35 +24,36 @@ from aiohttp.web_request import Request
 from aiohttp.web_response import Response
 
 from trpc_sdk.abc import TrpcContext
-from ._constants import HTTP_REQ_KEY
+from trpc_sdk.abc import get_message
 from ._constants import HTTP_RSP_HEADER_KEY
-from ._constants import HTTP_RSP_KEY
 from ._constants import HTTP_RSP_OK_CODE_KEY
 from ._http_response import TrpcHttpResponse
 
 
 def get_http_request(ctx: TrpcContext) -> Request:
-    """Return the aiohttp request stored on ``ctx``.
+    """Return the aiohttp request stored on ``ctx``'s message.
 
     Args:
-        ctx: tRPC context whose meta holds the request.
+        ctx: Server-side tRPC context of an HTTP call.
 
     Returns:
-        The aiohttp ``Request`` previously stored under ``HTTP_REQ_KEY``.
+        The aiohttp ``Request`` held as ``message.server_raw_req``, or
+        None outside an HTTP server call.
     """
-    return ctx.get_meta_data(HTTP_REQ_KEY)
+    return get_message(ctx).server_raw_req
 
 
 def get_http_response(ctx: TrpcContext) -> Response:
-    """Return the aiohttp response stored on ``ctx``.
+    """Return the aiohttp response stored on ``ctx``'s message.
 
     Args:
-        ctx: tRPC context whose meta holds the response.
+        ctx: Server-side tRPC context of an HTTP call.
 
     Returns:
-        The aiohttp ``Response`` previously stored under ``HTTP_RSP_KEY``.
+        The aiohttp ``Response`` held as ``message.server_raw_rsp``, or
+        None outside an HTTP server call.
     """
-    return ctx.get_meta_data(HTTP_RSP_KEY)
+    return get_message(ctx).server_raw_rsp
 
 
 def get_http_header_in_client(rsp: TrpcHttpResponse) -> CIMultiDictProxy:

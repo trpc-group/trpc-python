@@ -7,10 +7,10 @@
 """Shared type definitions for the client connection pool.
 
 :class:`ConnPoolOptions` is stamped onto client transport options and
-read by :class:`~trpc_sdk.pool.ConnectionPool` /
-:class:`~trpc_sdk.pool.ConnectionPoolManager`. :data:`ConnAddress`
-is the key type used when a manager indexes a pool by socket or
-``(host, port)``.
+read by :class:`~trpc_sdk.transport._pool.ConnectionPool` /
+:class:`~trpc_sdk.transport._pool.ConnectionPoolManager`.
+:data:`ConnAddress` is the key type used when a manager indexes a pool
+by socket or ``(host, port)``.
 """
 
 from __future__ import annotations
@@ -30,7 +30,8 @@ class ConnPoolOptions:
 
     Attributes:
         dial_timeout: Connect timeout in milliseconds; divided by 1000
-            before use in :meth:`trpc_sdk.pool.ConnectionPoolManager.get`.
+            before use in
+            :meth:`trpc_sdk.transport._pool.ConnectionPoolManager.get`.
         idle_timeout: Seconds an idle conn may sit in the queue. ``0``
             disables the idle check.
         max_conn_lifetime: Hard lifetime in seconds from create time;

@@ -41,7 +41,6 @@ from trpc_sdk.exceptions import TrpcException
 from trpc_sdk.exceptions import UnknownError
 from trpc_sdk.log import logger
 from trpc_sdk.naming import get_selector
-from trpc_sdk.pool import default_multiplexed_pool
 from trpc_sdk.serialization import deserialize
 from trpc_sdk.serialization import serialize
 from trpc_sdk.transport import ClientTimeoutReason
@@ -66,9 +65,8 @@ def get_client():
 async def _invoke_backend(ctx: TrpcContext, req: Any, rsp: Any, opts: Options) -> Any:
     """Encode ``req``, round-trip, and decode into ``rsp``.
 
-    This is the innermost filter-chain handler. Multiplexed transports
-    already return a decoded body, so that path skips ``codec.decode``.
-    Send-only calls return before any response handling.
+    This is the innermost filter-chain handler. Send-only calls return
+    before any response handling.
 
     Args:
         ctx: Client context whose message holds codec state.
@@ -92,13 +90,7 @@ async def _invoke_backend(ctx: TrpcContext, req: Any, rsp: Any, opts: Options) -
     req_body = compress(compress_type, req_body)
 
     client_codec = opts.codec
-    req_buff = client_codec.encode(msg, req_body)
-
-    if opts.enable_multiplexed:
-        opts.call_options.set_enable_multiplexed(True)
-        opts.call_options.set_msg(msg)
-        opts.call_options.set_codec(opts.codec)
-        opts.call_options.set_multiplexed(default_multiplexed_pool)
+    req_buff = client_codec.encode_data(ctx, req_body)
 
     opts.call_options.set_socket_type(opts.socket_type)
 
@@ -114,11 +106,7 @@ async def _invoke_backend(ctx: TrpcContext, req: Any, rsp: Any, opts: Options) -
 
     if opts.call_options.req_type == RequestType.SendOnly:
         return
-    # Multiplexed round-trip already returns the decoded body.
-    if opts.enable_multiplexed:
-        rsp_body = rsp_buff
-    else:
-        rsp_body = client_codec.decode(msg, rsp_buff)
+    rsp_body = client_codec.decode_data(ctx, rsp_buff)
 
     if len(rsp_body) > 0:
         # Prefer types from the backend response, then the same per-call overrides.

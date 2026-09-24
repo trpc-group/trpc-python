@@ -16,7 +16,6 @@ form serialisation all need:
 - :class:`UrlParser` — scheme-preserving URL parse used by the HTTP
   client
 - :class:`HttpSession` — thread-local aiohttp session holder
-- :data:`TYPE_CALLABLE_MAP` — protobuf field type to Python callable
 """
 
 from __future__ import annotations
@@ -31,16 +30,14 @@ from urllib.parse import ParseResult
 from urllib.parse import urlparse
 from urllib.parse import urlunparse
 
-import six
 from aiohttp import ClientSession
 from aiohttp import hdrs
-from google.protobuf.descriptor import FieldDescriptor
 
 from trpc_sdk.compressor import CompressType
 from trpc_sdk.exceptions import TrpcErrorCode
 from trpc_sdk.exceptions import TrpcErrorType
 from trpc_sdk.serialization import SerializationType
-from trpc_sdk.utils import strtobool
+
 from ._exceptions import InvalidURL
 from ._utils import find_from_dict
 from ._utils import reverse_dict
@@ -134,25 +131,6 @@ _trpc_err_code_to_http_status: Dict[int, http.HTTPStatus] = {
 }
 
 find_http_status = partial(find_from_dict, _trpc_err_code_to_http_status)
-
-TYPE_CALLABLE_MAP = {
-    FieldDescriptor.TYPE_DOUBLE: float,
-    FieldDescriptor.TYPE_FLOAT: float,
-    FieldDescriptor.TYPE_INT32: int,
-    FieldDescriptor.TYPE_INT64: int if six.PY3 else six.integer_types[1],
-    FieldDescriptor.TYPE_UINT32: int,
-    FieldDescriptor.TYPE_UINT64: int if six.PY3 else six.integer_types[1],
-    FieldDescriptor.TYPE_SINT32: int,
-    FieldDescriptor.TYPE_SINT64: int if six.PY3 else six.integer_types[1],
-    FieldDescriptor.TYPE_FIXED32: int,
-    FieldDescriptor.TYPE_FIXED64: int if six.PY3 else six.integer_types[1],
-    FieldDescriptor.TYPE_SFIXED32: int,
-    FieldDescriptor.TYPE_SFIXED64: int if six.PY3 else six.integer_types[1],
-    FieldDescriptor.TYPE_BOOL: strtobool,
-    FieldDescriptor.TYPE_STRING: six.text_type,
-    FieldDescriptor.TYPE_BYTES: six.binary_type,
-    FieldDescriptor.TYPE_ENUM: int,
-}
 
 
 class UrlParser:

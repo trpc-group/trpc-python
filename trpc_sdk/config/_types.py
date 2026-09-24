@@ -24,8 +24,7 @@ from enum import unique
 from typing import List
 from typing import Optional
 
-import automaxprocs
-
+from trpc_sdk.common import get_max_procs
 from ._constants import DEFAULT_BIND_INFO_FILE
 from ._constants import DEFAULT_CLIENT_DIAL_TIMEOUT_MS
 from ._constants import DEFAULT_CLIENT_IDLE_TIME_S
@@ -171,11 +170,11 @@ class MemoryInspection:
 
 
 def _default_worker_num() -> int:
-    return automaxprocs.get_max_procs() or DEFAULT_WORKER_NUM_FALLBACK
+    return get_max_procs() or DEFAULT_WORKER_NUM_FALLBACK
 
 
 def _default_thread_num() -> int:
-    return (automaxprocs.get_max_procs() or DEFAULT_WORKER_NUM_FALLBACK) * DEFAULT_THREAD_NUM_PER_CORE
+    return (get_max_procs() or DEFAULT_WORKER_NUM_FALLBACK) * DEFAULT_THREAD_NUM_PER_CORE
 
 
 def _default_max_read_buf_size() -> int:
