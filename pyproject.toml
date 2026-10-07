@@ -48,6 +48,13 @@ directives = { language_level = "3", boundscheck = false, wraparound = false }
 exclude = [
     # Keep package __init__ as pure Python re-exports; compiling it drops imports.
     ".*/_cython/__init__\\.(py|pxd)$",
+    # Header-only inline helpers and their package cimport entry; nothing to build.
+    ".*/utils/_cython/.*\\.pxd$",
+    ".*/utils/__init__\\.pxd$",
+    # C driver headers are not in this repo; compiling these would look for
+    # trpc_sdk/driver/*.h and fail the build.
+    ".*/_transport/_c_(ipc_codec|dispatcher)\\.(pyx|pxd)$",
+    ".*/_task/_(ctask|task_driver|c_task_util)\\.(pyx|pxd)$",
 ]
 
 [project]
@@ -70,10 +77,16 @@ classifiers = [
 ]
 dependencies = [
     "loguru",
-    "protobuf >=3.19.4",
+    "protobuf>=3.19.4,<3.20",
     "packaging",
     "PyYAML",
     "dataclasses>=0.8; python_version < '3.7'",
+    # Imported at process startup; requirements.txt alone is not installed by `pip install -e .`.
+    "aiohttp>3.6.2",
+    "aiocron>=1.6",
+    "netifaces==0.10.9",
+    "portalocker>=1.4.0",
+    "six==1.15.0",
 ]
 
 [project.urls]
@@ -100,6 +113,7 @@ test = [
     "pyparsing==2.2.0",
     "pytest>=6.1.0",
     "pytest-cov",
+    "automaxprocs==2.0.0",
     "xmlrunner; python_version < '3.12'",
     "unittest-xml-reporting; python_version >= '3.12'",
 ]

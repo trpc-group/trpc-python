@@ -24,10 +24,7 @@ from enum import unique
 from typing import List
 from typing import Optional
 
-import automaxprocs
-
-from trpc_sdk.utils import UNIX_TYPE
-
+from trpc_sdk.common import get_max_procs
 from ._constants import DEFAULT_BIND_INFO_FILE
 from ._constants import DEFAULT_CLIENT_DIAL_TIMEOUT_MS
 from ._constants import DEFAULT_CLIENT_IDLE_TIME_S
@@ -50,8 +47,8 @@ from ._constants import DEFAULT_RPCZ_SAMPLE_RATE
 from ._constants import DEFAULT_STREAM_MAX_WINDOW_SIZE
 from ._constants import DEFAULT_TASK_QUEUE_SIZE
 from ._constants import DEFAULT_TASK_WAIT_INTERVAL_MS
-from ._constants import DEFAULT_THREAD_NUM_PER_CORE
 from ._constants import DEFAULT_WORKER_NUM_FALLBACK
+from ._constants import UNIX_TYPE
 
 
 @unique
@@ -99,6 +96,7 @@ class GlobalConfig:
     local_ip: str = ''  # Peer service local IP address.
     enable_set: str = ''  # Peer service enable set.
     full_set_name: str = ''  # Peer service full set name.
+    enable_uvloop: bool = False  # Use the uvloop event-loop policy when uvloop is installed.
     save_bind_info: Optional[SaveBindInfo] = None  # Save bind information to a file.
     rpcz: Optional[Rpcz] = None  # Rpcz sampling and caching configuration.
 
@@ -172,11 +170,7 @@ class MemoryInspection:
 
 
 def _default_worker_num() -> int:
-    return automaxprocs.get_max_procs() or DEFAULT_WORKER_NUM_FALLBACK
-
-
-def _default_thread_num() -> int:
-    return (automaxprocs.get_max_procs() or DEFAULT_WORKER_NUM_FALLBACK) * DEFAULT_THREAD_NUM_PER_CORE
+    return get_max_procs() or DEFAULT_WORKER_NUM_FALLBACK
 
 
 def _default_max_read_buf_size() -> int:
@@ -202,7 +196,8 @@ class ServerConfig:
     protocol: str = ''
     mode: str = ''  # server running mode
     worker_num: int = field(default_factory=_default_worker_num)  # default: CPU core count
-    thread_num: int = field(default_factory=_default_thread_num)  # default: cores * 5
+    worker_thread_num: int = 0  # merge-mode event-loop threads; 0 means use the server default
+    rpc_task_num: int = 0  # separate-mode rpc task processes; 0 means use the server default
     max_rbuf_size: int = field(default_factory=_default_max_read_buf_size)  # default: 8 MiB
     registry_delay: int = 0  # registry delay (ms)
     registry_option: int = 0  # registry control: 0=off, 1=on
@@ -217,7 +212,7 @@ class ServerConfig:
     task_consumer_num: int = 1  # task process consumer thread count
     reboot_child: bool = False  # restart child process on failure
     encode_base64: bool = False  # use base64 encoding
-    registry_after_fork: bool = False  # register service after fork
+    registry_after_fork: bool = False  # no effect: services register once the worker listens
     memory_inspection: Optional[MemoryInspection] = None  # memory inspection config
     heartbeat_interval: int = 0  # process heartbeat interval (s)
     close_wait_time: int = 0  # graceful shutdown wait time (ms)

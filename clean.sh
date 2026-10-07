@@ -13,9 +13,7 @@ rm -rf .__*
 
 rm -rf trpc_sdk.egg-info
 rm -rf trpc_python.egg-info
-rm -rf trpc_sdk/abc/_cython/*.so
-rm -rf trpc_sdk/abc/_cython/*.c
-rm -rf trpc_sdk/abc/_cython/*.cpp
+find trpc_sdk -type f \( -name '*.so' -o -name '*.c' -o -name '*.cpp' \) -delete
 
 rm -rf examples/*.log
 rm -rf examples/.__trpc*
