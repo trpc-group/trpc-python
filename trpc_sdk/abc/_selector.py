@@ -6,8 +6,9 @@
 
 """Service selector extension interfaces and routing options.
 
-This module defines routing option models and the abstract selector contract
-used to choose a service node and report call outcomes.
+This module defines routing option models and the abstract selector,
+service-router, and DSN extractor contracts used to choose a service
+node and report call outcomes.
 """
 from __future__ import annotations
 
@@ -16,10 +17,13 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Dict
+from typing import List
 from typing import Optional
+from typing import Tuple
 
 from ._cython import TrpcContext  # pyright: ignore[reportMissingModuleSource]
 from ._node import Node
+from ._plugin import BasePlugin
 
 
 @dataclass
@@ -245,7 +249,7 @@ class SelectorOption:
         self.service_router_opt.metadata = metadata
 
 
-class BaseSelector(ABC):
+class BaseSelector(BasePlugin):
     """Define service endpoint selection and call-result reporting."""
 
     @abstractmethod
@@ -274,3 +278,56 @@ class BaseSelector(ABC):
             ``True`` if the report was accepted, otherwise ``False``.
         """
         ...
+
+
+class BaseServiceRouter(BasePlugin):
+    """Filter a discovered node list before load balancing.
+
+    Implementations must not mutate the incoming ``nodes`` list unless
+    they also return that same object; callers may reuse the original
+    list. Returning an empty list is a valid "no node matches" result
+    and is what the load balancer then reports as unavailable.
+    """
+
+    @abstractmethod
+    async def filter(
+            self,
+            service_name: str,
+            nodes: List[Node],
+            opt: ServerRouterOption) -> List[Node]:
+        """Return the nodes that are legal for this call.
+
+        Args:
+            service_name: Callee name the client asked to resolve.
+            nodes: Nodes produced by discovery for ``service_name``.
+            opt: Source/destination namespace, env, set, and metadata
+                that Polar-style routers match against.
+
+        Returns:
+            A (possibly empty) subset of ``nodes``. Order is preserved
+            unless the implementation documents otherwise.
+        """
+
+
+class ServiceNameExtractor(ABC):
+    """Locate the selectable service-name span inside a DSN.
+
+    ``extract`` returns byte offsets into the original string so
+    :class:`~trpc_sdk.naming._dsn_selector.ResolveSelector` can splice
+    the resolved address back into the surrounding DSN (user, password,
+    scheme, and so on stay untouched).
+    """
+
+    @abstractmethod
+    def extract(self, service_name: str) -> Tuple[int, int]:
+        """Return the ``(pos, length)`` span of the inner service name.
+
+        Args:
+            service_name: Full DSN, for example
+                ``mongodb+polaris://user:passwd@{polaris_name}``.
+
+        Returns:
+            A ``(pos, length)`` pair. ``pos`` is the start index of the
+            extractable name; ``length`` is how many characters to take.
+            ``(0, 0)`` means "nothing to extract".
+        """

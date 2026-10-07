@@ -20,14 +20,17 @@ cdef extern from "arpa/inet.h":
     uint32_t ntohl(uint32_t netlong) noexcept nogil
 
 
-cpdef TrpcFrameHead new_frame_head(
+cpdef TrpcFrameHead create_frame_head(
     uint8_t frame_type,
     uint8_t frame_state,
     uint32_t stream_id,
 )
 cpdef TrpcFrameHead parse_frame_head(bytes data)
 
-cpdef TrpcContext create_new_context(TrpcContext context)
-cpdef TrpcContext create_client_context_from_server(TrpcContext context)
-cpdef TrpcMessage get_or_create_message(TrpcContext context)
-cpdef TrpcMessage create_new_message_for_context(TrpcContext context)
+# Every clone returns a (context, message) tuple; get_message returns the
+# message alone, attaching one to the context on first access.
+cpdef tuple create_message(TrpcContext context)
+cpdef TrpcMessage get_message(TrpcContext context)
+cpdef tuple clone_context_and_message(TrpcContext context)
+cpdef tuple clone_message(TrpcContext context)
+cpdef tuple clone_client_message(TrpcContext context)

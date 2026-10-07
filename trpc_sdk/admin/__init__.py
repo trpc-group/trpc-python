@@ -9,7 +9,7 @@ from trpc_sdk import config
 from trpc_sdk import plugin
 from trpc_sdk.plugin import PluginType
 from trpc_sdk.plugin import PluginInitPos
-from trpc_sdk.utils.loop_lib import asynclib
+from trpc_sdk.utils import get_async_lib
 
 
 def getLoglevel(logger):
@@ -50,7 +50,7 @@ def on_worker_start(func):
     return func
 
 
-@plugin.register_plugin(PluginType.ADMIN, 'admin', init_pos=PluginInitPos.MASTER)
+@plugin.register_plugin(PluginType.ADMIN, 'admin', init_pos=PluginInitPos.WORKER)
 class AdminPlugin(plugin.BasePlugin):
 
     def get_config(self, master):
@@ -72,6 +72,7 @@ class AdminPlugin(plugin.BasePlugin):
             func(server.routes, server.configer)
 
         def run():
+            asynclib = get_async_lib(config.TrpcConfig.global_config().enable_uvloop)
             asyncio.set_event_loop(asynclib.new_event_loop())
             server.run(ip, port, print=None, access_log=None, handle_signals=False)
 
@@ -87,6 +88,7 @@ class AdminPlugin(plugin.BasePlugin):
             func(client.configer)
 
         def run():
+            asynclib = get_async_lib(config.TrpcConfig.global_config().enable_uvloop)
             loop = asynclib.new_event_loop()
             asyncio.set_event_loop(loop)
             loop.run_until_complete(client.run(ip, port))

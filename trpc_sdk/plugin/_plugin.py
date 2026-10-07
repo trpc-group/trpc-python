@@ -10,11 +10,11 @@ from __future__ import annotations
 from collections import OrderedDict
 from collections import defaultdict
 from dataclasses import dataclass
+from typing import Callable
 from typing import Dict
 from typing import List
 from typing import Optional
 
-from trpc_sdk.abc import BasePlugin
 from trpc_sdk.abc import PluginInitPos
 from trpc_sdk.abc import PluginType
 from trpc_sdk.abc import TaskInfo
@@ -22,14 +22,24 @@ from trpc_sdk.abc import TaskInfo
 
 @dataclass
 class PluginSpec:
-    """Plugin specification"""
+    """Plugin specification
 
-    cls: Optional[type[BasePlugin]]
+    ``cls`` is whatever ``register_plugin`` decorated. Usually a
+    :class:`~trpc_sdk.abc.BasePlugin` subclass, but a slot may also be
+    filled by a factory function or by a Cython extension type, so the
+    only guarantee is that calling it produces the instance.
+
+    ``report`` marks the plugin for version statistics: a reporter reads
+    the specs and sends ``{plugin_name: version}`` only for the marked ones.
+    """
+
+    cls: Optional[Callable[[], object]]
     init_pos: PluginInitPos
     plugin_type: PluginType
     plugin_name: str
     task_info: Optional[TaskInfo] = None
     version: str = ""
+    report: bool = False
 
 
 class _PluginManager:
@@ -37,7 +47,7 @@ class _PluginManager:
 
     def __init__(self):
         self._plugin_specs: Dict[PluginType, Dict[str, PluginSpec]] = defaultdict(dict)
-        self._plugin_instances: Dict[PluginType, Dict[str, BasePlugin]] = defaultdict(dict)
+        self._plugin_instances: Dict[PluginType, Dict[str, object]] = defaultdict(dict)
         self._plugin_spec_sequence: Dict[PluginType, List[str]] = defaultdict(list)
 
     def set_plugin_order(self, plugin_type: PluginType, plugin_name_sequence: List[str]):
@@ -94,7 +104,7 @@ class _PluginManager:
         """
         return plugin_type in self._plugin_instances and plugin_name in self._plugin_instances[plugin_type]
 
-    def get_instance(self, plugin_type: PluginType, plugin_name: str) -> Optional[BasePlugin]:
+    def get_instance(self, plugin_type: PluginType, plugin_name: str) -> Optional[object]:
         """
         Get plugin instance by plugin type and plugin name
 
@@ -106,14 +116,21 @@ class _PluginManager:
         """
         return self._plugin_instances[plugin_type].get(plugin_name, None)
 
-    def set_instance(self, instance: BasePlugin) -> None:
+    def set_instance(self, plugin_type: PluginType, plugin_name: str, instance: object) -> None:
         """
         Set plugin instance
 
+        The slot is keyed by the registered type and name rather than by
+        the instance, because not every registered object is a
+        :class:`BasePlugin` carrying those as properties: a slot may be
+        filled by a plain factory function or by a Cython extension type.
+
         Args:
+            plugin_type: plugin type the instance was registered under
+            plugin_name: plugin name the instance was registered under
             instance: plugin instance
         """
-        self._plugin_instances[instance.type][instance.name] = instance
+        self._plugin_instances[plugin_type][plugin_name] = instance
 
     def remove_plugin_spec(self, plugin_spec: PluginSpec) -> None:
         """
@@ -129,7 +146,7 @@ class _PluginManager:
         specs = [spec for v in self._plugin_specs.values() for spec in v.values()]
         return specs
 
-    def all_plugin_instances(self) -> List[BasePlugin]:
+    def all_plugin_instances(self) -> List[object]:
         """Get all plugin instances"""
         instances = [instance for v in self._plugin_instances.values() for instance in v.values()]
         return instances
@@ -143,7 +160,7 @@ class _PluginManager:
         """
         return [spec for spec in self._plugin_specs[plugin_type].values()]
 
-    def all_plugin_instances_by_type(self, plugin_type: PluginType) -> List[BasePlugin]:
+    def all_plugin_instances_by_type(self, plugin_type: PluginType) -> List[object]:
         """Get all plugin instances by plugin type
         Args:
             plugin_type: plugin type

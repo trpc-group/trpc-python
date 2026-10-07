@@ -14,12 +14,30 @@ from abc import ABC
 from abc import abstractmethod
 from dataclasses import dataclass
 from enum import IntEnum
+from enum import unique
 from typing import Any
 from typing import Callable
 from typing import List
 from typing import Optional
 
 from ._cython import TrpcContext  # pyright: ignore[reportMissingModuleSource]
+
+
+@unique
+class ProcessType(IntEnum):
+    """Identify the role stamped on ``multiprocessing.current_process().type``.
+
+    Attributes:
+        UNKNOWN: Default before a role is stamped, or an unclassified process.
+        WORKER: Worker process that serves RPC traffic.
+        TASK: Dedicated task process for offloaded work.
+        TIMER: Timer process that only runs timer executors.
+    """
+
+    UNKNOWN = 0
+    WORKER = 1
+    TASK = 2
+    TIMER = 3
 
 
 @dataclass
@@ -71,36 +89,16 @@ class ServiceDesc:
     stream_handler: Any = None
 
 
-class BaseService(ABC):
-    """Define request handling and service registration."""
+class BaseServer(ABC):
+    """Define the server interface: start serving and block."""
 
     @abstractmethod
-    async def handle(self, context: TrpcContext, request: bytes) -> bytes:
-        """Handle one request and return its encoded response.
+    def serve(self) -> None:
+        """Start the server and run until shutdown.
 
         Args:
-            context: Request-scoped RPC context.
-            request: Encoded inbound request bytes.
-
-        Returns:
-            Encoded outbound response bytes.
+            None.
         """
-        ...
-
-    @abstractmethod
-    def register(self, service_desc: ServiceDesc, fix_rpc_name: bool) -> None:
-        """Register unary and streaming handlers for a service.
-
-        Args:
-            service_desc: Service methods and streams to publish.
-            fix_rpc_name: Whether RPC names should be normalized on register.
-        """
-        ...
-
-    @abstractmethod
-    def run(self) -> None:
-        """Start serving registered methods."""
-        ...
 
 
 class BaseServerStream(ABC):
@@ -135,20 +133,6 @@ class BaseServerStream(ABC):
             Decoded application message.
         """
         ...
-
-
-class ProcessType(IntEnum):
-    """Identify the process role of a server worker.
-
-    Attributes:
-        MASTER: Master process that supervises workers.
-        WORKER: Worker process that serves RPC traffic.
-        TASK: Dedicated task process for offloaded work.
-    """
-
-    MASTER = 0
-    WORKER = 1
-    TASK = 2
 
 
 class BaseTrpcServerEngine(ABC):

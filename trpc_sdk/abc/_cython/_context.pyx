@@ -6,6 +6,9 @@
 
 # cython: language_level=3, boundscheck=False, wraparound=False
 
+from trpc_sdk.utils cimport ms_to_sec
+from trpc_sdk.utils cimport ms_to_us
+
 
 cdef class RpczData:
     """Store RPC scheduling and I/O timestamps in microseconds."""
@@ -25,9 +28,9 @@ cdef class RpczData:
 cdef class TrpcContext:
     """Own the runtime state and message for one RPC invocation.
 
-    Ownership is intentionally one-way: the context holds the message, and the
-    message has no reference back to the context. Public native fields provide
-    direct access to statically typed Cython callers.
+    The context owns the message, not the other way round. ``msg`` stays
+    ``None`` until :func:`trpc_sdk.abc.get_message` or one of the clone
+    helpers attaches one.
     """
 
     def __cinit__(self):
@@ -53,6 +56,34 @@ cdef class TrpcContext:
     cpdef object pop_meta_data(self, object key, object default=None):
         """Remove and return a metadata value or the supplied default."""
         return self.meta_data.pop(key, default)
+
+    cpdef object get_message(self):
+        """Return the message attached to this context.
+
+        Unlike the module-level :func:`trpc_sdk.abc.get_message`, this never
+        creates one, so it can return ``None``. The client invoke path reads
+        codec state from this object.
+
+        Returns:
+            The :class:`TrpcMessage`, or ``None`` before one is attached.
+        """
+        return self.msg
+
+    cpdef long get_timeout_ms(self):
+        """Return ``timeout`` in milliseconds (the unit it is stored in).
+
+        Pure unit accessor: ``<= 0`` is returned as-is and still means
+        "no limit" to callers.
+        """
+        return self.timeout
+
+    cpdef long get_timeout_us(self):
+        """Return ``timeout`` in microseconds; ``<= 0`` means no limit."""
+        return ms_to_us(self.timeout)
+
+    cpdef double get_timeout_sec(self):
+        """Return ``timeout`` in seconds; ``<= 0`` means no limit."""
+        return ms_to_sec(self.timeout)
 
     def __copy__(self):
         """Return a shallow copy without copying the owned message."""
