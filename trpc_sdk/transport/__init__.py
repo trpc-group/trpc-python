@@ -1,0 +1,199 @@
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
+
+"""tRPC-Python transport package: how bytes travel, not what they mean.
+
+The package holds both halves of the wire path.
+
+The **client half** turns an encoded request into a round trip over a pooled
+connection: :class:`ClientTransport` picks TCP or UDP from
+:class:`RoundTripOptions`, and :class:`ClientConn` keeps the frame
+queue for streaming calls.
+
+The **server half** never accepts connections itself. It tells
+:class:`~trpc_sdk.server.TrpcServerEngine` which children to fork, and the
+asyncio protocols in this package then run *inside* those children:
+
+- dispatcher / separate mode: :class:`DispatcherClientConnection` accepts
+  the client TCP, splits frames, and writes them to a worker pipe;
+  :class:`WorkerDispatcherConnection` (or the C / trpcio variants) runs
+  the handler and writes the response back
+- merge mode: :class:`ExecutorUDPConnection` and the re-exported
+  :class:`TCPConnection` listen on the merge worker. The TCP Protocol is
+  owned by :mod:`trpc_sdk.protocol`; this package only forwards the name
+  so :class:`~trpc_sdk.server.MergeWorker` can import both listen
+  protocols from here.
+
+The package is split by responsibility:
+
+- :mod:`~trpc_sdk.transport._client_transport` — ``ClientTransport`` and the
+  plugin lookups; the TCP / UDP /
+  stream round trips live in ``_client_transport_tcp``,
+  ``_client_transport_udp`` and ``_client_transport_stream``
+- :mod:`~trpc_sdk.transport._options` — ``RoundTripOptions`` the client half
+  fills per call
+- :mod:`~trpc_sdk.transport._pool` — client connection pools the TCP round
+  trip dials through; a tRPC-Python extension with no cross-language
+  counterpart, so it is scoped to the client transport half
+- :mod:`~trpc_sdk.transport._udp_connection` — datagram endpoint helpers used
+  by the UDP round trip
+- :mod:`~trpc_sdk.transport._transport` — ``TrpcServerTransport``:
+  process-model registration on the engine
+- :mod:`~trpc_sdk.transport._stream_transport` — stream write-handle map on
+  top of the unary listen path
+- :mod:`~trpc_sdk.transport._factory` — plugin factory,
+  ``DefaultServerTransport*``, :func:`get_server_transport`
+- :mod:`~trpc_sdk.transport._dispatcher`, :mod:`~trpc_sdk.transport._worker`,
+  :mod:`~trpc_sdk.transport._executor`, :mod:`~trpc_sdk.transport._task` — the
+  asyncio protocols each process attaches to its pipes
+- :mod:`~trpc_sdk.transport._connection` — shared ``BaseConnection``
+- :mod:`~trpc_sdk.transport._socket` — listen-socket constructors
+- :mod:`~trpc_sdk.transport._scheduler` — worker-selection hooks
+- :mod:`~trpc_sdk.transport._types`, :mod:`~trpc_sdk.transport._constants` —
+  shared records and defaults (listen backlog, IPC frame sizes,
+  ``RequestType``, ``ClientTimeoutReason``)
+- :mod:`~trpc_sdk.transport._cython` — Cython inner-IPC framing used
+  across dispatcher / worker / task pipes
+
+Symbols renamed or dropped relative to the pre-rewrite package are listed in
+``MIGRATION.md``; the frozen original lives in :mod:`trpc_sdk.old_transport`.
+"""
+
+from __future__ import annotations
+
+from importlib import import_module
+
+from trpc_sdk.abc import BaseServerTransportOption
+
+from ._cython import encode_worker_msg_req  # pylint: disable=no-name-in-module
+from ._client_transport import ClientTransport
+from ._client_transport import get_client_transport
+from ._client_transport import get_default_client_transport
+from ._client_transport_stream import ClientConn
+from ._connection import BaseConnection
+from ._constants import ClientTimeoutReason
+from ._constants import DEFAULT_BACKLOG
+from ._constants import FRAME_HEAD_LEN
+from ._constants import INNER_MAGIC_VALUE
+from ._constants import RequestType
+from ._dispatcher import DispatcherClientConnection
+from ._dispatcher import DispatcherRpczConnection
+from ._dispatcher import DispatcherWorkerConnection
+from ._factory import DefaultServerTransport
+from ._factory import DefaultServerTransportOption
+from ._factory import TrpcServerTransportFactory
+from ._factory import get_server_transport
+from ._options import RoundTripOptions
+from ._pool import ConnAddress
+from ._pool import ConnPoolOptions
+from ._pool import ConnectionPoolManager
+from ._pool import PooledConnection
+from ._pool import get_pool_connection
+from ._scheduler import get_next_worker
+from ._scheduler import register_dispatcher_worker_func
+from ._socket import create_inet_socket
+from ._socket import create_server_socket
+from ._socket import create_unix_socket
+from ._stream_transport import TrpcServerStreamTransport
+from ._transport import TrpcServerTransport
+from ._types import ClientConnectionInfo
+from ._types import SchedulerParams
+from ._udp_connection import PacketConnection
+from ._udp_connection import PacketReader
+from ._udp_connection import PacketReaderProtocol
+from ._udp_connection import PacketWriter
+from ._udp_connection import open_datagram_endpoint
+
+__all__ = [
+    # Client-side transport
+    "ClientTransport",
+    "get_client_transport",
+    "get_default_client_transport",
+    "ClientConn",
+    "RequestType",
+    "ClientTimeoutReason",
+    "RoundTripOptions",
+    # Client connection pool
+    "ConnAddress",
+    "ConnPoolOptions",
+    "ConnectionPoolManager",
+    "PooledConnection",
+    "get_pool_connection",
+    # Datagram endpoint helpers
+    "open_datagram_endpoint",
+    "PacketConnection",
+    "PacketReader",
+    "PacketReaderProtocol",
+    "PacketWriter",
+    # Listen / process-model registration
+    "TrpcServerTransport",
+    "TrpcServerStreamTransport",
+    "DefaultServerTransport",
+    "DefaultServerTransportOption",
+    "BaseServerTransportOption",
+    "TrpcServerTransportFactory",
+    "get_server_transport",
+    # Dispatcher-process protocols
+    "DispatcherClientConnection",
+    "DispatcherWorkerConnection",
+    "DispatcherRpczConnection",
+    # Worker-process protocols
+    "WorkerDispatcherConnection",
+    "WorkerTaskConnection",
+    "WorkerMessageConnection",
+    # Executor / merge-worker listen protocols
+    "ExecutorUDPConnection",
+    "ExecutorTaskConnection",
+    "TCPConnection",
+    # Task-process protocols
+    "TaskWorkerConnection",
+    "TASK_CONN",
+    # Shared types and hooks
+    "BaseConnection",
+    "ClientConnectionInfo",
+    "SchedulerParams",
+    "get_next_worker",
+    "register_dispatcher_worker_func",
+    # Socket helpers
+    "create_server_socket",
+    "create_inet_socket",
+    "create_unix_socket",
+    "DEFAULT_BACKLOG",
+    # Inner-IPC frame constants and Cython framing used across processes
+    "INNER_MAGIC_VALUE",
+    "FRAME_HEAD_LEN",
+    "encode_worker_msg_req",
+]
+
+
+_LAZY_EXPORTS = {
+    "TASK_CONN": ("._task", "TASK_CONN"),
+    "TaskWorkerConnection": ("._task", "TaskWorkerConnection"),
+    "ExecutorTaskConnection": ("._executor", "ExecutorTaskConnection"),
+    "ExecutorUDPConnection": ("._executor", "ExecutorUDPConnection"),
+    "TCPConnection": ("trpc_sdk.protocol", "TCPConnection"),
+    "WorkerDispatcherConnection": ("._worker", "WorkerDispatcherConnection"),
+    "WorkerMessageConnection": ("._worker", "WorkerMessageConnection"),
+    "WorkerTaskConnection": ("._worker", "WorkerTaskConnection"),
+}
+
+
+def __getattr__(name: str):
+    """Lazily export symbols that would otherwise load too early.
+
+    ``_worker`` / ``_executor`` / ``_task`` import ``trpc_sdk.task``, which
+    imports ``trpc_sdk.stream`` while that package is still initializing.
+    :class:`TCPConnection` is owned by :mod:`trpc_sdk.protocol` and is only
+    needed once a merge worker is already serving. Resolving these on first
+    access is enough.
+    """
+    spec = _LAZY_EXPORTS.get(name)
+    if spec is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attr_name = spec
+    value = getattr(import_module(module_name, package=__name__), attr_name)
+    globals()[name] = value
+    return value
