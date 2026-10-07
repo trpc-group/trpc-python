@@ -3,73 +3,99 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-"""Network address related operations"""
 
-import os
-import enum
-import struct
-import socket
-import sys
+"""IP, port, and socket helpers used by the server engine and connection pool.
+
+Port probes here are *availability* checks, not format-only validators:
+:func:`is_tcp_port_available` fails if something already accepts TCP on
+that address, and :func:`is_udp_port_available` fails if bind is refused.
+:func:`create_probe_socket` builds a short-lived socket for those probes
+only; listen sockets are created by :mod:`trpc_sdk.transport`.
+"""
+
+from __future__ import annotations
+
 import ipaddress
+import os
+import socket
+import struct
+import sys
 from contextlib import closing
 
 import netifaces
 
-from trpc_sdk.log import logger
 from trpc_sdk.common import TransportSocket
-
-from ._constants import IP_TYPE_MAP
+from trpc_sdk.log import logger
+from ._constants import TcpState
 from ._constants import UNIX_TYPE
-from ._constants import IpType
-from ._constants import PortType
+from ._types import IpType
+from ._types import PortType
+
+
+# Maps ``ipaddress.IPv*Address.version`` (4 / 6) onto ``socket.AF_*``.
+# Used only by :func:`create_probe_socket` for short-lived port probes;
+# listen sockets are created by :mod:`trpc_sdk.transport`.
+_IP_TYPE_MAP = {4: socket.AF_INET, 6: socket.AF_INET6}
 
 
 def int2ip(ip: int) -> str:
-    """Convert integer ip to string.
+    """Convert an IPv4 address stored as an integer to dotted text.
+
     Args:
-        ip: ip of type int
+        ip: Address as a host-order integer, e.g. ``2130706433``.
+
     Returns:
-        str
+        Dotted or compressed IP string.
     """
     return str(ipaddress.ip_address(ip))
 
 
 def ip2int(ip: str) -> int:
-    """Convert string ip to integer.
+    """Convert a textual IP address to an integer.
+
     Args:
-        ip: ip of type str
+        ip: Dotted IPv4 or compressed IPv6 string.
+
     Returns:
-        int
+        Host-order integer form of ``ip``.
     """
     return int(ipaddress.ip_address(ip))
 
 
 def ip_to_bytes(ip: str) -> bytes:
-    """Convert string ip to bytes.
+    """Pack a textual IP address into network-order bytes.
+
     Args:
-        ip: ip of type str
+        ip: Dotted IPv4 or compressed IPv6 string.
+
     Returns:
-        bytes
+        4-byte IPv4 or 16-byte IPv6 packed form.
     """
     return ipaddress.ip_address(ip).packed
 
 
 def bytes_to_ip(ip_bytes: bytes) -> str:
-    """Convert bytes ip to string.
+    """Decode packed IP bytes to a textual address.
+
     Args:
-        ip_bytes: bytes of ip
+        ip_bytes: 4-byte IPv4 or 16-byte IPv6 packed form.
+
     Returns:
-        str
+        Dotted or compressed IP string.
     """
     return str(ipaddress.ip_address(ip_bytes))
 
 
 def is_ipv4(ip: IpType) -> bool:
-    """Check if ip is ipv4.
+    """Return whether ``ip`` is a valid IPv4 address.
+
+    Invalid values are logged and treated as False rather than raised.
+
     Args:
-        ip: ip of type IpType
+        ip: Address as int, str, or packed bytes.
+
     Returns:
-        bool
+        True only when :mod:`ipaddress` parses ``ip`` as IPv4.
     """
     try:
         return ipaddress.ip_address(ip).version == 4
@@ -79,11 +105,15 @@ def is_ipv4(ip: IpType) -> bool:
 
 
 def is_ipv6(ip: IpType) -> bool:
-    """Check if ip is ipv6.
+    """Return whether ``ip`` is a valid IPv6 address.
+
+    Invalid values are logged and treated as False rather than raised.
+
     Args:
-        ip: ip of type IpType
+        ip: Address as int, str, or packed bytes.
+
     Returns:
-        bool
+        True only when :mod:`ipaddress` parses ``ip`` as IPv6.
     """
     try:
         return ipaddress.ip_address(ip).version == 6
@@ -93,95 +123,102 @@ def is_ipv6(ip: IpType) -> bool:
 
 
 def is_unix_socket(socket_type: str) -> bool:
-    """Check if socket type is unix.
+    """Return whether a config socket-type label is UNIX domain.
+
+    Compares against :data:`~trpc_sdk.utils._constants.UNIX_TYPE`, not
+    ``socket.AF_UNIX``.
+
     Args:
-        socket_type: socket type of type str
+        socket_type: Family label from service config.
+
     Returns:
-        bool
+        True when ``socket_type`` equals :data:`UNIX_TYPE`.
     """
     return socket_type == UNIX_TYPE
 
 
-def port_valid(port: PortType) -> bool:
-    """Check if port is valid.
+def is_port_valid(port: PortType) -> bool:
+    """Return whether ``port`` is an integer in ``[0, 65535]``.
+
     Args:
-        port: port of type PortType
+        port: Port number or a value convertible with ``int()``.
+
     Returns:
-        bool
+        True when the converted integer is a legal TCP/UDP port.
     """
     return int(port) >= 0 and int(port) <= 65535
 
 
-def tcp_port_valid(ip: IpType, port: PortType) -> bool:
-    """
-    Check if tcp port is valid.
+def is_tcp_port_available(ip: IpType, port: PortType) -> bool:
+    """Return whether ``(ip, port)`` can be used as a TCP listen address.
+
+    First checks the numeric range, then probes with a TCP connect:
+    a successful ``connect_ex`` means something is already listening.
+
     Args:
-        ip: ip of type IpType
-        port: port of type PortType
+        ip: Bind address to probe.
+        port: Bind port to probe.
+
     Returns:
-        bool
+        True when the port is in range and not occupied.
     """
-    if not port_valid(port):
+    if not is_port_valid(port):
         logger.error(f"tcp port valid check failed, port:{port} is invalid")
         return False
 
-    return real_tcp_port_valid(ip, port)
+    return _probe_port_available(ip, port, is_udp=False)
 
 
-def udp_port_valid(ip: IpType, port: PortType) -> bool:
-    """
-    Check if udp port is valid.
+def is_udp_port_available(ip: IpType, port: PortType) -> bool:
+    """Return whether ``(ip, port)`` can be used as a UDP bind address.
+
+    First checks the numeric range, then probes with a UDP bind:
+    bind failure means the address is not available.
+
     Args:
-        ip: ip of type IpType
-        port: port of type PortType
+        ip: Bind address to probe.
+        port: Bind port to probe.
+
     Returns:
-        bool
+        True when the port is in range and bind succeeds.
     """
-    if not port_valid(port):
+    if not is_port_valid(port):
         logger.error(f"udp port valid check failed, port:{port} is invalid")
         return False
 
-    return real_udp_port_valid(ip, port)
+    return _probe_port_available(ip, port, is_udp=True)
 
 
-def real_tcp_port_valid(ip: IpType, port: PortType) -> bool:
-    """Check if tcp port is valid.
+def _probe_port_available(ip: IpType, port: PortType, is_udp: bool) -> bool:
+    """Probe whether ``(ip, port)`` is free for TCP or UDP.
+
+    TCP uses ``connect_ex``: return code 0 means a peer accepted the
+    handshake, so the port is occupied. UDP uses ``bind``: success means
+    the datagram port is free. The probe socket is always closed.
+
     Args:
-        ip: ip of type IpType
-        port: port of type PortType
+        ip: Address to probe.
+        port: Port to probe.
+        is_udp: True to probe with a datagram socket; False for stream.
+
     Returns:
-        bool
+        True when the probe concludes the port is available.
     """
+    protocol = "udp" if is_udp else "tcp"
     socket_tmp = None
     try:
-        socket_tmp = new_inet_socket(ip, is_udp=False)
-        if 0 == socket_tmp.connect_ex((ip, port)):
-            logger.error(f"tcp port valid check failed, (ip:{ip} port:{port}) has been occupied")
+        socket_tmp = create_probe_socket(ip, is_udp=is_udp)
+        if is_udp:
+            socket_tmp.bind((ip, port))
+            return True
+        if socket_tmp.connect_ex((ip, port)) == 0:
+            logger.error(
+                f"tcp port valid check failed, (ip:{ip} port:{port}) has been occupied")
             return False
         return True
     except Exception as err:  # pylint: disable=broad-except
-        logger.error(f"tcp port valid check failed, (ip:{ip} port:{port}) appear err: {err}")
-        return False
-    finally:
-        if socket_tmp:
-            socket_tmp.close()
-
-
-def real_udp_port_valid(ip: IpType, port: PortType) -> bool:
-    """Check if udp port is valid.
-    Args:
-        ip: ip of type IpType
-        port: port of type PortType
-    Returns:
-        bool
-    """
-    socket_tmp = None
-    try:
-        socket_tmp = new_inet_socket(ip, is_udp=True)
-        socket_tmp.bind((ip, port))
-        return True
-    except Exception as err:  # pylint: disable=broad-except
-        logger.error(f"udp port valid check failed, (ip:{ip} port:{port}) appear err: {err}")
+        logger.error(
+            f"{protocol} port valid check failed, (ip:{ip} port:{port}) appear err: {err}")
         return False
     finally:
         if socket_tmp:
@@ -189,11 +226,16 @@ def real_udp_port_valid(ip: IpType, port: PortType) -> bool:
 
 
 def unix_path_valid(unix_path: str) -> bool:
-    """Check if unix path is valid.
+    """Return whether a UNIX socket path can be bound.
+
+    Unlinks a stale socket file first. Fails only when the path still
+    exists after unlink (for example a regular file that cannot be removed).
+
     Args:
-        unix_path: unix path of type str
+        unix_path: Filesystem path of the UNIX socket.
+
     Returns:
-        bool
+        True when the path is clear for bind.
     """
     is_unlink = unlink_unix_socket_file(unix_path)
     if not is_unlink:
@@ -202,24 +244,35 @@ def unix_path_valid(unix_path: str) -> bool:
     return True
 
 
-def new_inet_socket(ip: str, is_udp: bool) -> socket.socket:
-    """Build socket.
+def create_probe_socket(ip: IpType, is_udp: bool) -> socket.socket:
+    """Create an unbound inet socket for a port-availability probe.
+
+    Family is taken from ``ip`` (IPv4 vs IPv6). This is not the listen
+    socket used by the dispatcher; see
+    :func:`trpc_sdk.transport.create_server_socket` for that.
+
     Args:
-        ip: ip of type str
-        is_udp: whether is udp
+        ip: Address whose version selects ``AF_INET`` / ``AF_INET6``.
+        is_udp: True for ``SOCK_DGRAM``; False for ``SOCK_STREAM``.
+
     Returns:
-        socket.socket
+        A new socket. The caller owns close.
     """
     addr = ipaddress.ip_address(ip)
-    return socket.socket(IP_TYPE_MAP[addr.version], socket.SOCK_DGRAM if is_udp else socket.SOCK_STREAM)
+    return socket.socket(_IP_TYPE_MAP[addr.version], socket.SOCK_DGRAM if is_udp else socket.SOCK_STREAM)
 
 
 def unlink_unix_socket_file(unix_path: str) -> bool:
-    """Check if unix socket file is exists.
+    """Remove a leftover UNIX socket file if present.
+
+    ``os.unlink`` of a missing path is treated as success. Failure is
+    returned only when the path still exists after ``OSError``.
+
     Args:
-        unix_path: unix socket file of type str
+        unix_path: Filesystem path of the UNIX socket.
+
     Returns:
-        bool
+        True when the path does not exist afterwards.
     """
     try:
         os.unlink(unix_path)
@@ -229,11 +282,53 @@ def unlink_unix_socket_file(unix_path: str) -> bool:
     return True
 
 
-def find_free_port() -> int:
-    """
-    Find free port.
+def get_ip_with_nic(nic: str) -> str:
+    """Return the first address of a network interface.
+
+    Prefers IPv4; falls back to IPv6 when the NIC has no IPv4 address.
+
+    Args:
+        nic: Interface name such as ``eth0``.
+
     Returns:
-        int
+        Address string, or empty when the NIC is missing or lookup fails.
+    """
+    if nic not in netifaces.interfaces():
+        return ""
+    try:
+        nic_ip = ""
+        nic_addrs = netifaces.ifaddresses(nic)
+        if netifaces.AF_INET in nic_addrs:
+            nic_ip = nic_addrs[netifaces.AF_INET][0]['addr']
+        elif netifaces.AF_INET6 in nic_addrs:
+            nic_ip = nic_addrs[netifaces.AF_INET6][0]['addr']
+
+        return nic_ip
+    except Exception as err:  # pylint: disable=broad-except
+        logger.error(f"parse nic err: {err}")
+        return ""
+
+
+def join_host_port(host: str, port: int) -> str:
+    """Format ``host:port``, bracketing IPv6 hosts.
+
+    Args:
+        host: Hostname or IP.
+        port: Port number.
+
+    Returns:
+        ``host:port`` or ``[ipv6]:port``.
+    """
+    if host.find(':') != -1:
+        return f"[{host}]:{port}"
+    return f"{host}:{port}"
+
+
+def find_free_port() -> int:
+    """Bind ``('', 0)`` and return the ephemeral TCP port the kernel assigned.
+
+    Returns:
+        A currently unused TCP port on the local machine.
     """
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
         s.bind(('', 0))
@@ -241,28 +336,14 @@ def find_free_port() -> int:
         return s.getsockname()[1]
 
 
-class TcpState(enum.IntEnum):
-    """Tcp state.
-    """
-    TCP_ESTABLISHED = 1
-    TCP_SYN_SENT = enum.auto()
-    TCP_SYN_RECV = enum.auto()
-    TCP_FIN_WAIT1 = enum.auto()
-    TCP_FIN_WAIT2 = enum.auto()
-    TCP_TIME_WAIT = enum.auto()
-    TCP_CLOSE = enum.auto()
-    TCP_CLOSE_WAIT = enum.auto()
-    TCP_LAST_ACK = enum.auto()
-    TCP_LISTEN = enum.auto()
-    TCP_CLOSING = enum.auto()
-
-
 def is_valid_socket(sock: socket.socket) -> bool:
-    """Check if socket is valid.
+    """Return whether ``sock`` still has a live file descriptor.
+
     Args:
-        sock: socket of type socket.socket
+        sock: Socket-like object; objects without ``fileno`` are invalid.
+
     Returns:
-        bool
+        True when ``fileno() >= 0``.
     """
     if hasattr(sock, 'fileno'):
         return sock.fileno() >= 0
@@ -270,15 +351,19 @@ def is_valid_socket(sock: socket.socket) -> bool:
 
 
 def is_close_wait(sock: socket.socket) -> bool:
-    """Check close wait.
+    """Return whether a TCP socket is in ``CLOSE_WAIT``.
+
+    Skipped on Darwin: ``TCP_INFO`` is not available on the Python
+    versions this package supports there. Non-TCP sockets return False.
+
     Args:
-        sock: socket of type socket.socket
+        sock: Connected TCP socket.
+
     Returns:
-        bool
+        True only when Linux ``TCP_INFO`` reports ``TCP_CLOSE_WAIT``.
     """
     if sock.proto != socket.IPPROTO_TCP:
         return False
-    # mac in python312以后，才支持获取TCP_INFO，当前还不支持312版本，先返回False不做此项检查
     if sys.platform == "darwin":
         return False
     tcp_info = sock.getsockopt(socket.SOL_TCP, socket.TCP_INFO, 20)
@@ -286,75 +371,73 @@ def is_close_wait(sock: socket.socket) -> bool:
 
 
 def get_tcp_state(sock: socket.socket) -> str:
-    """Get info of tcp.
+    """Return the ``TCP_INFO`` state name of a TCP socket.
+
     Args:
-        sock: socket of type socket.socket
+        sock: Socket that supports ``TCP_INFO``.
+
     Returns:
-        str
+        Name of a :class:`~trpc_sdk.utils._constants.TcpState` member.
     """
     tcp_info = sock.getsockopt(socket.SOL_TCP, socket.TCP_INFO, 20)
     return TcpState(tcp_info[0]).name
 
 
-def set_no_close_wait(sock: socket.socket) -> bool:
-    """Set no close wait.
+def set_no_close_wait(sock: socket.socket) -> None:
+    """Disable lingering so ``close`` sends RST instead of waiting.
+
     Args:
-        sock: socket of type socket.socket
-    Returns:
-        bool
+        sock: Socket to configure.
     """
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
 
 
-def set_close_wait(sock: socket.socket, delay_time: int) -> bool:
-    """Set close wait.
+def set_close_wait(sock: socket.socket, delay_time: int) -> None:
+    """Enable lingering with a timeout in seconds.
+
     Args:
-        sock: socket of type socket.socket
-        delay_time: delay time of type int
-    Returns:
-        bool
+        sock: Socket to configure.
+        delay_time: Linger timeout passed to ``SO_LINGER``.
     """
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, delay_time))
 
 
-def set_default_close_wait(sock: socket.socket) -> bool:
-    """Set default close wait.
+def set_default_close_wait(sock: socket.socket) -> None:
+    """Restore default linger (``l_onoff = 0``).
+
     Args:
-        sock: socket of type socket.socket
-    Returns:
-        bool
+        sock: Socket to configure.
     """
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 0, 0))
 
 
-def set_tcp_no_delay(sock: socket.socket) -> bool:
-    """Set no delay.
+def set_tcp_no_delay(sock: socket.socket) -> None:
+    """Disable Nagle on a TCP socket.
+
     Args:
-        sock: socket of type socket.socket
-    Returns:
-        bool
+        sock: TCP socket to configure.
     """
     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
 
-def set_tcp_keep_alive(sock: socket.socket) -> bool:
-    """Set keep alive.
+def set_tcp_keep_alive(sock: socket.socket) -> None:
+    """Enable kernel TCP keepalive.
+
     Args:
-        sock: socket of type socket.socket
-    Returns:
-        bool
+        sock: TCP socket to configure.
     """
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
 
 
-def close_socket(sock) -> bool:
-    """Close socket.
-    Args:
-        sock: socket of type socket.socket
-    Returns:
-        bool
-    """
+def close_socket(sock) -> None:
+    """Close a socket, including :class:`~trpc_sdk.common.TransportSocket`.
 
+    Prefer ``sock.close()``. Cython transport sockets expose the real
+    fd on ``_sock`` and have no usable ``close``.
+
+    Args:
+        sock: Socket or transport-socket wrapper.
+    """
     if hasattr(sock, 'close'):
         try:
             sock.close()
