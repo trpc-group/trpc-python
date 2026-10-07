@@ -41,10 +41,8 @@ DEFAULT_MEMORY_INSPECTION_LINE_LIMIT: int = 50
 # Filename prefix for memory-inspection debug dumps.
 DEFAULT_MEMORY_INSPECTION_FILENAME_PREFIX: str = "tracemalloc"
 
-# Worker count used when automaxprocs cannot determine the CPU quota.
+# Worker count used when neither the cgroup CPU quota nor the CPU count is known.
 DEFAULT_WORKER_NUM_FALLBACK: int = 2
-# Thread count multiplier applied to the resolved CPU core / worker count.
-DEFAULT_THREAD_NUM_PER_CORE: int = 5
 # Server read-buffer size, 8 MiB.
 DEFAULT_MAX_READ_BUF_SIZE: int = 8 * 1024 * 1024
 # Task-process batch wait duration, in milliseconds.
@@ -65,3 +63,7 @@ DEFAULT_CLIENT_MAX_IDLE_CONN: int = 5
 
 # Default text encoding for decoder ``code`` option when unset.
 DEFAULT_ENCODING: str = "utf8"
+
+# Socket-family label stored on service config (``socket_type``). This is the
+# YAML/string value compared by callers, not ``socket.AF_UNIX``.
+UNIX_TYPE: str = "unix"

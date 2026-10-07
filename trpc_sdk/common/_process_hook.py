@@ -3,6 +3,7 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
+
 """Fork hook list"""
 
 from __future__ import annotations
@@ -17,7 +18,8 @@ from typing import List
 from typing import Optional
 from typing import Union
 
-from ._process_helper import ProcessType
+from trpc_sdk.abc import ProcessType
+
 from ._process_helper import is_task_process
 from ._process_helper import is_worker_process
 
@@ -139,3 +141,26 @@ def execute_after_in_child():
         cbs = _child_cbs.get(ProcessType.WORKER, [])
         for cb in cbs:
             cb()
+
+
+_before_loop_run_in_child_hooks: List[HookType] = []
+
+
+def register_before_loop_run_in_child(hook: HookType) -> None:
+    """Register a hook that runs in the child after plugins, before the loop.
+
+    Args:
+        hook: Zero-argument callback invoked by
+            :func:`execute_before_loop_run_in_child`.
+    """
+    _before_loop_run_in_child_hooks.append(hook)
+
+
+def execute_before_loop_run_in_child() -> None:
+    """Run child hooks after plugin init and before ``loop.run_forever()``.
+
+    Must be called in the child after ``_init_plugins()``. With no
+    registrations the hook list is empty and this is a no-op.
+    """
+    for hook in _before_loop_run_in_child_hooks:
+        hook()

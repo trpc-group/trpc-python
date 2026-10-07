@@ -6,9 +6,9 @@
 
 """Unary filter chain helpers."""
 
-from .filter import FilterChain  # pyright: ignore[reportMissingModuleSource]
-from .filter import get_client_filter  # pyright: ignore[reportMissingModuleSource]
-from .filter import get_server_filter  # pyright: ignore[reportMissingModuleSource]
+from ._cython import FilterChain  # pyright: ignore[reportMissingModuleSource]
+from ._cython import get_client_filter  # pyright: ignore[reportMissingModuleSource]
+from ._cython import get_server_filter  # pyright: ignore[reportMissingModuleSource]
 
 __all__ = [
     "FilterChain",

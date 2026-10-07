@@ -8,21 +8,7 @@
 This module provides a function to get or create an event loop.
 """
 
-import os
 import asyncio
-
-async_lib = asyncio
-
-use_uvloop = False
-
-if os.environ.get('TRPC_UVLOOP', '0') == '1':
-    try:
-        import uvloop
-        asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-        async_lib = uvloop
-        use_uvloop = True
-    except ImportError:
-        async_lib = asyncio
 
 
 def get_or_create_event_loop():
@@ -38,10 +24,12 @@ def get_or_create_event_loop():
           no current event loop in the calling thread. Fall back to
           ``new_event_loop()`` + ``set_event_loop()`` to mimic the legacy
           auto-create behavior, keeping every call site backwards compatible.
+          The new loop follows the installed policy, so it is a uvloop loop
+          once :func:`trpc_sdk.utils.get_async_lib` has installed uvloop.
     """
     try:
         return asyncio.get_event_loop()
     except RuntimeError:
-        loop = async_lib.new_event_loop()
+        loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         return loop
