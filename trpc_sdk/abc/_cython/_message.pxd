@@ -23,6 +23,17 @@ cdef class TrpcFrameHead:
         public uint32_t stream_id       # Identifier used to correlate streaming frames.
         public uint16_t frame_reserved  # Reserved protocol bits for future extensions.
 
+    # Setters mirror the public fields one for one. They exist so Python
+    # callers and statically typed Cython callers share a single spelling;
+    # every one of them stores the host-endian value unchanged.
+    cpdef void set_stx(self, uint16_t stx) except *
+    cpdef void set_frame_type(self, uint8_t frame_type) except *
+    cpdef void set_frame_state(self, uint8_t frame_state) except *
+    cpdef void set_package_len(self, uint32_t package_len) except *
+    cpdef void set_head_len(self, uint16_t head_len) except *
+    cpdef void set_stream_id(self, uint32_t stream_id) except *
+    cpdef void set_frame_reserved(self, uint16_t frame_reserved) except *
+
 
 cdef class TrpcMessage:
     cdef:
@@ -43,6 +54,8 @@ cdef class TrpcMessage:
         public object server_rsp_head        # Protocol-specific outbound response header.
         public object client_req_head        # Protocol-specific downstream request header.
         public object client_rsp_head        # Protocol-specific downstream response header.
+        public object server_raw_req         # Protocol-native inbound request object (e.g. aiohttp Request).
+        public object server_raw_rsp         # Protocol-native outbound response object (e.g. aiohttp Response).
         public str caller_app
         public str caller_server
         public str caller_service
@@ -50,7 +63,7 @@ cdef class TrpcMessage:
         public str callee_server
         public str callee_service
         public str callee_method
-        public str local_addr                # Local network endpoint for the RPC.
+        public str local_ip                  # Local IP of the RPC, without port.
         public str remote_addr               # Peer network endpoint for the RPC.
         public str logger                    # Logger category or identifier.
         public str caller_method             # Method invoked by the upstream caller.
@@ -92,3 +105,50 @@ cdef class TrpcMessage:
     cdef void _set_caller_service_name(self, str caller_service_name) except *
     @cython.final
     cdef void _set_callee_service_name(self, str callee_service_name) except *
+
+    # Python-visible setters. Plain fields are assigned directly; the four
+    # semantic names forward to the cdef helpers above so derived fields stay
+    # in sync no matter which spelling the caller uses.
+    cpdef void set_frame_head(self, TrpcFrameHead frame_head) except *
+    cpdef void set_timeout(self, int timeout) except *
+    cpdef void set_serialization_type(self, int serialization_type) except *
+    cpdef void set_compress_type(self, int compress_type) except *
+    cpdef void set_stream_id(self, uint32_t stream_id) except *
+    cpdef void set_dyeing(self, bint dyeing) except *
+    cpdef void set_dyeing_key(self, str dyeing_key) except *
+    cpdef void set_server_rpc_name(self, str server_rpc_name) except *
+    cpdef void set_client_rpc_name(self, str client_rpc_name) except *
+    cpdef void set_server_meta_data(self, object server_meta_data) except *
+    cpdef void set_client_meta_data(self, object client_meta_data) except *
+    cpdef void set_caller_service_name(self, str caller_service_name) except *
+    cpdef void set_callee_service_name(self, str callee_service_name) except *
+    cpdef void set_server_rsp_err(self, object server_rsp_err) except *
+    cpdef void set_client_rsp_err(self, object client_rsp_err) except *
+    cpdef void set_server_req_head(self, object server_req_head) except *
+    cpdef void set_server_rsp_head(self, object server_rsp_head) except *
+    cpdef void set_client_req_head(self, object client_req_head) except *
+    cpdef void set_client_rsp_head(self, object client_rsp_head) except *
+    cpdef void set_server_raw_req(self, object server_raw_req) except *
+    cpdef void set_server_raw_rsp(self, object server_raw_rsp) except *
+    cpdef void set_local_ip(self, str local_ip) except *
+    cpdef void set_remote_addr(self, str remote_addr) except *
+    cpdef void set_logger(self, str logger) except *
+    cpdef void set_caller_app(self, str caller_app) except *
+    cpdef void set_caller_server(self, str caller_server) except *
+    cpdef void set_caller_service(self, str caller_service) except *
+    cpdef void set_caller_method(self, str caller_method) except *
+    cpdef void set_callee_app(self, str callee_app) except *
+    cpdef void set_callee_server(self, str callee_server) except *
+    cpdef void set_callee_service(self, str callee_service) except *
+    cpdef void set_callee_method(self, str callee_method) except *
+    cpdef void set_namespace(self, str namespace) except *
+    cpdef void set_env_name(self, str env_name) except *
+    cpdef void set_setname(self, str set_name) except *
+    cpdef void set_env_transfer(self, str env_transfer) except *
+    cpdef void set_callee_container_name(self, str callee_container_name) except *
+    cpdef void set_callee_set_name(self, str callee_set_name) except *
+    cpdef void set_stream_frame(self, object stream_frame) except *
+    cpdef void set_request_id(self, uint32_t request_id) except *
+    cpdef void set_session_id(self, int session_id) except *
+    cpdef void set_request_attachment(self, bytes attachment) except *
+    cpdef void set_response_attachment(self, bytes attachment) except *

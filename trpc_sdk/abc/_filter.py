@@ -11,7 +11,6 @@ pluggable filters that intercept unary and streaming RPC call chains.
 """
 from __future__ import annotations
 
-from abc import ABC
 from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Any
@@ -24,6 +23,7 @@ from typing import Tuple
 from typing import TypeVar
 
 from ._cython import TrpcContext  # pyright: ignore[reportMissingModuleSource]
+from ._plugin import BasePlugin
 
 FILTER_RSP = TypeVar("FILTER_RSP")
 
@@ -56,7 +56,7 @@ FilterAsyncGenHandleType = Callable[[], AsyncGenerator[FilterStreamResultType, N
 """Next streaming handler or filter in the chain."""
 
 
-class BaseFilter(ABC):
+class BaseFilter(BasePlugin):
     """Define unary and streaming filter interception points.
 
     Filters wrap the next handler in the RPC call chain so that cross-cutting

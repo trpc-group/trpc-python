@@ -11,16 +11,16 @@ implementations that list service endpoints and select one node for a call.
 """
 from __future__ import annotations
 
-from abc import ABC
 from abc import abstractmethod
 from typing import Any
 from typing import List
 from typing import Optional
 
 from ._node import Node
+from ._plugin import BasePlugin
 
 
-class BaseDiscovery(ABC):
+class BaseDiscovery(BasePlugin):
     """Define service endpoint listing and node selection."""
 
     @abstractmethod

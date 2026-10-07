@@ -13,14 +13,14 @@ that receive call-result feedback after each attempt.
 
 from __future__ import annotations
 
-from abc import ABC
 from abc import abstractmethod
 from typing import NoReturn
 
 from ._node import Node
+from ._plugin import BasePlugin
 
 
-class BaseCircuitBreaker(ABC):
+class BaseCircuitBreaker(BasePlugin):
     """Define node availability checks and call-result reporting.
 
     Concrete implementations track node health, trip open when failures exceed

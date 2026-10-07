@@ -11,12 +11,13 @@ that publish and withdraw service endpoint addresses.
 """
 from __future__ import annotations
 
-from abc import ABC
 from abc import abstractmethod
 from typing import Tuple
 
+from ._plugin import BasePlugin
 
-class BaseServiceRegistry(ABC):
+
+class BaseServiceRegistry(BasePlugin):
     """Define service endpoint registration and deregistration."""
 
     @abstractmethod

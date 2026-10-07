@@ -10,14 +10,18 @@ from __future__ import annotations
 from typing import List
 from typing import Callable
 from typing import Optional
+from typing import TypeVar
 
 from trpc_sdk.abc import BasePlugin
 from trpc_sdk.abc import PluginInitPos
 from trpc_sdk.abc import PluginType
 from trpc_sdk.abc import TaskInfo
-
 from ._plugin import DEFAULT_PLUGIN_MANAGER
 from ._plugin import PluginSpec
+
+
+PluginFactoryType = TypeVar("PluginFactoryType", bound=Callable[[], object])
+"""Anything ``register_plugin`` accepts: a plugin class or a factory."""
 
 
 def register_plugin(
@@ -25,15 +29,23 @@ def register_plugin(
     plugin_name: str,
     init_pos: PluginInitPos = PluginInitPos.WORKER,
     version: str = "",
-) -> Callable[[type[BasePlugin]], type[BasePlugin]]:
+    report: bool = False,
+) -> Callable[[PluginFactoryType], PluginFactoryType]:
     """
     Register plugin decorator
+
+    The decorated object only has to be callable with no arguments. A
+    :class:`~trpc_sdk.abc.BasePlugin` subclass is the common case and is
+    the only one that gets the ``init`` / ``start`` lifecycle, but a slot
+    may also be filled by a factory function or a Cython extension type.
 
     Args:
         plugin_type: plugin type
         plugin_name: plugin name
         init_pos: init position
         version: plugin version
+        report: whether to report this plugin's name and version for
+            usage statistics
     Returns:
         None
     """
@@ -44,7 +56,8 @@ def register_plugin(
                                  plugin_type=plugin_type,
                                  plugin_name=plugin_name,
                                  version=version,
-                                 task_info=None)
+                                 task_info=None,
+                                 report=report)
         DEFAULT_PLUGIN_MANAGER.register(plugin_spec)
 
         return cls
@@ -70,9 +83,9 @@ def register_task(task_name: str, task_info: TaskInfo):
     DEFAULT_PLUGIN_MANAGER.register(plugin_spec)
 
 
-def get_plugin(plugin_type: PluginType, plugin_name: str) -> Optional[BasePlugin]:
+def get_plugin(plugin_type: PluginType, plugin_name: str) -> Optional[object]:
     """
-    Get plugin, note: this method must be called after setup
+    Get plugin, building it on first use if no eager pass covered it
 
     Args:
         plugin_type: plugin type
@@ -85,18 +98,24 @@ def get_plugin(plugin_type: PluginType, plugin_name: str) -> Optional[BasePlugin
         if not plugin_spec or plugin_spec.cls is None:
             return None
         plugin_instance = plugin_spec.cls()
-        plugin_instance.init()
-        if not plugin_instance.name:
-            plugin_instance._name = plugin_name
-        if plugin_instance.type == PluginType.UNKNOWN:
-            plugin_instance._type = plugin_type
-        plugin_instance.start()
-        DEFAULT_PLUGIN_MANAGER.set_instance(plugin_instance)
+        # Mirrors ``init_plugins``: the lifecycle only applies to a
+        # BasePlugin. Factory functions and Cython extension types fill
+        # their slot as soon as they are built.
+        if isinstance(plugin_instance, BasePlugin):
+            plugin_instance.init()
+            if not plugin_instance.name:
+                plugin_instance._name = plugin_name
+            if plugin_instance.type == PluginType.UNKNOWN:
+                plugin_instance._type = plugin_type
+            if plugin_instance.init_pos == PluginInitPos.UNKNOWN:
+                plugin_instance._init_pos = plugin_spec.init_pos
+            plugin_instance.start()
+        DEFAULT_PLUGIN_MANAGER.set_instance(plugin_type, plugin_name, plugin_instance)
 
     return DEFAULT_PLUGIN_MANAGER.get_instance(plugin_type, plugin_name)
 
 
-def get_plugin_class(plugin_type: PluginType, plugin_name: str) -> Optional[type[BasePlugin]]:
+def get_plugin_class(plugin_type: PluginType, plugin_name: str) -> Optional[Callable[[], object]]:
     """
     Get plugin class
     Args:
@@ -109,6 +128,20 @@ def get_plugin_class(plugin_type: PluginType, plugin_name: str) -> Optional[type
     if not plugin_spec or plugin_spec.cls is None:
         return None
     return plugin_spec.cls
+
+
+def get_registered_tasks() -> List[TaskInfo]:
+    """Return ``task_info`` for every registered TASK plugin.
+
+    :mod:`trpc_sdk.server._task` imports this name at module load even
+    when nothing has registered a task.
+
+    Returns:
+        TaskInfo records from TASK plugin specs. Specs without
+        ``task_info`` are skipped.
+    """
+    specs = DEFAULT_PLUGIN_MANAGER.all_plugin_specs_by_type(PluginType.TASK)
+    return [spec.task_info for spec in specs if spec.task_info is not None]
 
 
 def set_plugin_order(plugin_type: PluginType, plugin_name_sequence: List[str]):

@@ -4,12 +4,14 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
+from typing import Tuple
+
 from ._context import TrpcContext
 from ._message import TrpcFrameHead
 from ._message import TrpcMessage
 
 
-def new_frame_head(
+def create_frame_head(
     frame_type: int,
     frame_state: int,
     stream_id: int,
@@ -17,16 +19,20 @@ def new_frame_head(
 
 def parse_frame_head(data: bytes) -> TrpcFrameHead: ...
 
-def create_new_context(
+def create_message(
     context: TrpcContext,
-) -> TrpcContext: ...
+) -> Tuple[TrpcContext, TrpcMessage]: ...
 
-def create_client_context_from_server(
+def get_message(context: TrpcContext) -> TrpcMessage: ...
+
+def clone_context_and_message(
     context: TrpcContext,
-) -> TrpcContext: ...
+) -> Tuple[TrpcContext, TrpcMessage]: ...
 
-def get_or_create_message(context: TrpcContext) -> TrpcMessage: ...
-
-def create_new_message_for_context(
+def clone_message(
     context: TrpcContext,
-) -> TrpcMessage: ...
+) -> Tuple[TrpcContext, TrpcMessage]: ...
+
+def clone_client_message(
+    context: TrpcContext,
+) -> Tuple[TrpcContext, TrpcMessage]: ...
