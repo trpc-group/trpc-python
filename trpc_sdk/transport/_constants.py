@@ -41,23 +41,23 @@ DEFAULT_MEM_SIZE = 1024
 class RequestType(IntEnum):
     """Whether a client call waits for a response.
 
-    ``SendAndRecv`` is the unary path. ``SendOnly`` writes the request and
+    ``SEND_AND_RECV`` is the unary path. ``SEND_ONLY`` writes the request and
     returns without waiting, used by one-way RPCs. ``IntEnum`` keeps
     integer comparisons valid without a cast.
     """
 
-    SendAndRecv = 0
-    SendOnly = 1
+    SEND_AND_RECV = 0
+    SEND_ONLY = 1
 
 
 @unique
 class ClientTimeoutReason(IntEnum):
     """Who ran out of time when a client call times out.
 
-    ``DownstreamTimeout`` means the callee did not answer in time.
-    ``CurrentServiceTimeout`` means this service's own remaining budget
+    ``DOWNSTREAM_TIMEOUT`` means the callee did not answer in time.
+    ``CURRENT_SERVICE_TIMEOUT`` means this service's own remaining budget
     expired first (the parent RPC already had a tighter deadline).
     """
 
-    DownstreamTimeout = 1
-    CurrentServiceTimeout = 2
+    DOWNSTREAM_TIMEOUT = 1
+    CURRENT_SERVICE_TIMEOUT = 2

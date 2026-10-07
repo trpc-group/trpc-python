@@ -45,7 +45,5 @@ def get_default_selector() -> Optional[BaseSelector]:
     """Return the DSN selector, the framework's built-in default resolver.
 
     Equivalent to ``get_selector(DEFAULT_SELECTOR_NAME)``.
-    :mod:`trpc_sdk.naming._dsn_selector` re-exports this as
-    ``default_selector`` for historical callers.
     """
     return get_selector(DEFAULT_SELECTOR_NAME)

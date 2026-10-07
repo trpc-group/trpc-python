@@ -175,7 +175,7 @@ class DispatcherClientConnection(BaseConnection):
         if self.check_idle_timeout > 0:
             self.last_recv_time = time.time()
 
-        self.parser.feeds_data(data)
+        self.parser.feed_data(data)
 
         while True:
             try:

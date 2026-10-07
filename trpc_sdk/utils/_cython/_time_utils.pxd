@@ -21,11 +21,11 @@ cdef inline double current_time_ms() noexcept nogil:
     # CLOCK_REALTIME in milliseconds; same clock as ``TrpcContext.recv_time``.
     cdef timespec ts
     clock_gettime(CLOCK_REALTIME, &ts)
-    return ts.tv_sec * 1000 + (ts.tv_nsec / 1000000)
+    return ts.tv_sec * 1000.0 + ts.tv_nsec / 1000000.0
 
 
 cdef inline double ms_to_sec(double ms) noexcept nogil:
-    return ms / 1000
+    return ms / 1000.0
 
 
 cdef inline long ms_to_us(long ms) noexcept nogil:

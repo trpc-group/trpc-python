@@ -55,7 +55,7 @@ def serialize(serialization_type: int, body: Any) -> bytes:
     return serializer.serialize(body)
 
 
-def deserialize(serialization_type: int, data: bytes, body: Any) -> Any:
+def deserialize(serialization_type: int, data: Optional[bytes], body: Any) -> Any:
     """Populate ``body`` from ``data`` using the registered serializer.
 
     ``None`` body, ``None`` / empty ``data``, and
@@ -65,16 +65,10 @@ def deserialize(serialization_type: int, data: bytes, body: Any) -> Any:
 
     Args:
         serialization_type: ContentType code.
-        data: Serialized body bytes.
+        data: Serialized body bytes, or ``None``.
         body: Object to populate, or ``None``.
     """
-    if body is None:
-        return None
-
-    if data is None:
-        return None
-
-    if len(data) == 0:
+    if body is None or not data:
         return None
 
     if serialization_type == SerializationType.Unsupported:

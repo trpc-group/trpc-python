@@ -31,6 +31,7 @@ reference. That is why :func:`trpc_sdk.server.send_msg_worker` can reach
 
 from __future__ import annotations
 
+import sys
 import threading
 from typing import Callable
 from typing import List
@@ -120,7 +121,7 @@ class TrpcServerEngine(BaseTrpcServerEngine):
             network: Network protocol (tcp/http/udp). Passed separately
                 because it is not always ``opts.network``: an HTTP service is
                 configured as ``network: tcp`` plus ``protocol: http``, and
-                the worker picks its front end by this value, so the HTTP
+                the worker picks its listener by this value, so the HTTP
                 transport has to register the endpoint as ``http``.
         """
         address = (opts.address, opts.port)
@@ -129,19 +130,19 @@ class TrpcServerEngine(BaseTrpcServerEngine):
         if is_unix_socket(opts.socket_type):
             if not unix_path_valid(address[0]):
                 logger.error("[Master Engine] cannot unlink unix address %s", address[0])
-                exit()
+                sys.exit(1)
         else:
             if network.find(Network.TCP) != -1 or network.find(Network.HTTP) != -1:
                 if not is_tcp_port_available(address[0], address[1]):
                     logger.error("[Master Engine] tcp address %s invalid", address)
-                    exit()
+                    sys.exit(1)
             elif network.find(Network.UDP) != -1:
                 if not is_udp_port_available(address[0], address[1]):
                     logger.error("[Master Engine] udp address %s invalid", address)
-                    exit()
+                    sys.exit(1)
             else:
                 logger.error("[Master Engine] unsupported network %s", network)
-                exit()
+                sys.exit(1)
 
         self.process_info.add_address(address)
         self.process_info.add_socket_type(opts.socket_type)

@@ -31,8 +31,6 @@ from trpc_sdk.plugin import DEFAULT_PLUGIN_MANAGER
 from trpc_sdk.plugin import register_plugin
 
 from ._constants import DEFAULT_SELECTOR_NAME
-from ._selector_lookup import get_default_selector as default_selector
-from ._selector_lookup import get_selector
 
 
 @register_plugin(PluginType.NAMING_SELECTOR, DEFAULT_SELECTOR_NAME)
@@ -73,7 +71,7 @@ class DSNSelector(BaseSelector):
             cost: Call duration; ignored.
             success: Call result; ignored.
         """
-        pass
+        return None
 
 
 class ResolveSelector(BaseSelector):
@@ -163,4 +161,4 @@ class ResolveSelector(BaseSelector):
             cost: Call duration; ignored.
             success: Call result; ignored.
         """
-        pass
+        return None

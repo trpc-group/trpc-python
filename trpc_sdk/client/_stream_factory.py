@@ -15,7 +15,6 @@ options into the next.
 from __future__ import annotations
 
 from ._stream import Stream
-from ._stream import TaskClientStream
 
 
 def create_stream() -> Stream:
@@ -26,13 +25,3 @@ def create_stream() -> Stream:
     shared instance would leak one call's options into the next.
     """
     return Stream()
-
-
-def create_task_client_stream() -> TaskClientStream:
-    """Build a client stream for the inner worker-to-task protocol.
-
-    Same lifetime rule as :func:`create_stream`, but ``start()`` also
-    installs ``TaskStreamClientCodec`` and ``ClientTaskStreamTransport``
-    when the caller left those options unset.
-    """
-    return TaskClientStream()

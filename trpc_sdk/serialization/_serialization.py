@@ -20,8 +20,6 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from typing import Dict
-from typing import Optional
 from typing import Union
 
 import google.protobuf
@@ -41,29 +39,11 @@ from ._types import SerializationType
 _PROTOBUF_VERSION = tuple(int(x) for x in google.protobuf.__version__.split(".")[:2])
 _USE_NEW_PARAM = _PROTOBUF_VERSION >= (5, 26)
 
-# for protobuf to json
-_pb_to_json_kwargs = {}
-# for json to protobuf
-_json_to_pb_kwargs = {}
-
-
-def register_pb_json_format_kwargs(pb_kwargs: Optional[Dict] = None, json_kwargs: Optional[Dict] = None):
-    """Merge extra keyword arguments into protobuf JSON conversion.
-
-    Process-wide defaults used by :class:`JsonSerializer` when a protobuf
-    ``Message`` is serialized to or parsed from JSON. Later calls update
-    the stored dicts in place; they do not replace them.
-
-    Args:
-        pb_kwargs: Extra kwargs for ``MessageToJson`` (protobuf to JSON).
-        json_kwargs: Extra kwargs for ``Parse`` (JSON to protobuf).
-    """
-    global _pb_to_json_kwargs
-    if pb_kwargs:
-        _pb_to_json_kwargs.update(pb_kwargs)
-    global _json_to_pb_kwargs
-    if json_kwargs:
-        _json_to_pb_kwargs.update(json_kwargs)
+# Extra kwargs for MessageToJson / Parse used by JsonSerializer. Update in
+# place (``pb_to_json_kwargs.update(...)``); rebinding the name after
+# ``from ... import`` does not reach this module.
+pb_to_json_kwargs = {}
+json_to_pb_kwargs = {}
 
 
 @register_plugin(PluginType.SERIALIZATION, SerializationType.JSON, init_pos=PluginInitPos.WORKER)
@@ -71,19 +51,15 @@ class JsonSerializer(BaseSerializer):
     """JSON serializer registered as ``SerializationType.JSON``.
 
     Accepts either a :class:`JsonData` dict wrapper or a protobuf
-    ``Message``. Protobuf conversion uses
-    :func:`register_pb_json_format_kwargs` when those kwargs are set;
-    otherwise it picks the protobuf 5.26+ vs older ``MessageToJson``
-    parameter names.
+    ``Message``. Protobuf conversion uses :data:`pb_to_json_kwargs` /
+    :data:`json_to_pb_kwargs` when they are set; otherwise it picks the
+    protobuf 5.26+ vs older ``MessageToJson`` parameter names.
     """
 
-    def __init__(self) -> None:
-        super().__init__()
-
-    def _pb_serialize(self, body: PbMessage) -> str:
+    def _pb_serialize(self, body: PbMessage) -> bytes:
         """Serialize a protobuf message to JSON bytes.
 
-        When no kwargs were registered, protobuf < 5.26 uses
+        When no kwargs were set, protobuf < 5.26 uses
         ``including_default_value_fields`` and protobuf >= 5.26 uses
         ``always_print_fields_with_no_presence``. Both paths keep
         proto field names and integer enums.
@@ -94,9 +70,8 @@ class JsonSerializer(BaseSerializer):
         Returns:
             UTF-8 JSON bytes.
         """
-        global _pb_to_json_kwargs
-        if _pb_to_json_kwargs:
-            body_json = MessageToJson(body, **_pb_to_json_kwargs)
+        if pb_to_json_kwargs:
+            body_json = MessageToJson(body, **pb_to_json_kwargs)
         else:
             if _USE_NEW_PARAM:
                 # protobuf >= 5.26.0
@@ -115,20 +90,19 @@ class JsonSerializer(BaseSerializer):
     def _pb_deserialize(self, data: bytes, body: PbMessage) -> None:
         """Populate a protobuf message from JSON bytes.
 
-        Uses registered ``Parse`` kwargs when present; otherwise
+        Uses :data:`json_to_pb_kwargs` when present; otherwise
         ``ignore_unknown_fields=True``.
 
         Args:
             data: JSON bytes.
             body: Protobuf message mutated in place.
         """
-        global _json_to_pb_kwargs
-        if _json_to_pb_kwargs:
-            Parse(data, body, **_json_to_pb_kwargs)
+        if json_to_pb_kwargs:
+            Parse(data, body, **json_to_pb_kwargs)
             return
         Parse(data, body, ignore_unknown_fields=True)
 
-    def _json_serialize(cls, body: JsonData) -> bytes:
+    def _json_serialize(self, body: JsonData) -> bytes:
         """Serialize :class:`JsonData` with :func:`json.dumps`.
 
         Args:
@@ -191,8 +165,7 @@ class ProtoSerializer(BaseSerializer):
     :class:`~trpc_sdk.abc.TrpcMessage`.
     """
 
-    @classmethod
-    def serialize(cls, body: Any) -> bytes:
+    def serialize(self, body: Any) -> bytes:
         """Return ``body.SerializeToString()``.
 
         Args:
@@ -200,8 +173,7 @@ class ProtoSerializer(BaseSerializer):
         """
         return body.SerializeToString()
 
-    @classmethod
-    def deserialize(cls, data: bytes, body: Any) -> None:
+    def deserialize(self, data: bytes, body: Any) -> None:
         """Call ``body.ParseFromString(data)``.
 
         Args:
@@ -215,13 +187,12 @@ class ProtoSerializer(BaseSerializer):
 class NoopSerializer(BaseSerializer):
     """Identity serializer registered as ``SerializationType.Noop``.
 
-    Used when the frame already carries raw bytes (HTTP octet-stream,
-    task-stream payloads). ``Body`` is the typed wrapper; a plain
+    Used when the frame already carries raw bytes (e.g. HTTP octet-stream).
+    ``Body`` is the typed wrapper; a plain
     ``bytes`` object is only accepted on serialize.
     """
 
-    @classmethod
-    def serialize(cls, body: Any) -> bytes:
+    def serialize(self, body: Any) -> bytes:
         """Return ``body.data`` for :class:`Body`, otherwise ``body``.
 
         Args:
@@ -231,8 +202,7 @@ class NoopSerializer(BaseSerializer):
             return body.data
         return body
 
-    @classmethod
-    def deserialize(cls, data: bytes, body: Any) -> None:
+    def deserialize(self, data: bytes, body: Any) -> None:
         """Set ``body.data = data`` when ``body`` is a :class:`Body`.
 
         Args:
@@ -253,8 +223,7 @@ class JceSerializer(BaseSerializer):
     ``body``.
     """
 
-    @classmethod
-    def serialize(cls, body: Any) -> bytes:
+    def serialize(self, body: Any) -> bytes:
         """Serialize ``body`` with a JCE output stream.
 
         Args:
@@ -266,8 +235,7 @@ class JceSerializer(BaseSerializer):
         oos.bodySerilization(body)
         return oos.getBuffer()
 
-    @classmethod
-    def deserialize(cls, data: bytes, body: Any) -> None:
+    def deserialize(self, data: bytes, body: Any) -> None:
         """Populate ``body`` from JCE bytes.
 
         Args:
@@ -293,8 +261,7 @@ class WupSerializer(BaseSerializer):
     by :class:`JceSerializer`.
     """
 
-    @classmethod
-    def serialize(cls, body: Any) -> bytes:
+    def serialize(self, body: Any) -> bytes:
         """Serialize ``body`` with ``TafUniPacket.WUPserialize``.
 
         Args:
@@ -305,8 +272,7 @@ class WupSerializer(BaseSerializer):
         up = tafcore.TafUniPacket()
         return up.WUPserialize(body)
 
-    @classmethod
-    def deserialize(cls, data: bytes, body: Any) -> None:
+    def deserialize(self, data: bytes, body: Any) -> None:
         """Populate ``body`` from a WUP packet.
 
         Args:

@@ -11,14 +11,12 @@ modules; callers should only ``from trpc_sdk.codec import ...``.
 
 The package is split by responsibility:
 
-- :mod:`~trpc_sdk.codec._codec` — Python ``ClientCodec`` / ``ServerCodec`` plugins (``BaseCodec`` subclasses) that
+- :mod:`~trpc_sdk.codec._codec` — Python ``TrpcClientCodec`` / ``TrpcServerCodec`` plugins (``BaseCodec`` subclasses) that
   hold a unary and a stream Cython codec and dispatch between them; the server INIT meta cache lives here
 - :mod:`~trpc_sdk.codec._cython._codec` / :mod:`~trpc_sdk.codec._cython._codec_stream` — private Cython unary /
   stream codecs, both derived from the C-level ``_Codec`` root in :mod:`trpc_sdk.abc`
-- :mod:`~trpc_sdk.codec._cython._codec_parser` — TCP sticky-packet splitter (``TrpcServerParser``)
+- :mod:`~trpc_sdk.codec._cython._codec_parser` — TCP sticky-packet splitter (``TrpcServerProtocolChecker``)
 - :mod:`~trpc_sdk.codec._factory` — plugin lookups and protocol checkers
-- :mod:`~trpc_sdk.codec._task_stream_codec` — inner worker-to-task stream protocol
-- :mod:`~trpc_sdk.codec._exceptions` — task-stream encode / decode errors
 
 The message type and its clone helpers now live in :mod:`trpc_sdk.abc`. The
 ``Message`` / ``CFrameHead`` / ``FrameHead`` names below are aliases kept so
@@ -37,25 +35,15 @@ from trpc_sdk.abc import create_frame_head
 from trpc_sdk.abc import create_message
 from trpc_sdk.abc import get_message
 from trpc_sdk.abc import parse_frame_head
-from ._codec import ClientCodec
-from ._codec import ServerCodec
+from ._codec import TrpcClientCodec
+from ._codec import TrpcServerCodec
 from ._constants import FRAME_HEAD_LEN
-from ._constants import INNER_TASK_STREAM
-from ._exceptions import TaskStreamClientDecodeError
-from ._exceptions import TaskStreamClientEncodeError
-from ._exceptions import TaskStreamClientReadFrameError
-from ._exceptions import TaskStreamServerDecodeError
-from ._exceptions import TaskStreamServerEncodeError
+from ._cython import TrpcServerProtocolChecker
 from ._factory import TrpcClientParser
-from ._factory import TrpcServerParser
 from ._factory import get_client_checker
 from ._factory import get_client_codec
 from ._factory import get_server_checker
 from ._factory import get_server_codec
-from ._task_stream_codec import TaskStreamClientCodec
-from ._task_stream_codec import TaskStreamClientParser
-from ._task_stream_codec import TaskStreamServerCodec
-from ._task_stream_codec import TaskStreamServerParser
 from ._utils import get_request_attachment
 from ._utils import get_response_attachment
 from ._utils import set_request_attachment
@@ -68,10 +56,10 @@ FrameHead = TrpcFrameHead
 
 __all__ = [
     # Codec
-    "ClientCodec",
-    "ServerCodec",
+    "TrpcClientCodec",
+    "TrpcServerCodec",
     "TrpcClientParser",
-    "TrpcServerParser",
+    "TrpcServerProtocolChecker",
     "get_client_checker",
     "get_client_codec",
     "get_server_checker",
@@ -92,15 +80,4 @@ __all__ = [
     "create_message",
     "get_message",
     "parse_frame_head",
-    # Task stream
-    "INNER_TASK_STREAM",
-    "TaskStreamClientCodec",
-    "TaskStreamServerCodec",
-    "TaskStreamClientParser",
-    "TaskStreamServerParser",
-    "TaskStreamClientReadFrameError",
-    "TaskStreamClientEncodeError",
-    "TaskStreamClientDecodeError",
-    "TaskStreamServerEncodeError",
-    "TaskStreamServerDecodeError",
 ]

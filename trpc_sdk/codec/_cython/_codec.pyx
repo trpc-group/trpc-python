@@ -10,7 +10,7 @@
 
 Packs ``trpc_pb2.RequestProtocol`` / ``trpc_pb2.ResponseProtocol`` after the 16-byte frame
 head. Stream frames live in :mod:`trpc_sdk.codec._cython._codec_stream`. Python
-:class:`~trpc_sdk.codec.ClientCodec` / ``ServerCodec`` hold one codec of
+:class:`~trpc_sdk.codec.TrpcClientCodec` / ``TrpcServerCodec`` hold one codec of
 each kind and dispatch unary here and stream there.
 
 Wire layout produced by :func:`_common_pack`::
@@ -24,6 +24,9 @@ the tail.
 """
 
 import copy
+from libc.stdint cimport uint8_t
+from libc.stdint cimport uint16_t
+from libc.stdint cimport uint32_t
 from libc.string cimport memcpy
 from cpython.mem cimport PyMem_Free
 from cpython.mem cimport PyMem_Malloc
@@ -39,26 +42,23 @@ from trpc_sdk.abc._cython cimport TrpcFrameHead
 from trpc_sdk.abc._cython cimport TrpcMessage
 from trpc_sdk.abc._cython cimport parse_frame_head
 from .._constants import DYEING_KEY as _PY_DYEING_KEY
-from .._constants import EnvTransfer as _PY_ENV_TRANSFER
+from .._constants import ENV_TRANSFER_KEY as _PY_ENV_TRANSFER_KEY
 from .._constants import FRAME_HEAD_LEN as _PY_FRAME_HEAD_LEN
 
 cdef int FRAME_HEAD_LEN = _PY_FRAME_HEAD_LEN
 # Per-instance request_id wrap; not a globally unique id. A uint32 width
 # fact rather than a protocol constant, so it stays out of _constants.py.
-cdef unsigned int UINT32_MAX_VALUE = 4294967295
+cdef uint32_t UINT32_MAX_VALUE = 4294967295
 # trpc_pb2.RequestProtocol.trans_info keys; _constants.py is the single source.
 cdef str DYEING_KEY = _PY_DYEING_KEY
-cdef str EnvTransfer = _PY_ENV_TRANSFER
-ctypedef unsigned int uint
-ctypedef unsigned short ushort
-ctypedef unsigned char uchar
+cdef str ENV_TRANSFER_KEY = _PY_ENV_TRANSFER_KEY
 
 
-cdef class _ClientCodec(_Codec):
+cdef class _TrpcClientCodec(_Codec):
     """Client-side unary codec: request encode and response decode.
 
     Handles unary frames only. The Python
-    :class:`~trpc_sdk.codec.ClientCodec` plugin holds one instance as
+    :class:`~trpc_sdk.codec.TrpcClientCodec` plugin holds one instance as
     ``self.codec`` and sends stream frames to the stream codec instead,
     so ``encode_stream`` / ``decode_stream`` keep the ``_Codec`` default.
 
@@ -159,7 +159,7 @@ cdef class _ClientCodec(_Codec):
             req.trans_info[DYEING_KEY] = message.dyeing_key.encode('utf8')
         # Set env-transfer info.
         if len(message.env_transfer) > 0:
-            req.trans_info[EnvTransfer] = message.env_transfer.encode('utf8')
+            req.trans_info[ENV_TRANSFER_KEY] = message.env_transfer.encode('utf8')
 
         req.attachment_size = len(message.request_attachment)
         cdef bytes req_head = req.SerializeToString()
@@ -221,7 +221,7 @@ cdef class _ClientCodec(_Codec):
             ClientDecodeError: Empty or oversized protocol head, or
                 ``attachment_size`` overlapping the body.
         """
-        cdef uint buffer_length = len(buffer)
+        cdef uint32_t buffer_length = len(buffer)
 
         frame_head = parse_frame_head(buffer)
         if frame_head.head_len == 0:
@@ -255,47 +255,12 @@ cdef class _ClientCodec(_Codec):
         message.set_response_attachment(buffer[body_end:buffer_length])
         return buffer[body_start:body_end]
 
-    cpdef void update_msg_by_msg(self, TrpcMessage origin_message, TrpcMessage target_message):
-        """Copy a decoded response from a temporary message onto the request.
 
-        For callers that decode into a scratch message and then move the
-        head, frame, compress / serialize types, trans_info, error, and
-        attachment onto the original request message. Equivalent to the
-        second half of ``_unpack`` without touching the body.
-
-        Args:
-            origin_message: Temporary message that already ran decode.
-            target_message: The in-flight request message to update.
-        """
-        # Update the request msg from a temporary msg.
-        if origin_message.client_rsp_head:
-            target_message.set_client_rsp_head(origin_message.client_rsp_head)
-
-        if origin_message.frame_head:
-            target_message.set_frame_head(origin_message.frame_head)
-
-        rsp = origin_message.client_rsp_head
-        target_message.set_compress_type(int(rsp.content_encoding))
-        target_message.set_serialization_type(int(rsp.content_type))
-        # Reset transmissive info returned by the downstream.
-        if len(rsp.trans_info) > 0:
-            trans_info = {}
-            for key, value in rsp.trans_info.items():
-                trans_info[key] = value
-            target_message.set_client_meta_data(trans_info)
-        if rsp.ret != 0:
-            target_message.set_client_rsp_err(TrpcException(TrpcErrorType.BUSINESS, rsp.ret, rsp.error_msg))
-        elif rsp.func_ret != 0:
-            target_message.set_client_rsp_err(TrpcException(TrpcErrorType.BUSINESS, rsp.func_ret, rsp.error_msg))
-        target_message.set_response_attachment(origin_message.response_attachment)
-        return
-    
-
-cdef class _ServerCodec(_Codec):
+cdef class _TrpcServerCodec(_Codec):
     """Server-side unary codec: request decode and response encode.
 
     Handles unary frames only. The Python
-    :class:`~trpc_sdk.codec.ServerCodec` plugin holds one instance as
+    :class:`~trpc_sdk.codec.TrpcServerCodec` plugin holds one instance as
     ``self.codec``; stream frames and the INIT meta cache live elsewhere.
     """
 
@@ -405,8 +370,8 @@ cdef class _ServerCodec(_Codec):
                 message.set_dyeing_key(req.trans_info[DYEING_KEY].decode('utf8'))
 
             # Env-transfer info.
-            if EnvTransfer in req.trans_info:
-                message.set_env_transfer(req.trans_info[EnvTransfer].decode('utf8'))
+            if ENV_TRANSFER_KEY in req.trans_info:
+                message.set_env_transfer(req.trans_info[ENV_TRANSFER_KEY].decode('utf8'))
 
         # Parse app / server from the service name. Clear first: the setters
         # short-circuit when the value is unchanged, so an empty derived field
@@ -449,7 +414,7 @@ cdef class _ServerCodec(_Codec):
                 ``attachment_size`` overlapping the body.
         """
 
-        cdef uint buffer_length = len(buffer)
+        cdef uint32_t buffer_length = len(buffer)
 
         frame_head = parse_frame_head(buffer)
         if frame_head.head_len == 0:
@@ -487,21 +452,21 @@ cpdef bytes _common_pack(bytes req_head, TrpcFrameHead frame_head, bytes body, b
     Returns:
         Complete unary frame bytes.
     """
-    cdef ushort head_len = len(req_head)
-    cdef uint body_len = len(body)
-    cdef uint attachment_len = len(attachment)
-    cdef uint total_len = FRAME_HEAD_LEN + head_len + body_len + attachment_len
+    cdef uint16_t head_len = len(req_head)
+    cdef uint32_t body_len = len(body)
+    cdef uint32_t attachment_len = len(attachment)
+    cdef uint32_t total_len = FRAME_HEAD_LEN + head_len + body_len + attachment_len
 
 
     cdef char* to_prt = <char *> PyMem_Malloc(total_len)
-    cdef ushort magic = trpc_pb2.TRPC_MAGIC_VALUE
-    (<ushort *>(to_prt))[0] = htons(magic)
-    (<uchar *>(to_prt+2))[0] = frame_head.frame_type
-    (<uchar *>(to_prt+3))[0] = frame_head.frame_state
-    (<uint *>(to_prt+4))[0] = htonl(total_len)
-    (<ushort *>(to_prt+8))[0] = htons(head_len)
-    (<uint *>(to_prt+10))[0] = htonl(frame_head.stream_id)
-    (<ushort *>(to_prt+14))[0] = htons(frame_head.frame_reserved)
+    cdef uint16_t magic = trpc_pb2.TRPC_MAGIC_VALUE
+    (<uint16_t *>(to_prt))[0] = htons(magic)
+    (<uint8_t *>(to_prt+2))[0] = frame_head.frame_type
+    (<uint8_t *>(to_prt+3))[0] = frame_head.frame_state
+    (<uint32_t *>(to_prt+4))[0] = htonl(total_len)
+    (<uint16_t *>(to_prt+8))[0] = htons(head_len)
+    (<uint32_t *>(to_prt+10))[0] = htonl(frame_head.stream_id)
+    (<uint16_t *>(to_prt+14))[0] = htons(frame_head.frame_reserved)
 
     cdef char* req_head_ptr = req_head
     memcpy(to_prt+FRAME_HEAD_LEN, req_head_ptr, head_len)

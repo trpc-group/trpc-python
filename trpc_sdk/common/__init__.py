@@ -18,7 +18,9 @@ from ._process_hook import execute_after_in_parent
 from ._process_hook import execute_after_in_child
 from ._process_hook import execute_before_loop_run_in_child
 from ._process_helper import ProcessType
+from ._process_helper import bind_lifetime_to_parent
 from ._process_helper import is_task_process
+from ._process_helper import is_timer_process
 from ._process_helper import is_worker_process
 from ._process_helper import get_process_name
 from ._process_helper import get_process_type
@@ -39,7 +41,9 @@ __all__ = [
     "execute_after_in_child",
     "execute_before_loop_run_in_child",
     "ProcessType",
+    "bind_lifetime_to_parent",
     "is_task_process",
+    "is_timer_process",
     "is_worker_process",
     "get_process_name",
     "get_process_type",

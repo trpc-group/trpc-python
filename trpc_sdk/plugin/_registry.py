@@ -29,6 +29,7 @@ def register_plugin(
     plugin_name: str,
     init_pos: PluginInitPos = PluginInitPos.WORKER,
     version: str = "",
+    report: bool = False,
 ) -> Callable[[PluginFactoryType], PluginFactoryType]:
     """
     Register plugin decorator
@@ -43,6 +44,8 @@ def register_plugin(
         plugin_name: plugin name
         init_pos: init position
         version: plugin version
+        report: whether to report this plugin's name and version for
+            usage statistics
     Returns:
         None
     """
@@ -53,7 +56,8 @@ def register_plugin(
                                  plugin_type=plugin_type,
                                  plugin_name=plugin_name,
                                  version=version,
-                                 task_info=None)
+                                 task_info=None,
+                                 report=report)
         DEFAULT_PLUGIN_MANAGER.register(plugin_spec)
 
         return cls

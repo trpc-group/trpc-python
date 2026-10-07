@@ -41,7 +41,7 @@ from trpc_sdk.transport import ConnPoolOptions
 from trpc_sdk.transport import RoundTripOptions
 from trpc_sdk.transport import get_client_transport
 from trpc_sdk.transport import get_default_client_transport
-from ._config import get_client_backend_config
+from ._config import get_client_service_config
 
 
 # pylint: disable=too-many-instance-attributes,too-many-public-methods
@@ -123,7 +123,7 @@ class Options:
         Returns:
             self: Returns the Options instance for method chaining
         """
-        service = get_client_backend_config(name)
+        service = get_client_service_config(name)
         if service.target:
             self.target = service.target
         else:

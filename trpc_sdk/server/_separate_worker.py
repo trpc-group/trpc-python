@@ -29,6 +29,22 @@ process itself rather than a child a master forked.
 Responses are addressed by ``(fd, session_id)``. The fd alone is not enough
 because the kernel reuses fds: a response that arrives after the client is
 gone must not be written to whoever inherited its descriptor.
+
+Only addresses whose bytes the I/O process can cut into self-delimiting tRPC
+frames go through it: the ones
+:func:`~trpc_sdk.server._listeners.classify_address` calls TCP. Every other
+kind is served by each rpc task directly, on its own ``SO_REUSEPORT`` socket:
+
+* USER — a protocol registered with
+  :func:`~trpc_sdk.server.register_protocol_handle`; the I/O process has no
+  checker that could frame it.
+* UDP — datagrams carry no connection to forward over a pipe.
+* HTTP — aiohttp parses and answers requests itself.
+
+Those addresses therefore skip ``check_idle_timeout``, the custom scheduler
+and the RPCZ post-I/O step, and the kernel picks the rpc task for each
+connection or datagram. On macOS ``SO_REUSEPORT`` does not balance load: all
+of them work, but in practice one rpc task serves each such address.
 """
 
 from __future__ import annotations
@@ -44,7 +60,9 @@ from typing import Dict
 from typing import List
 from typing import Tuple
 
-from trpc_sdk.common import ProcessType
+from aiohttp import web
+
+from trpc_sdk.abc import ProcessType
 from trpc_sdk.ipc import PipeConnection
 from trpc_sdk.ipc import PipeEnd
 from trpc_sdk.ipc import PipeKind
@@ -60,6 +78,13 @@ from trpc_sdk.transport import WorkerDispatcherConnection
 from trpc_sdk.transport import create_server_socket
 from ._constants import LISTEN_BACKLOG
 from ._constants import RPC_TASK_PRODUCER_PREFIX
+from ._constants import AddressKind
+from ._listeners import classify_address
+from ._listeners import create_http_msg_handle
+from ._listeners import start_http_site
+from ._listeners import start_udp
+from ._listeners import start_user_protocol
+from ._listeners import stop_http_sites
 from ._worker import BaseWorker
 
 
@@ -117,10 +142,12 @@ class RpcTaskPipes:
 class RpcTaskProcess(BaseWorker, Process):
     """Child of a separate-mode worker: decodes frames and runs handlers.
 
-    Owns no listen socket. Everything it serves arrives on the request pipe,
-    already framed and tagged with the fd, session id and listen port it came
-    in on; the port is what selects the handler, timeout and transport options
-    to serve it with.
+    Owns no listen socket for TCP addresses. Everything served on those
+    arrives on the request pipe, already framed and tagged with the fd,
+    session id and listen port it came in on; the port is what selects the
+    handler, timeout and transport options to serve it with. USER, UDP and
+    HTTP addresses are the exception: this process binds them itself, with
+    ``SO_REUSEPORT``, alongside its sibling rpc tasks.
 
     It is a full :class:`BaseWorker`, which is what makes
     :func:`~trpc_sdk.task.send_to_task` work from a handler running here without
@@ -150,17 +177,24 @@ class RpcTaskProcess(BaseWorker, Process):
         # Pipes of every sibling; all but ``index`` are closed after fork.
         self._all_pipes: List[RpcTaskPipes] = pipes
         self.worker_pipe_conn, self.rpcz_pipe_conn = pipes[index].endpoints(PipeEnd.LEFT)
+        # aiohttp runners and sites for the HTTP addresses this process binds
+        # itself. Runners are kept so they stay referenced while serving;
+        # sites are what ``_stop_accepting`` closes.
+        self._http_runners: List[web.AppRunner] = []
+        self._http_sites: List[web.BaseSite] = []
 
     def _owned_producer_names(self) -> List[str]:
         """Claim this child's producer identity in the task mesh."""
         return [rpc_task_producer_name(self.index)]
 
     def start_worker_process(self) -> None:
-        """Drop the descriptors of other processes, then attach the request pipe.
+        """Attach the request pipe, then bind the addresses this process serves itself.
 
         Called by :meth:`~trpc_sdk.server._worker.BaseWorker._prepare_to_serve`
         once plugins and infer-task connections are up; this is where the
-        process starts accepting work.
+        process starts accepting work. The pipe comes first so that the
+        descriptors of other processes are already dropped when the first
+        socket of our own is bound.
 
         The RPCZ pipe is closed to its far end but never wrapped in a
         protocol: this side only ever writes. ``WorkerDispatcherConnection``
@@ -181,6 +215,26 @@ class RpcTaskProcess(BaseWorker, Process):
         coro = self.loop.create_connection(handle, sock=self.worker_pipe_conn.get_socket())
         self.loop.run_until_complete(coro)
 
+        self._start_own_listeners()
+
+    def _start_own_listeners(self) -> None:
+        """Bind every USER, UDP and HTTP address on this process's loop.
+
+        TCP addresses are skipped: the I/O process owns them and forwards
+        their frames over the request pipe. The addresses were validated by
+        the worker before the fork, so no other kind can appear here.
+        """
+        for i, _ in enumerate(self.addresses):
+            kind = classify_address(self, i)
+            if kind is AddressKind.USER:
+                start_user_protocol(self, i)
+            elif kind is AddressKind.UDP:
+                start_udp(self, i, self.loop)
+            elif kind is AddressKind.HTTP:
+                runner, site = start_http_site(self, i, create_http_msg_handle(self, i), self.loop)
+                self._http_runners.append(runner)
+                self._http_sites.append(site)
+
     def _close_sibling_pipes(self) -> None:
         """Close both ends of every other rpc task's pipes.
 
@@ -193,8 +247,18 @@ class RpcTaskProcess(BaseWorker, Process):
             if index != self.index:
                 pipes.close()
 
+    def _stop_accepting(self) -> None:
+        """Close the HTTP sites this process bound itself."""
+        stop_http_sites(self.loop, self._http_sites)
+        self._http_sites.clear()
+
     def _on_sigterm_received(self) -> None:
-        """Log the shutdown; the base class exits the loop afterwards."""
+        """Log the shutdown.
+
+        Handlers run in this process, so the user worker-exit callbacks
+        (``set_signal_handle(worker_handle=...)``) run here in ``separate``
+        mode, through the inherited :meth:`_on_drained`.
+        """
         logger.error("[rpc task] RpcTaskProcess-%s received kill signal", self.index)
 
 
@@ -236,6 +300,8 @@ class SeparateWorker(BaseWorker):
         # Live pipe transports to the rpc tasks; the index the scheduler
         # returns selects one of these.
         self.worker_connections: List[asyncio.Transport] = []
+        # Listen servers for the TCP addresses; closed by ``_stop_accepting``.
+        self._servers: List[asyncio.AbstractServer] = []
         # Live clients keyed by kernel fd; value is a ClientConnectionInfo.
         self.client_connections: Dict[int, ClientConnectionInfo] = {}
         # RPCZ spans in flight, keyed by (fd, session_id).
@@ -282,13 +348,32 @@ class SeparateWorker(BaseWorker):
 
         The task mesh itself is still built before every fork, as it must be:
         a peer-to-peer task pipe joins two children and neither can create it.
+
+        Addresses are validated before anything is forked, so a configuration
+        error stops startup instead of crashing every rpc task.
         """
+        self._validate_addresses()
         super()._spawn_children()
 
         self._create_rpc_task_pipes()
         for index in range(self.rpc_task_num):
             self._spawn(f"rpc_task-{index}",
                         partial(RpcTaskProcess, index, self.rpc_task_pipes, self.server_engine))
+
+    def _validate_addresses(self) -> None:
+        """Fail before the fork on an address no process here could serve.
+
+        Raises:
+            ValueError: An address matches no listener, or a TCP address has
+                no checker factory to cut its byte stream into frames.
+        """
+        for i, address in enumerate(self.addresses):
+            kind = classify_address(self, i)
+            if kind is AddressKind.UNKNOWN:
+                raise ValueError(f"separate mode: unsupported network {self.networks[i]!r} for address {address}")
+            if kind is AddressKind.TCP and not hasattr(self.checkers[i], "create"):
+                raise ValueError(f"separate mode: no protocol checker for TCP address {address} "
+                                 f"(protocol {self.services[i].opt.protocol!r}), so its frames cannot be forwarded")
 
     def _create_rpc_task_pipes(self) -> None:
         """Build both socketpairs for every rpc task, before any of them forks.
@@ -302,7 +387,7 @@ class SeparateWorker(BaseWorker):
                 RpcTaskPipes(request=create_pipe(PipeKind.TCP), rpcz=create_pipe(PipeKind.TCP)))
 
     def start_worker_process(self) -> None:
-        """Attach the rpc task pipes, then bind and listen on every address.
+        """Attach the rpc task pipes, then bind and listen on every TCP address.
 
         Pipes first: an address must not become reachable before there is
         somewhere to send the frames arriving on it, or the first requests
@@ -330,21 +415,42 @@ class SeparateWorker(BaseWorker):
             self.loop.run_until_complete(self.loop.create_connection(rpcz_handle, sock=rpcz.get_socket()))
 
     def _listen(self) -> None:
-        """Bind every configured address and start accepting on the main loop.
+        """Bind every TCP address and start accepting on the main loop.
+
+        Other kinds are left to the rpc tasks, which bind them themselves.
 
         ``create_server`` is enough here, unlike in merge mode: the connection
         is only read from and written to on this loop, never handed to another
         one, so there is nothing to gain from accepting by hand.
         """
         for i, address in enumerate(self.addresses):
+            if classify_address(self, i) is not AddressKind.TCP:
+                continue
             sock = create_server_socket(address, self.socket_types[i], reuse_port=True)
             handle = partial(DispatcherClientConnection, app=self, address=address, checker=self.checkers[i])
             server = self.loop.create_server(handle, sock=sock, reuse_port=True, backlog=LISTEN_BACKLOG)
-            self.loop.run_until_complete(server)
+            self._servers.append(self.loop.run_until_complete(server))
+
+    def _start_timers(self) -> None:
+        """No timers here: this process runs no business code.
+
+        The rpc tasks run ``worker:<index>`` executors. One here as well would
+        share rpc task 0's name and run every unnamed timer once more, in a
+        process whose business plugins were never initialized.
+        """
+
+    def _stop_accepting(self) -> None:
+        """Close the TCP listen sockets; open client connections keep being served."""
+        for server in self._servers:
+            server.close()
+        self._servers.clear()
 
     def _on_sigterm_received(self) -> None:
         """Log the shutdown; children are stopped after the loop unwinds."""
         logger.error("[separate worker] received kill signal")
+
+    def _on_drained(self) -> None:
+        """No user worker-exit callbacks here: handlers run in the rpc tasks."""
 
     def _on_graceful_exit(self) -> None:
         """Report the exit so a supervisor can tell it from a crash."""
@@ -362,4 +468,4 @@ class SeparateWorker(BaseWorker):
         """
         report_attr("trpc_separate_worker_err_exit", 1)
         logger.error("[separate worker] SeparateWorker exited with error: %s, trace: %s", repr(err),
-                     traceback.format_stack())
+                     traceback.format_exc())

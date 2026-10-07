@@ -18,12 +18,6 @@ forked. The returned worker then owns this process: it forks the children and
 only afterwards creates the event loop. Unknown mode names fail here rather
 than in the worker constructor, so a typo in YAML is reported before any
 socket is bound.
-
-Resolution order is registry first, then the retired-name mapping in
-:mod:`~trpc_sdk.server._compat`. That order is load-bearing: ``dispatcher`` is
-both a legacy value that maps to ``separate`` and a name a private
-registration may still use. Consulting the registry first means such a
-registration wins; folding the name first would make it unreachable.
 """
 
 from __future__ import annotations
@@ -32,7 +26,6 @@ from typing import Any
 from typing import Dict
 from typing import Type
 
-from ._compat import compat_mode_name
 from ._constants import MODE_MERGE
 from ._constants import MODE_SEPARATE
 from ._merge_worker import MergeWorker
@@ -82,18 +75,13 @@ def resolve_worker_cls(mode: str) -> Type[BaseWorker]:
             :data:`DEFAULT_MODE` in place when the YAML field is absent.
 
     Returns:
-        The registered class, looked up under the configured name first and
-        under its modern equivalent only if that missed.
+        The class registered under ``mode``.
 
     Raises:
-        ValueError: The name is neither registered nor a known legacy value.
+        ValueError: The name is not registered.
     """
     if mode in _WORKER_MODES:
         return _WORKER_MODES[mode]
-
-    resolved = compat_mode_name(mode)
-    if resolved in _WORKER_MODES:
-        return _WORKER_MODES[resolved]
 
     raise ValueError(f"unknown server.mode: {mode!r}; registered modes are {sorted(_WORKER_MODES)}")
 
@@ -111,6 +99,6 @@ def create_worker(mode: str, engine: Any) -> BaseWorker:
         A worker that has not forked anything and has no event loop yet.
 
     Raises:
-        ValueError: If ``mode`` names no registered or legacy mode.
+        ValueError: If ``mode`` names no registered mode.
     """
     return resolve_worker_cls(mode)(engine)

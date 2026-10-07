@@ -30,7 +30,6 @@ from typing import Type
 
 from trpc_sdk.ipc import PipeConnection
 from trpc_sdk.transport import encode_worker_msg_req
-from trpc_sdk.task import TaskStreamHandler
 from ._loop_thread import LoopThread
 
 
@@ -143,7 +142,7 @@ class QueueWindow:
 class AcceptTarget:
     """One loop thread plus the protocol factory to use for sockets sent to it.
 
-    The factory is per target rather than per acceptor because some front ends
+    The factory is per target rather than per acceptor because some listeners
     cannot share one across loops. An aiohttp ``AppRunner`` builds a ``Server``
     bound to whichever loop was running during ``setup()``, so each thread
     needs its own runner and therefore its own factory. Plain tRPC protocols
@@ -161,11 +160,13 @@ class ChildRecord:
     """One child this worker forked, plus how to build a replacement.
 
     A ``multiprocessing.Process`` can only be started once, so restarting a
-    dead child means constructing a new one. Keeping the factory rather than
-    the constructor arguments also means the caller decides what a restart
-    reuses: task children hand back the same :class:`TaskInfo`, and therefore
-    the same already-created pipes, which is what lets the survivors keep
-    talking to the replacement.
+    dead child would mean constructing a new one; the factory is kept for
+    that. Restarting is not supported yet (``reboot_child`` is treated as
+    false). Handing the replacement the same pipes would not work: the parent
+    closed the child's ends after the first fork, and a half-written frame
+    left in a socket buffer would desynchronize the parser on the far side.
+    A restart has to rebuild every IPC edge of the child, which needs a
+    framework-level fd registry or task endpoints reached by name.
     """
 
     # Child name, used in log messages.
@@ -220,8 +221,7 @@ class WorkerInfo:
     # writes this end.
     write_message_pipe: Optional[PipeConnection] = None
     # This worker's end of each worker <-> task IPC pipe, index-aligned
-    # with ``task_name``. ``None`` for stream tasks, which connect over
-    # a Unix-domain socket instead.
+    # with ``task_name``. ``None`` for a task this process has no pipe to.
     task_pipe_conn: List[Optional[PipeConnection]] = field(default_factory=list)
     # Task names paired with ``task_pipe_conn``.
     task_name: List[str] = field(default_factory=list)
@@ -263,8 +263,7 @@ class TaskInfo:
     ``TrpcServerEngine.init_task_process``.
     """
 
-    # Stable name ``{registered_name}:{index}`` used for IPC lookup and
-    # Unix-domain path ``.__{name}`` for stream tasks.
+    # Stable name ``{registered_name}:{index}`` used for IPC lookup.
     name: str = ""
     handle: Optional[Type[Process]] = None
     # ``(initializer, handler)`` from the user registration; the child
@@ -275,8 +274,7 @@ class TaskInfo:
     process_instance: Optional[Process] = None
     # This task's end of each producer <-> task IPC pipe, index-aligned with
     # ``producer_names``. ``None`` where that producer has no pipe to this
-    # task: stream tasks (which use a Unix-domain socket) and producers that
-    # are peer tasks which did not declare this one.
+    # task: a peer task which did not declare this one.
     task_pipe_conn: List[Optional[PipeConnection]] = field(default_factory=list)
     # Who may send work to this task, in the order ``task_pipe_conn`` uses.
     # The index into this list is the ``task_conn_index`` a response carries,
@@ -302,8 +300,6 @@ class TaskInfo:
     # If True, registry heartbeats were paused at registration and must
     # be resumed after the task initializer returns.
     pause_heartbeat: bool = False
-    # Stream client/service pair; ``None`` for non-stream tasks.
-    task_stream_handler: Optional[TaskStreamHandler] = None
 
     @property
     def pid(self) -> int:

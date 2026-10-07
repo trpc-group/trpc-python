@@ -65,7 +65,7 @@ if TYPE_CHECKING:
     from trpc_sdk.abc import BaseServerTransport
     from trpc_sdk.abc import BaseServerTransportOption
     from trpc_sdk.abc import BaseServiceRegistry
-    from trpc_sdk.codec import ServerCodec
+    from trpc_sdk.codec import TrpcServerCodec
     from trpc_sdk.stream import StreamDispatcher
     from ._server import Server
 
@@ -82,8 +82,7 @@ class ServerOption:
     """
 
     def __init__(self) -> None:
-        # Process model: "merge" / "separate". Retired YAML names are
-        # translated in ``trpc_sdk.server._compat`` before the worker is built.
+        # Process model: "merge" / "separate".
         self.mode: str = DEFAULT_MODE
         # Worker (or executor) process count. YAML default is CPU core count.
         self.worker_num: int = DEFAULT_WORKER_NUM
@@ -103,12 +102,14 @@ class ServerOption:
         self.task_consumer_num: int = DEFAULT_TASK_CONSUMER_NUM
         # Optional callback for master -> worker message-pipe payloads.
         self.on_worker_message: Optional[Callable[[int, bytes], Any]] = None
-        # If True, master restarts a crashed worker/task child.
+        # Restart a crashed child instead of exiting. Not supported in this
+        # version: the worker treats it as False and warns when it is set.
         self.reboot_child: bool = DEFAULT_REBOOT_CHILD
         # Event loop assigned by the engine. Cython left this as None via
         # ``cdef public object``; Python must set it explicitly.
         self.loop: Optional[AbstractEventLoop] = None
-        # Graceful-shutdown wait on SIGTERM, in milliseconds.
+        # Drain period on SIGTERM, in milliseconds: the listen sockets are
+        # closed and in-flight requests get this long to finish before exit.
         self.close_wait_time: int = DEFAULT_CLOSE_WAIT_TIME
 
 
@@ -180,7 +181,7 @@ class ServiceOption:
         # Registry control: 0 = off, 1 = on.
         self.registry_option: int = DEFAULT_REGISTRY_OPTION
         # Server codec for this protocol; set by set_protocol().
-        self.codec: Optional[ServerCodec] = None
+        self.codec: Optional[TrpcServerCodec] = None
 
         # Server filter chain (True = server-side chain).
         self.filters: FilterChain = FilterChain(True)

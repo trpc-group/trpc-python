@@ -8,7 +8,7 @@
 
 Opens a connected datagram endpoint via
 :func:`open_datagram_endpoint`, writes the request, and (unless
-``req_type`` is :attr:`RequestType.SendOnly`) waits for one reply.
+``req_type`` is :attr:`RequestType.SEND_ONLY`) waits for one reply.
 The connection is always closed in ``finally``.
 """
 
@@ -44,7 +44,7 @@ async def udp_round_trip(ctx: TrpcContext, req_data: bytes, options: RoundTripOp
             ``req_type``.
 
     Returns:
-        Response bytes, or ``None`` for ``SendOnly``.
+        Response bytes, or ``None`` for ``SEND_ONLY``.
 
     Raises:
         ClientTimeoutError: Deadline already passed, or the wait expired.
@@ -73,7 +73,7 @@ async def udp_round_trip(ctx: TrpcContext, req_data: bytes, options: RoundTripOp
     set_addr_to_ctx_from_transport(ctx, conn.transport)
 
     try:
-        if options.req_type == RequestType.SendOnly:
+        if options.req_type == RequestType.SEND_ONLY:
             return
 
         rsp_data, _ = await asyncio.wait_for(conn.receive(), timeout)

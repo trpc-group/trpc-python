@@ -99,7 +99,7 @@ class WorkerDispatcherConnection(BaseConnection):
             ctx.local_port = local_addr[1]
 
             msg = get_message(ctx)
-            msg.set_local_addr(ctx.local_ip)
+            msg.set_local_ip(ctx.local_ip)
             msg.set_remote_addr(ctx.remote_ip)
             msg.set_session_id(session_id)
 
@@ -170,10 +170,10 @@ class WorkerDispatcherConnection(BaseConnection):
                         "session_id": session_id,
                         "span": rpcz_span.to_dict(),
                     }
-                    side_buf = encode_worker_msg_req(self.app.worker.id, json.dumps(rpcz_payload).encode("utf-8"))
+                    side_buf = encode_worker_msg_req(self.app.worker_id, json.dumps(rpcz_payload).encode("utf-8"))
                     self.app.rpcz_pipe_conn.send(side_buf)
                     logger.debug("[worker] rpcz side-pipe sent, worker_id=%s, fd=%s, session_id=%s, span_id=%s",
-                                 self.app.worker.id, conn_fd, session_id, rpcz_span.span_id)
+                                 self.app.worker_id, conn_fd, session_id, rpcz_span.span_id)
 
                 session_id = ctx.pop_meta_data("session_id")
                 conn_fd = ctx.pop_meta_data("fd")
@@ -187,7 +187,7 @@ class WorkerDispatcherConnection(BaseConnection):
         except Exception as err:  # pylint: disable=broad-except
             report_attr("trpc_worker_write_err", 1)
             logger.error("[worker] failed to send rsp to dispatcher (normal rpc), err: %s, trace: %s", repr(err),
-                         traceback.format_stack())
+                         traceback.format_exc())
 
 
 class WorkerTaskConnection(asyncio.Protocol):

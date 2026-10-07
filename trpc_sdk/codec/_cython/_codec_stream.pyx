@@ -22,7 +22,7 @@ in the body slot, not as a separate protocol head.
 ``encode_stream`` / ``decode_stream`` are the entry points: they
 branch on ``frame_head.frame_state`` and call one of the per-frame
 methods below. They only pack and unpack; the server INIT meta cache
-stays in :class:`trpc_sdk.codec.ServerCodec`.
+stays in :class:`trpc_sdk.codec.TrpcServerCodec`.
 
 ``encode_init_frame`` / ``encode_close_frame`` / ``encode_feedback_frame``
 ignore the ``body`` argument. The payload is ``message.stream_frame``
@@ -37,10 +37,13 @@ including the 16-byte head; every decoder slices
 Server ``decode_init_frame`` stores caller / callee / func on the
 message and ``set_stream_frame``. Later DATA / CLOSE frames recover
 ``server_rpc_name`` from the INIT cache in
-:meth:`trpc_sdk.codec.ServerCodec.set_init_meta` keyed by
+:meth:`trpc_sdk.codec.TrpcServerCodec.set_init_meta` keyed by
 ``session_id + stream_id``.
 """
 
+from libc.stdint cimport uint8_t
+from libc.stdint cimport uint16_t
+from libc.stdint cimport uint32_t
 from libc.string cimport memcpy
 from cpython.mem cimport PyMem_Free
 from cpython.mem cimport PyMem_Malloc
@@ -54,42 +57,21 @@ from trpc_sdk.abc._cython cimport _Codec
 from trpc_sdk.abc._cython cimport TrpcFrameHead
 from trpc_sdk.abc._cython cimport TrpcMessage
 from .._constants import DYEING_KEY as _PY_DYEING_KEY
-from .._constants import EnvTransfer as _PY_ENV_TRANSFER
+from .._constants import ENV_TRANSFER_KEY as _PY_ENV_TRANSFER_KEY
 from .._constants import FRAME_HEAD_LEN as _PY_FRAME_HEAD_LEN
 
 cdef int FRAME_HEAD_LEN = _PY_FRAME_HEAD_LEN
 # Request meta trans_info keys; _constants.py is the single source.
 cdef str DYEING_KEY = _PY_DYEING_KEY
-cdef str EnvTransfer = _PY_ENV_TRANSFER
-ctypedef unsigned int uint
-ctypedef unsigned short ushort
-ctypedef unsigned char uchar
+cdef str ENV_TRANSFER_KEY = _PY_ENV_TRANSFER_KEY
 
 
-cdef ushort endian_byte_swapper_ushort(ushort src):
-    """Swap a 16-bit value between big and little endian.
-
-    Unused here; packing uses ``htons`` / ``htonl``. Kept for historical
-    Cython callers.
-    """
-    return  (src >> 8) | (src << 8)
-
-
-cdef uint endian_byte_swapper_uint(uint src):
-    """Swap a 32-bit value between big and little endian.
-
-    Unused here; packing uses ``htons`` / ``htonl``. Kept for historical
-    Cython callers.
-    """
-    return (src & 0x000000FFU) << 24 | (src & 0x0000FF00U) << 8 | (src & 0x00FF0000U) >> 8 | (src & 0xFF000000U) >> 24
-
-
-cdef class _ClientStreamCodec(_Codec):
+cdef class _TrpcClientStreamCodec(_Codec):
     """Client-side stream codec: INIT / DATA / CLOSE / FEEDBACK.
 
     Stream-only: the entry points are ``encode_stream`` /
     ``decode_stream``, and ``encode`` / ``decode`` keep the ``_Codec``
-    default. The Python :class:`~trpc_sdk.codec.ClientCodec` plugin holds
+    default. The Python :class:`~trpc_sdk.codec.TrpcClientCodec` plugin holds
     one instance as ``self.stream_codec``.
     """
 
@@ -214,7 +196,7 @@ cdef class _ClientStreamCodec(_Codec):
             req.trans_info[DYEING_KEY] = message.dyeing_key.encode('utf8')
         # Set env-transfer info.
         if len(str(message.env_transfer)) > 0:
-            req.trans_info[EnvTransfer] = message.env_transfer.encode('utf8')
+            req.trans_info[ENV_TRANSFER_KEY] = message.env_transfer.encode('utf8')
 
         stream_buf = init_meta.SerializeToString()
         return _common_pack(message.frame_head, stream_buf)
@@ -365,12 +347,12 @@ cdef class _ClientStreamCodec(_Codec):
         return b''
 
 
-cdef class _ServerStreamCodec(_Codec):
+cdef class _TrpcServerStreamCodec(_Codec):
     """Server-side stream codec: INIT / DATA / CLOSE / FEEDBACK.
 
     Stream-only: the entry points are ``encode_stream`` /
     ``decode_stream``, and ``encode`` / ``decode`` keep the ``_Codec``
-    default. The Python :class:`~trpc_sdk.codec.ServerCodec` plugin holds
+    default. The Python :class:`~trpc_sdk.codec.TrpcServerCodec` plugin holds
     one instance as ``self.stream_codec`` and maintains the INIT meta
     cache around these calls; nothing here touches that cache.
     """
@@ -537,7 +519,7 @@ cdef class _ServerStreamCodec(_Codec):
 
         ``body`` is the complete frame. Stores the meta on
         ``message.stream_frame`` so
-        :meth:`trpc_sdk.codec.ServerCodec.store_init_meta` can cache
+        :meth:`trpc_sdk.codec.TrpcServerCodec.store_init_meta` can cache
         it by ``session_id + stream_id`` for later DATA / CLOSE.
         Returns ``b''``.
 
@@ -570,8 +552,8 @@ cdef class _ServerStreamCodec(_Codec):
                 message.set_dyeing_key(req.trans_info[DYEING_KEY].decode('utf8'))
 
             # Env-transfer info.
-            if EnvTransfer in req.trans_info:
-                message.set_env_transfer(req.trans_info[EnvTransfer].decode('utf8'))
+            if ENV_TRANSFER_KEY in req.trans_info:
+                message.set_env_transfer(req.trans_info[ENV_TRANSFER_KEY].decode('utf8'))
 
         message.set_stream_frame(init_meta)
         return b''
@@ -645,18 +627,18 @@ cpdef bytes _common_pack(TrpcFrameHead frame_head, bytes body):
     Returns:
         Complete stream frame bytes.
     """
-    cdef uint body_len = len(body)
-    cdef uint total_len = FRAME_HEAD_LEN + body_len
+    cdef uint32_t body_len = len(body)
+    cdef uint32_t total_len = FRAME_HEAD_LEN + body_len
 
     cdef char* to_prt = <char *> PyMem_Malloc(total_len)
-    cdef ushort magic = trpc_pb2.TRPC_MAGIC_VALUE
-    (<ushort *>(to_prt))[0] = htons(magic)
-    (<uchar *>(to_prt+2))[0] = frame_head.frame_type
-    (<uchar *>(to_prt+3))[0] = frame_head.frame_state
-    (<uint *>(to_prt+4))[0] = htonl(total_len)
-    (<ushort *>(to_prt+8))[0] = 0
-    (<uint *>(to_prt+10))[0] = htonl(frame_head.stream_id)
-    (<ushort *>(to_prt+14))[0] = htons(frame_head.frame_reserved)
+    cdef uint16_t magic = trpc_pb2.TRPC_MAGIC_VALUE
+    (<uint16_t *>(to_prt))[0] = htons(magic)
+    (<uint8_t *>(to_prt+2))[0] = frame_head.frame_type
+    (<uint8_t *>(to_prt+3))[0] = frame_head.frame_state
+    (<uint32_t *>(to_prt+4))[0] = htonl(total_len)
+    (<uint16_t *>(to_prt+8))[0] = 0
+    (<uint32_t *>(to_prt+10))[0] = htonl(frame_head.stream_id)
+    (<uint16_t *>(to_prt+14))[0] = htons(frame_head.frame_reserved)
 
     cdef char* body_ptr = body
     memcpy(to_prt+FRAME_HEAD_LEN, body_ptr, body_len)

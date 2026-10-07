@@ -4,11 +4,7 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
-"""Timer tasks and per-worker executors.
-
-:class:`TimerType` and :class:`TimerTaskInfo` live in
-:mod:`trpc_sdk.utils._constants` / :mod:`trpc_sdk.utils._types`. Dedicated
-timer processes live in :mod:`trpc_sdk.utils._timer_process`.
+"""Timer tasks, their registration records, and per-worker executors.
 
 Decorators run at import time in the parent. The executor instantiates
 tasks in the child after fork, using that child's event loop.
@@ -17,16 +13,58 @@ tasks in the child after fork, using that child's event loop.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
+from enum import Enum
+from enum import unique
 from typing import Callable
 from typing import List
 from typing import Optional
+from typing import Type
 from typing import Union
 
 import aiocron
 
-from ._constants import TimerType
 from ._loop_lib import get_or_create_event_loop
-from ._types import TimerTaskInfo
+
+
+@unique
+class TimerType(Enum):
+    """How :class:`TimerExecutor` schedules one task.
+
+    Attributes:
+        ONCE: Run ``handle`` once after ``interval`` seconds.
+        REPEAT_WITH_CRON: Repeat on an aiocron spec (``TimerTask.spec``).
+        REPEAT_WITH_SECOND: Repeat every ``interval`` seconds via
+            :meth:`TimerTask.start`.
+    """
+
+    ONCE = 0
+    REPEAT_WITH_CRON = 1
+    REPEAT_WITH_SECOND = 2
+
+
+@dataclass
+class TimerTaskInfo:
+    """Registration record for one :class:`TimerTask` subclass.
+
+    Built by :func:`register_timer_task` at import time.
+    :class:`TimerExecutor` instantiates ``cls`` in the child process and
+    copies the remaining fields onto that instance.
+
+    Attributes:
+        cls: Task subclass to construct; ``None`` only as the dataclass default.
+        interval: Delay or period in seconds for ``ONCE`` / ``REPEAT_WITH_SECOND``.
+        type: Schedule kind; see :class:`TimerType`.
+        name: Target process name such as ``worker:0``. Empty means every
+            timer executor runs it.
+        spec: Cron expression used only for :attr:`TimerType.REPEAT_WITH_CRON`.
+    """
+
+    cls: Optional[Type[TimerTask]] = None
+    interval: int = 1
+    type: TimerType = TimerType.REPEAT_WITH_SECOND
+    name: str = ""
+    spec: str = ""
 
 
 class TimerTask:

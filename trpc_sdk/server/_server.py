@@ -18,29 +18,29 @@ epoll/kqueue descriptor whose readiness state is meaningless once copied, so
 a child that inherited one would share the parent's. That is why the sequence
 is register endpoints, build the worker, ``_spawn_children``, then ``run``.
 
-The only work :class:`Server` keeps for itself is
-:meth:`Server._shutdown_services`, registered as a worker exit callback so
-services leave the naming service before the process stops answering.
+The only lifecycle work :class:`Server` keeps for itself is handed to the
+worker as callbacks: naming registration runs once the worker listens
+(``ready_callbacks``), :meth:`Server._shutdown_services` deregisters first
+on SIGTERM (``exit_callbacks``), and after the drain period
+(``post_drain_callbacks``) the server waits for that deregistration
+(:meth:`TrpcServerEngine.close`, at most 10 seconds per service) and then
+runs the user server exit callbacks, right before the worker's own user
+worker exit callbacks.
 """
 
 from __future__ import annotations
 
 import multiprocessing
-import time
 from functools import partial
 from typing import Any
 from typing import Collection
 from typing import Dict
 from typing import Optional
 
-from trpc_sdk._inner import wait_notify_in_io
 from trpc_sdk.abc import BaseServer
 from trpc_sdk.abc import ServiceDesc
-from trpc_sdk.common import ProcessType
 from trpc_sdk.common import execute_after_in_parent
 from trpc_sdk.common import execute_before
-from trpc_sdk.common import register_at_fork
-from trpc_sdk.common import register_child_callback
 from trpc_sdk.config import SocketType
 from trpc_sdk.config import TrpcConfig
 from trpc_sdk.filters import get_server_filter
@@ -50,9 +50,8 @@ from trpc_sdk.transport import DefaultServerTransport
 from trpc_sdk.transport import DefaultServerTransportOption
 from trpc_sdk.transport import get_server_transport
 from trpc_sdk.utils import find_free_port
+from trpc_sdk.utils import get_async_lib
 from . import _engine as _engine_module
-from ._compat import compat_rpc_task_num
-from ._compat import compat_worker_thread_num
 from ._engine import TrpcServerEngine
 from ._modes import create_worker
 from ._option import ServerOption
@@ -133,23 +132,30 @@ class Server(BaseServer):
         This process does not supervise a tree of servers; it *is* the server.
         The steps are:
 
-        1. Force the ``fork`` start method, which every child relies on to
-           inherit already-created pipes.
+        1. Force the ``fork`` start method for the whole process.
         2. ``Service.run`` registers each listen endpoint on the engine. No
            socket is bound yet, only recorded.
-        3. Look up ``server.mode`` and build the worker for it.
+        3. Look up ``server.mode`` and build the worker for it, and hand it
+           the lifecycle work that belongs to the server: naming
+           registration once it listens, deregistration and the drain on
+           SIGTERM.
         4. ``_spawn_children`` creates every IPC pipe and forks the children.
-        5. ``run`` builds this process's event loop, binds the addresses and
-           serves until SIGTERM.
+        5. ``run`` builds this process's event loop, binds the addresses,
+           registers with the naming service and serves until SIGTERM.
 
         Step 4 must precede step 5. An event loop holds an epoll/kqueue
         descriptor whose readiness state does not survive fork, so children
-        must be created while this process still has no loop.
+        must be created while this process still has no loop. For the same
+        reason no registry thread is started before the fork any more.
+
+        Children inherit the pipes created before step 4 and the state
+        already in this process, which is why step 1 forces ``fork``: they
+        are started with the global start method.
 
         Args:
-            io_wait_count: If set, register a ``wait_notify_in_io`` child
-                callback so IO workers wait for this many shared-memory
-                notifications after fork.
+            io_wait_count: If set, the worker waits for this many
+                ``inc_io_wait_count`` notifications from its tasks before it
+                binds any address.
         """
         try:
             multiprocessing.set_start_method("fork", force=True)
@@ -160,12 +166,14 @@ class Server(BaseServer):
         for s in self.services.values():
             s.run()
 
-        if io_wait_count:
-            register_child_callback(partial(wait_notify_in_io, io_wait_count),
-                                              ProcessType.WORKER)
-
         self.worker = create_worker(self.opt.mode, self.server_engine)
+        if io_wait_count:
+            self.worker.io_wait_count = io_wait_count
+        self.worker.ready_callbacks.append(partial(start_service_registry, self))
         self.worker.exit_callbacks.append(self._shutdown_services)
+        self.worker.post_drain_callbacks.append(self.server_engine.close)
+        self.worker.post_drain_callbacks.append(run_server_signal_handle)
+        self.worker.drain_seconds = max(0, self.opt.close_wait_time) / 1000.0
         # Children reach ``worker_process_list`` through this reference, which
         # they can only inherit if it is set before the first fork.
         _engine_module.GLOBAL_SERVER_ENGINE = self.server_engine
@@ -179,22 +187,19 @@ class Server(BaseServer):
         self.worker.run()
 
     def _shutdown_services(self) -> None:
-        """Leave the naming service and drain in-flight work, then let go.
+        """Leave the naming service; the worker drains afterwards.
 
-        Runs on the worker's SIGTERM path, before it stops its loop and its
-        children. Deregistering first is what makes ``close_wait_time``
-        useful: callers stop being pointed here, and the wait then covers the
-        requests already on their way.
+        Runs first on the worker's SIGTERM path. Deregistering first is what
+        makes ``close_wait_time`` useful: callers stop being pointed here,
+        and the worker's drain period (``drain_seconds``, without blocking
+        its loop) then covers the requests already on their way. After that
+        drain, post-drain callbacks wait for the deregistration to finish and
+        then run the user server exit callbacks, followed by the worker's user
+        worker exit callbacks.
         """
         self.close = True
         for service in self.services.values():
             service.close()
-
-        if self.opt.close_wait_time > 0:
-            logger.warning("waiting %d ms for remaining requests to be processed", self.opt.close_wait_time)
-            time.sleep(self.opt.close_wait_time / 1000.0)
-
-        run_server_signal_handle()
 
 
 def _add_server_filters(service_option: ServiceOption, filter_names: Optional[Collection[str]]) -> None:
@@ -223,11 +228,10 @@ def create_server(conf_path: str,
     """Load YAML, build one :class:`Service` per ``server.service[]``, return a :class:`Server`.
 
     This is the application entry that used to live as ``trpc.new``. It does
-    not bind sockets and does not fork: it fills :class:`ServerOption` from
-    the config, constructs each listen endpoint, and registers
-    :func:`start_service_registry` as a fork hook so naming-service
-    registration runs either before fork or in the parent after fork,
-    according to ``server.registry_after_fork``.
+    not bind sockets, does not fork and does not register with the naming
+    service: it fills :class:`ServerOption` from the config and constructs
+    each listen endpoint. Registration happens in :meth:`Server.serve`, once
+    the worker listens.
 
     An empty YAML ``server.mode`` is left untouched so :class:`ServerOption`'s
     own default (``merge``) stands; a missing field must not become a
@@ -248,6 +252,7 @@ def create_server(conf_path: str,
 
     server_cfg = TrpcConfig.server_config()
     global_cfg = TrpcConfig.global_config()
+    get_async_lib(global_cfg.enable_uvloop)
 
     if server_option is None:
         server_option = ServerOption()
@@ -257,10 +262,10 @@ def create_server(conf_path: str,
     if server_cfg.mode:
         server_option.mode = server_cfg.mode
     server_option.worker_num = server_cfg.worker_num
-    # A config that only sets the retired worker_num still sizes merge mode
-    # and separate-mode rpc tasks.
-    server_option.worker_thread_num = compat_worker_thread_num(server_cfg.worker_num, server_cfg.worker_thread_num)
-    server_option.rpc_task_num = compat_rpc_task_num(server_cfg.worker_num, server_cfg.rpc_task_num)
+    if server_cfg.worker_thread_num > 0:
+        server_option.worker_thread_num = server_cfg.worker_thread_num
+    if server_cfg.rpc_task_num > 0:
+        server_option.rpc_task_num = server_cfg.rpc_task_num
     server_option.service_num = len(server_cfg.service)
     server_option.task_wait_interval = server_cfg.task_wait_interval
     server_option.task_batch_size = server_cfg.task_batch_size
@@ -325,9 +330,4 @@ def create_server(conf_path: str,
         service = create_service(service_conf.name, service_option)
         server.add_service(service_conf.name, service)
 
-    if server_cfg.registry_after_fork:
-        register_at_fork(after_in_parent=partial(start_service_registry, server))
-    else:
-        register_at_fork(before=partial(start_service_registry, server))
     return server
-

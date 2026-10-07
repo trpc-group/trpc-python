@@ -19,10 +19,8 @@ The package is split by responsibility:
   and address keys
 - :mod:`~trpc_sdk.transport._pool._constants` -- default stream-reader
   buffer limit
-- :mod:`~trpc_sdk.transport._pool._tcp_connection` -- dial TCP/Unix and
-  wrap as :class:`Connection`
 - :mod:`~trpc_sdk.transport._pool._dial` -- shared TCP/Unix connect
-  helper
+  helper over the stdlib ``asyncio.open_connection``
 - :mod:`~trpc_sdk.transport._pool._pooled_connection` --
   :class:`PooledConnection`
 - :mod:`~trpc_sdk.transport._pool._short_conn_factory` -- one-shot conn
@@ -44,8 +42,6 @@ from ._connection_pool import PoolCache
 from ._connection_pool import get_pool_connection
 from ._pooled_connection import PooledConnection
 from ._short_conn_factory import ShortConnFactory
-from ._tcp_connection import Connection
-from ._tcp_connection import open_connection
 from ._types import ConnAddress
 from ._types import ConnPoolOptions
 
@@ -60,8 +56,6 @@ __all__ = [
     "PoolCache",
     "ShortConnFactory",
     "get_pool_connection",
-    "Connection",
-    "open_connection",
     "IncompleteReadError",
     "LimitOverrunError",
 ]

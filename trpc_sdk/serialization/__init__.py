@@ -26,7 +26,8 @@ from ._serialization import JsonSerializer
 from ._serialization import NoopSerializer
 from ._serialization import ProtoSerializer
 from ._serialization import WupSerializer
-from ._serialization import register_pb_json_format_kwargs
+from ._serialization import json_to_pb_kwargs
+from ._serialization import pb_to_json_kwargs
 from ._types import Body
 from ._types import JsonData
 from ._types import SerializationType
@@ -42,7 +43,8 @@ __all__ = [
     "JsonSerializer",
     "JsonData",
     "Body",
-    "register_pb_json_format_kwargs",
+    "pb_to_json_kwargs",
+    "json_to_pb_kwargs",
     "ProtoSerializer",
     "NoopSerializer",
     "JceSerializer",

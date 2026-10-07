@@ -14,7 +14,7 @@ so they work regardless of which module is imported first.
 
 A checker cuts complete frames out of a byte stream by magic plus
 ``package_len``; it never parses ``RequestProtocol``. The server side
-buffers a TCP stream (:class:`~trpc_sdk.codec._cython._codec_parser.CServerParser`),
+buffers a TCP stream (:class:`~trpc_sdk.codec._cython._codec_parser.TrpcServerProtocolChecker`),
 while the client side reads exactly one frame off a pooled connection.
 """
 
@@ -35,13 +35,10 @@ from trpc_sdk.plugin import get_plugin
 from trpc_sdk.plugin import register_plugin
 from trpc_sdk.telemetry import report_attr
 from ._constants import FRAME_HEAD_LEN
-from ._cython import CServerParser
+from ._cython import TrpcServerProtocolChecker
 
 if TYPE_CHECKING:
     from trpc_sdk.transport import PooledConnection
-
-# Public name for the Cython stream splitter used as the server checker.
-TrpcServerParser = CServerParser
 
 
 class TrpcServerCheckerFactory(BasePluginFactory):
@@ -51,9 +48,9 @@ class TrpcServerCheckerFactory(BasePluginFactory):
     needs one instance per connection rather than a shared singleton.
     """
 
-    def create(self) -> CServerParser:
-        """Return a new :class:`TrpcServerParser`."""
-        return TrpcServerParser()
+    def create(self) -> TrpcServerProtocolChecker:
+        """Return a new :class:`TrpcServerProtocolChecker`."""
+        return TrpcServerProtocolChecker()
 
 
 @register_plugin(PluginType.SERVER_CHECKER, "trpc", init_pos=PluginInitPos.WORKER)

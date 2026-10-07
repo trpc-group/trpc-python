@@ -29,8 +29,8 @@ asyncio protocols in this package then run *inside* those children:
 
 The package is split by responsibility:
 
-- :mod:`~trpc_sdk.transport._client_transport` — ``ClientTransport``,
-  ``ClientTaskStreamTransport`` and the plugin lookups; the TCP / UDP /
+- :mod:`~trpc_sdk.transport._client_transport` — ``ClientTransport`` and the
+  plugin lookups; the TCP / UDP /
   stream round trips live in ``_client_transport_tcp``,
   ``_client_transport_udp`` and ``_client_transport_stream``
 - :mod:`~trpc_sdk.transport._options` — ``RoundTripOptions`` the client half
@@ -52,10 +52,9 @@ The package is split by responsibility:
 - :mod:`~trpc_sdk.transport._connection` — shared ``BaseConnection``
 - :mod:`~trpc_sdk.transport._socket` — listen-socket constructors
 - :mod:`~trpc_sdk.transport._scheduler` — worker-selection hooks
-- :mod:`~trpc_sdk.transport._types`, :mod:`~trpc_sdk.transport._constants`,
-  :mod:`~trpc_sdk.transport._features` — shared records, defaults (listen
-  backlog, IPC frame sizes, ``RequestType``, ``ClientTimeoutReason``),
-  accessors
+- :mod:`~trpc_sdk.transport._types`, :mod:`~trpc_sdk.transport._constants` —
+  shared records and defaults (listen backlog, IPC frame sizes,
+  ``RequestType``, ``ClientTimeoutReason``)
 - :mod:`~trpc_sdk.transport._cython` — Cython inner-IPC framing used
   across dispatcher / worker / task pipes
 
@@ -70,7 +69,6 @@ from importlib import import_module
 from trpc_sdk.abc import BaseServerTransportOption
 
 from ._cython import encode_worker_msg_req  # pylint: disable=no-name-in-module
-from ._client_transport import ClientTaskStreamTransport
 from ._client_transport import ClientTransport
 from ._client_transport import get_client_transport
 from ._client_transport import get_default_client_transport
@@ -88,7 +86,6 @@ from ._factory import DefaultServerTransport
 from ._factory import DefaultServerTransportOption
 from ._factory import TrpcServerTransportFactory
 from ._factory import get_server_transport
-from ._features import is_uvloop_enabled
 from ._options import RoundTripOptions
 from ._pool import ConnAddress
 from ._pool import ConnPoolOptions
@@ -100,7 +97,6 @@ from ._scheduler import register_dispatcher_worker_func
 from ._socket import create_inet_socket
 from ._socket import create_server_socket
 from ._socket import create_unix_socket
-from ._stream_transport import TaskServerStreamTransport
 from ._stream_transport import TrpcServerStreamTransport
 from ._transport import TrpcServerTransport
 from ._types import ClientConnectionInfo
@@ -114,7 +110,6 @@ from ._udp_connection import open_datagram_endpoint
 __all__ = [
     # Client-side transport
     "ClientTransport",
-    "ClientTaskStreamTransport",
     "get_client_transport",
     "get_default_client_transport",
     "ClientConn",
@@ -136,7 +131,6 @@ __all__ = [
     # Listen / process-model registration
     "TrpcServerTransport",
     "TrpcServerStreamTransport",
-    "TaskServerStreamTransport",
     "DefaultServerTransport",
     "DefaultServerTransportOption",
     "BaseServerTransportOption",
@@ -156,7 +150,6 @@ __all__ = [
     "TCPConnection",
     # Task-process protocols
     "TaskWorkerConnection",
-    "TaskStreamConnection",
     "TASK_CONN",
     # Shared types and hooks
     "BaseConnection",
@@ -173,14 +166,11 @@ __all__ = [
     "INNER_MAGIC_VALUE",
     "FRAME_HEAD_LEN",
     "encode_worker_msg_req",
-    # Feature accessors
-    "is_uvloop_enabled",
 ]
 
 
 _LAZY_EXPORTS = {
     "TASK_CONN": ("._task", "TASK_CONN"),
-    "TaskStreamConnection": ("._task", "TaskStreamConnection"),
     "TaskWorkerConnection": ("._task", "TaskWorkerConnection"),
     "ExecutorTaskConnection": ("._executor", "ExecutorTaskConnection"),
     "ExecutorUDPConnection": ("._executor", "ExecutorUDPConnection"),

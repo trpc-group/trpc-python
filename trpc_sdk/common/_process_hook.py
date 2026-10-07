@@ -18,7 +18,8 @@ from typing import List
 from typing import Optional
 from typing import Union
 
-from ._process_helper import ProcessType
+from trpc_sdk.abc import ProcessType
+
 from ._process_helper import is_task_process
 from ._process_helper import is_worker_process
 

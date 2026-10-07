@@ -79,12 +79,12 @@ def set_addr_to_ctx_from_transport(ctx, transport: asyncio.Transport) -> None:
     """Copy local/peer addresses from ``transport`` onto ``ctx`` and its message.
 
     Unix sockets yield a path string; those are stored as ``(path, 0)``.
-    The protocol message gets host strings via ``set_local_addr`` /
+    The protocol message gets host strings via ``set_local_ip`` /
     ``set_remote_addr``; the context also stores ``remote_port`` /
     ``local_port``.
 
     Args:
-        ctx: Server or client context with ``get_client_message``.
+        ctx: Server or client context with ``get_message``.
         transport: Connected asyncio transport.
 
     Raises:
@@ -100,8 +100,8 @@ def set_addr_to_ctx_from_transport(ctx, transport: asyncio.Transport) -> None:
         raise ValueError(f"Invalid local address {local_addr}")
     if not isinstance(peer_addr, tuple) or len(peer_addr) != 2:
         raise ValueError(f"Invalid peer address {peer_addr}")
-    msg = ctx.get_client_message()
-    msg.set_local_addr(local_addr[0])
+    msg = ctx.get_message()
+    msg.set_local_ip(local_addr[0])
     msg.set_remote_addr(peer_addr[0])
     ctx.remote_ip = peer_addr[0]
     ctx.remote_port = peer_addr[1]

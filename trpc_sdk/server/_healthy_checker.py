@@ -4,7 +4,14 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
-"""Healthy checker module for monitoring process health and communication"""
+"""Heartbeat monitoring between a worker and the task processes it forks.
+
+The worker builds one socketpair per task in :func:`init_healthy_checker`,
+before the fork. After the fork each task sends heartbeats from a ``TASK``
+child callback, and the worker attaches :class:`MasterHeartbeatConnection`
+to its own loop in :func:`start_heartbeat_monitor`. Any other child that
+inherited the pipes closes them with :func:`close_heartbeat_pipes`.
+"""
 
 from __future__ import annotations
 
@@ -12,7 +19,6 @@ import asyncio
 import multiprocessing
 import os
 import struct
-import threading
 import time
 from dataclasses import dataclass
 from functools import partial
@@ -24,7 +30,7 @@ from typing import Optional
 from trpc_sdk.abc import BasePlugin
 from trpc_sdk.abc import PluginInitPos
 from trpc_sdk.abc import PluginType
-from trpc_sdk.common import ProcessType
+from trpc_sdk.abc import ProcessType
 from trpc_sdk.common import get_or_create_event_loop
 from trpc_sdk.common import register_child_callback
 from trpc_sdk.config import TrpcConfig
@@ -334,89 +340,89 @@ def init_healthy_checker(task_list: List[TaskInfo]) -> None:
         _init_healthy_checker.make_options(ProcessType.TASK, task.name)
 
 
-def _run_checker_thread_in_master() -> None:
-    """Run the healthy checker thread in the master process.
+def _all_options() -> List[HealthyOptions]:
+    """Every heartbeat pipe built by :func:`init_healthy_checker`, in creation order."""
+    if _init_healthy_checker is None:
+        return []
+    options: List[HealthyOptions] = []
+    for per_type in _init_healthy_checker.options.values():
+        options.extend(per_type)
+    return options
 
-    Continuously monitors all child processes for heartbeat messages and handles timeouts.
+
+def start_heartbeat_monitor(loop: asyncio.AbstractEventLoop) -> None:
+    """Watch every task's heartbeat on ``loop``; call in the worker that forked them.
+
+    Runs after the last fork, so no child inherits the monitor's transports.
+    Drops the child end of each pipe first: holding it would keep the
+    monitor's end from reaching EOF when that task dies. A no-op when
+    ``heartbeat_interval`` is unset.
+
+    Args:
+        loop: The worker's event loop, created but not yet running.
     """
-    global _init_healthy_checker
-    while _init_healthy_checker is None:
-        # Wait for initialization to complete
-        time.sleep(1)
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    all_processes: List[HealthyOptions] = []
-    for v in _init_healthy_checker.options.values():
-        all_processes.extend(v)
-    for process in all_processes:
-        process.master_pipe.close_extra_conn()
-        coro = get_or_create_event_loop().create_connection(partial(MasterHeartbeatConnection, process),
-                                                            sock=process.master_pipe.get_socket())
+    for option in _all_options():
+        option.master_pipe.close_extra_conn()
+        coro = loop.create_connection(partial(MasterHeartbeatConnection, option),
+                                      sock=option.master_pipe.get_socket())
         loop.run_until_complete(coro)
-    try:
-        loop.run_forever()
-    except (SystemExit, KeyboardInterrupt):
-        loop.stop()
+
+
+def close_heartbeat_pipes(keep: Optional[str] = None) -> Optional[HealthyOptions]:
+    """Close the heartbeat pipes this process inherited but does not own.
+
+    Every child forked after :func:`init_healthy_checker` inherits both ends
+    of every heartbeat pipe. A task keeps the child end of its own pipe and
+    closes everything else; any other child (an rpc task, for instance)
+    closes all of them.
+
+    Args:
+        keep: Name of the task whose child end stays open, or ``None`` to
+            close every pipe.
+
+    Returns:
+        The options for ``keep``, with its monitor end already closed, or
+        ``None`` when nothing was kept.
+    """
+    kept: Optional[HealthyOptions] = None
+    for option in _all_options():
+        if keep is not None and option.name == keep:
+            option.child_pipe.close_extra_conn()
+            kept = option
+            continue
+        option.child_pipe.socket_pair[0].close()
+        option.child_pipe.socket_pair[1].close()
+    return kept
+
+
+def _start_heartbeat_sender() -> None:
+    """Send heartbeats from this task process to the worker that forked it.
+
+    Registered as a ``TASK`` child callback, so it runs in every task after
+    its loop is created and before plugins are initialized.
+    """
+    if not TrpcConfig.server_config().heartbeat_interval:
+        return
+    name = getattr(multiprocessing.current_process(), "name", "")
+    option = close_heartbeat_pipes(keep=name)
+    if option is None:
+        logger.error(f"heartbeat pipe not found for task {name}")
+        return
+    logger.info(f"start heartbeat sender in task {name}")
+    loop = get_or_create_event_loop()
+    coro = loop.create_connection(partial(ChildHeartbeatConnection, option), sock=option.child_pipe.get_socket())
+    loop.run_until_complete(coro)
 
 
 @register_plugin(PluginType.USER_DEFINED, "healthy_checker", init_pos=PluginInitPos.WORKER)
 class HealthyCheckerPlugin(BasePlugin):
-    """Plugin for managing healthy checking functionality in TRPC framework."""
+    """Placeholder kept so configs naming ``healthy_checker`` still load.
 
-    def __init__(self):
-        """Initialize the HealthyCheckerPlugin with no active thread."""
-        super().__init__()
-        # Daemon thread started once by ``on_master_start``; stays ``None`` when
-        # ``heartbeat_interval`` is unset.
-        self.checker_thread: Optional[threading.Thread] = None
-
-    def on_master_start(self) -> None:
-        """Called when master process starts - initializes the healthy checker thread."""
-        if not TrpcConfig.server_config().heartbeat_interval:
-            logger.debug(f"heartbeat_interval is not set")
-            return
-        if self.checker_thread is not None:
-            return
-        logger.info(f"open checker thread in master")
-        self.checker_thread = threading.Thread(target=_run_checker_thread_in_master)
-        self.checker_thread.daemon = True
-        self.checker_thread.start()
-
-    def on_worker_start(self) -> None:
-        """Called when worker process starts - placeholder method (no initialization needed)."""
-        pass
-
-
-def _run_checker_thread_in_worker(type: ProcessType) -> None:
-    """Run the healthy checker thread in worker/dispatcher/task processes.
-
-    Args:
-        type: The type of process (WORKER, DISPATCHER, TASK)
+    Heartbeat monitoring no longer goes through a plugin: the worker that
+    forks the tasks starts the monitor itself after the last fork (see
+    :func:`start_heartbeat_monitor`), and each task starts its sender from a
+    child callback.
     """
-    heartbeat_interval = TrpcConfig.server_config().heartbeat_interval
-    if not heartbeat_interval:
-        logger.debug(f"heartbeat_interval is not set")
-        return
-    current_process = multiprocessing.current_process()
-    name = getattr(current_process, "name", "")
-    options: List[HealthyOptions] = _init_healthy_checker.options[type]
-    target_option = None
-    for option in options:
-        if option.name in name:
-            target_option = option
-            break
-    if target_option is None:
-        logger.error(f"process {type} not found in worker {name}")
-        return
-    target_option.child_pipe.close_extra_conn()
-    logger.info(f"open checker thread in worker {name}")
-    #                                                   sock=target_option.child_pipe.get_socket())
-    coro = get_or_create_event_loop().create_connection(partial(ChildHeartbeatConnection, target_option),
-                                                        sock=target_option.child_pipe.get_socket())
-    get_or_create_event_loop().run_until_complete(coro)
 
 
-register_child_callback(partial(_run_checker_thread_in_worker, ProcessType.WORKER),
-                                  ProcessType.WORKER)
-register_child_callback(partial(_run_checker_thread_in_worker, ProcessType.TASK),
-                                  ProcessType.TASK)
+register_child_callback(_start_heartbeat_sender, ProcessType.TASK)

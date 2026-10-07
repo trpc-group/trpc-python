@@ -36,19 +36,52 @@ from ._task_frame cimport inner_decode_task_req_c
 from ._task_frame cimport inner_encode_task_rsp_c
 from .._default_codec import get_default_codec
 
+cdef extern from * nogil:
+    """
+    #include <cassert>
+    #include <mutex>
+
+    class TrpcTaskLockGuard {
+    public:
+        TrpcTaskLockGuard() : mutex_(nullptr) {}
+
+        ~TrpcTaskLockGuard() {
+            if (mutex_ != nullptr) {
+                mutex_->unlock();
+            }
+        }
+
+        void acquire(std::recursive_mutex& mutex) {
+            // A guard owns at most one lock for its entire lifetime.
+            assert(mutex_ == nullptr);
+            mutex.lock();
+            mutex_ = &mutex;
+        }
+
+    private:
+        std::recursive_mutex* mutex_;
+        TrpcTaskLockGuard(const TrpcTaskLockGuard&) = delete;
+        TrpcTaskLockGuard& operator=(const TrpcTaskLockGuard&) = delete;
+    };
+    """
+    # Stack-allocated RAII guard: Cython cannot stack-allocate std::lock_guard
+    # (no nullary constructor), and the destructor unlocks on every return path.
+    cdef cppclass TrpcTaskLockGuard:
+        TrpcTaskLockGuard()
+        void acquire(recursive_mutex&)
+
 # Both queues are crossed by two threads inside the task process: the
 # TaskConsumer thread drains REQ_QUEUE and fills RSP_QUEUE, while the main
 # loop reading the worker pipes fills REQ_QUEUE and drains RSP_QUEUE. Each
 # queue has its own mutex so the two directions never block each other.
 cdef recursive_mutex req_mtx
 cdef recursive_mutex rsp_mtx
-# Requests received from the workers. Bounded: once cap is reached further
+# Requests received from the workers. Bounded: once REQ_QUEUE_CAP (set by
+# task_init) is reached further
 # requests are answered with TaskStatusCode.QUEUE_FULL instead of queueing,
 # which is what keeps a slow handler from growing memory without limit.
 cdef queue[TaskRequest*] REQ_QUEUE
-cdef TaskQueueMsg QUEUE_MSG
-QUEUE_MSG.cap = 1000
-QUEUE_MSG.num = 0
+cdef uint32_t REQ_QUEUE_CAP = 1000
 # Finished responses waiting to be written back to the worker pipes. Unbounded,
 # because every entry corresponds to a request already removed from REQ_QUEUE.
 cdef queue[TaskResponse*] RSP_QUEUE
@@ -123,40 +156,21 @@ cdef int enque_req(TaskRequest* req) nogil:
         ``0`` on success, or ``-1`` when the queue is at capacity. The caller
         turns ``-1`` into ``TaskStatusCode.QUEUE_FULL`` rather than blocking.
     """
-    if QUEUE_MSG.num >= QUEUE_MSG.cap:
+    cdef TrpcTaskLockGuard lck
+    lck.acquire(req_mtx)
+    if REQ_QUEUE.size() >= REQ_QUEUE_CAP:
         return -1
 
-    cdef lock_guard[recursive_mutex]* lck = new lock_guard[recursive_mutex](req_mtx)
     REQ_QUEUE.push(req)
-
-    QUEUE_MSG.num += 1
-    del lck
     return 0
-
-
-cdef TaskRequest* deque_req() nogil:
-    """Take the oldest request off the request queue.
-
-    Returns:
-        The dequeued request, whose ownership moves to the caller, or ``NULL``
-        when the queue is empty.
-    """
-    if QUEUE_MSG.num == 0:
-        return NULL
-
-    cdef lock_guard[recursive_mutex]* lck = new lock_guard[recursive_mutex](req_mtx)
-    cdef TaskRequest* req = REQ_QUEUE.front()
-    REQ_QUEUE.pop()
-    QUEUE_MSG.num -= 1
-    del lck
-    return req
 
 
 cdef TaskRequest* deque_batch_req(int batch_size) nogil:
     """Pop up to one batch of requests and chain them together.
 
-    The mutex is taken once per request rather than once per batch, so a
-    producer can still interleave while a batch is being collected.
+    The mutex is held for the whole batch, so the emptiness check and the pop
+    cannot be split by another consumer; the hold time is bounded by
+    ``batch_size`` pointer moves.
 
     Args:
         batch_size: Maximum number of requests to pop.
@@ -169,13 +183,15 @@ cdef TaskRequest* deque_batch_req(int batch_size) nogil:
     cdef TaskRequest* head = NULL
     cdef TaskRequest* curr = NULL
     cdef TaskRequest* req = NULL
+    cdef TrpcTaskLockGuard lck
+    lck.acquire(req_mtx)
+
     while batch_size > 0:
-        if QUEUE_MSG.num == 0:
+        if REQ_QUEUE.empty():
             break
 
-        req = deque_req()
-        if req == NULL:
-            break
+        req = REQ_QUEUE.front()
+        REQ_QUEUE.pop()
 
         if head == NULL:
             head = req
@@ -202,9 +218,9 @@ cdef int enque_rsp(TaskResponse* rsp) nogil:
     Returns:
         Always ``0``; the signature matches :func:`enque_req`.
     """
-    cdef lock_guard[recursive_mutex]* lck = new lock_guard[recursive_mutex](rsp_mtx)
+    cdef TrpcTaskLockGuard lck
+    lck.acquire(rsp_mtx)
     RSP_QUEUE.push(rsp)
-    del lck
     return 0
 
 
@@ -215,13 +231,13 @@ cdef TaskResponse* deque_rsp() nogil:
         The dequeued response, whose ownership moves to the caller, or
         ``NULL`` when the queue is empty.
     """
-    if RSP_QUEUE.size() == 0:
+    cdef TrpcTaskLockGuard lck
+    lck.acquire(rsp_mtx)
+    if RSP_QUEUE.empty():
         return NULL
 
-    cdef lock_guard[recursive_mutex]* lck = new lock_guard[recursive_mutex](rsp_mtx)
     cdef TaskResponse* rsp = RSP_QUEUE.front()
     RSP_QUEUE.pop()
-    del lck
     return rsp
 
 
@@ -234,7 +250,8 @@ cpdef void task_init(int capability):
     Args:
         capability: Maximum number of queued requests.
     """
-    QUEUE_MSG.cap = capability
+    global REQ_QUEUE_CAP
+    REQ_QUEUE_CAP = capability
 
 
 cdef TaskResponse* new_task_response_from_request(TaskRequest* req, TaskStatusCode code, PyObject* obj):
@@ -370,9 +387,6 @@ cdef TaskRequest* _prepare_batch_requests(object app):
         caller should back off; they are distinguished only in the metrics.
     """
     cdef int batch = app.batch_size
-    cdef int queue_num = QUEUE_MSG.num
-    if batch > queue_num:
-        batch = queue_num
 
     cdef TaskRequest* req = NULL
     with nogil:

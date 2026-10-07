@@ -9,12 +9,12 @@
 
 """Length-only tRPC frame splitter for a TCP byte stream.
 
-``CServerParser`` (exported as ``TrpcServerParser``) checks magic
-``2352`` and ``package_len``. It does not parse ``RequestProtocol``. The
-dispatcher uses it to cut complete frames from a socket; protocol
-decode happens later in :mod:`trpc_sdk.codec._cython._codec`.
+``TrpcServerProtocolChecker`` checks magic ``2352`` and ``package_len``.
+It does not parse ``RequestProtocol``. The dispatcher uses it to cut
+complete frames from a socket; protocol decode happens later in
+:mod:`trpc_sdk.codec._cython._codec`.
 
-A half-frame stays in ``buf`` across ``feeds_data``. After ``read``
+A half-frame stays in ``buf`` across ``feed_data``. After ``read``
 drains complete frames, the leftover is compacted to the front with
 ``memmove`` because source and dest overlap (``memcpy`` has
 segfaulted). Grow uses ``(self.size + append_length) * 2``, i.e.
@@ -25,6 +25,8 @@ single sources; the module-level ``cdef`` keeps the hot scan on C
 scalars.
 """
 
+from libc.stdint cimport uint16_t
+from libc.stdint cimport uint32_t
 from libc.string cimport memcpy
 from libc.string cimport memmove
 from cpython.mem cimport PyMem_Free
@@ -36,14 +38,11 @@ from trpc_sdk.config import TrpcConfig
 from trpc_sdk.exceptions import ServerDecodeError
 
 
-ctypedef unsigned short ushort
-ctypedef unsigned int uint
-
-cdef ushort TRPC_MAGIC_VALUE = 2352
-cdef uint FRAME_HEAD_LEN = 16
+cdef uint16_t TRPC_MAGIC_VALUE = 2352
+cdef uint32_t FRAME_HEAD_LEN = 16
 
 
-cdef class CServerParser:
+cdef class TrpcServerProtocolChecker(BaseServerProtocolChecker):
     """Split a TCP stream into complete tRPC frames.
 
     A frame is 16-byte head plus ``package_len - 16`` more bytes.
@@ -58,11 +57,11 @@ cdef class CServerParser:
         if not self.buf:
             raise MemoryError()
 
-    cpdef void reset(self):
+    cpdef void reset(self) except *:
         """Drop buffered bytes without freeing the allocation."""
         self.length = 0
 
-    cpdef void feeds_data(self, bytes data):
+    cpdef void feed_data(self, bytes data) except *:
         """Append ``data`` to the growable parse buffer.
 
         Grows with ``(self.size + append_length) * 2`` when the
@@ -101,17 +100,16 @@ cdef class CServerParser:
         results = []
 
         cdef int scan_end = 0
-        cdef ushort stx = 0
-        cdef uint package_len = 0
-        cdef uint i = 0
+        cdef uint16_t stx = 0
+        cdef uint32_t package_len = 0
 
         while self.length >= scan_end+FRAME_HEAD_LEN:
-            stx = ntohs(dereference(<ushort *>(self.buf+scan_end)))
+            stx = ntohs(dereference(<uint16_t *>(self.buf+scan_end)))
 
             if stx != TRPC_MAGIC_VALUE:
                 raise ServerDecodeError("framer head magic not match")
 
-            package_len = ntohl(dereference(<uint *>(self.buf+4+scan_end)))
+            package_len = ntohl(dereference(<uint32_t *>(self.buf+4+scan_end)))
 
             if package_len < FRAME_HEAD_LEN:
                 raise ServerDecodeError("frame header total len invalid" + str(package_len))
@@ -133,23 +131,6 @@ cdef class CServerParser:
 
         return results
 
-    cdef void mem_cpy(self, int start_index, int length):
-        """Byte-by-byte compact replaced by ``memmove`` in ``read``.
-
-        Still declared in the ``.pxd``. Copies ``buf[start_index:]``
-        onto ``buf[0]`` and sets ``self.length``.
-
-        Args:
-            start_index: First unread byte in ``buf``.
-            length: Number of leftover bytes to keep.
-        """
-        cdef uint i = 0
-        while i < length:
-            self.buf[i] = self.buf[start_index+i]
-            i += 1
-
-        self.length = length
-
     cpdef void resize(self, size_t new_number):
         """Reallocate the parse buffer to ``new_number`` bytes.
 
@@ -167,23 +148,3 @@ cdef class CServerParser:
 
     def __dealloc__(self):
         PyMem_Free(self.buf)
-
-cdef void endian_byte_swapper_ushort(char* dest, char* src):
-    """Swap a 16-bit value between big and little endian in place.
-
-    Unused by ``read`` (which calls ``ntohs``). Kept for historical
-    Cython callers.
-    """
-    cdef ushort* p_dest = <ushort*> dest
-    cdef ushort* p_src = <ushort*> src
-    p_dest[0] = (p_src[0] >> 8) | (p_src[0] << 8)
-
-cdef void endian_byte_swapper_uint(char* dest, char* src):
-    """Swap a 32-bit value between big and little endian in place.
-
-    Unused by ``read`` (which calls ``ntohl``). Kept for historical
-    Cython callers.
-    """
-    cdef uint* p_dest = <uint*> dest
-    cdef uint* p_src = <uint*> src
-    p_dest[0] = (p_src[0] >> 24) | ((p_src[0] & 0x00ff0000) >> 8) | ((p_src[0] & 0x0000ff00) << 8) | (p_src[0] << 24)

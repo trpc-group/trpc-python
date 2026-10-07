@@ -6,7 +6,7 @@
 
 """Unary/stream dispatch layer for the ``"trpc"`` codec plugins.
 
-``ClientCodec`` and ``ServerCodec`` own no packing logic of their own.
+``TrpcClientCodec`` and ``TrpcServerCodec`` own no packing logic of their own.
 Each subclasses :class:`~trpc_sdk.abc.BaseCodec` only and holds two Cython
 codecs by composition: ``self.codec`` for unary frames
 (:mod:`trpc_sdk.codec._cython._codec`) and ``self.stream_codec`` for stream
@@ -32,22 +32,21 @@ from trpc_sdk.exceptions import ServerDecodeError
 from trpc_sdk.exceptions import ServerSystemError
 from trpc_sdk.plugin import register_plugin
 from ._constants import FRAME_HEAD_LEN
-from ._cython import _ClientCodec
-from ._cython import _ClientStreamCodec
-from ._cython import _ServerCodec
-from ._cython import _ServerStreamCodec
+from ._cython import _TrpcClientCodec
+from ._cython import _TrpcClientStreamCodec
+from ._cython import _TrpcServerCodec
+from ._cython import _TrpcServerStreamCodec
 from ._types import StreamInitMeta
 
 
 @register_plugin(PluginType.CLIENT_CODEC, "trpc", init_pos=PluginInitPos.WORKER)
-class ClientCodec(BaseCodec):
+class TrpcClientCodec(BaseCodec):
     """Client-side ``"trpc"`` codec: unary vs stream dispatch.
 
     Owns no packing logic. ``frame_head.frame_type`` selects
-    ``self.codec`` (:class:`_ClientCodec`, unary) or ``self.stream_codec``
-    (:class:`_ClientStreamCodec`, INIT / DATA / CLOSE / FEEDBACK).
-    ``request_id`` / ``update_msg_by_msg`` live on ``self.codec``, not on
-    this plugin.
+    ``self.codec`` (:class:`_TrpcClientCodec`, unary) or ``self.stream_codec``
+    (:class:`_TrpcClientStreamCodec`, INIT / DATA / CLOSE / FEEDBACK).
+    ``request_id`` lives on ``self.codec``, not on this plugin.
 
     :meth:`encode` / :meth:`decode` stay message-first. Callers use the
     :class:`BaseCodec` ``encode_data`` / ``decode_data`` entry points,
@@ -56,8 +55,8 @@ class ClientCodec(BaseCodec):
 
     def __init__(self):
         super().__init__()
-        self.codec = _ClientCodec()
-        self.stream_codec = _ClientStreamCodec()
+        self.codec = _TrpcClientCodec()
+        self.stream_codec = _TrpcClientStreamCodec()
 
     def encode(self, message: TrpcMessage, body: bytes) -> bytes:
         """Dispatch unary or stream encode for an outbound client frame.
@@ -146,12 +145,12 @@ class ClientCodec(BaseCodec):
 
 
 @register_plugin(PluginType.SERVER_CODEC, "trpc", init_pos=PluginInitPos.WORKER)
-class ServerCodec(BaseCodec):
+class TrpcServerCodec(BaseCodec):
     """Server-side ``"trpc"`` codec: unary vs stream dispatch.
 
     Owns no packing logic. Unary frames go to ``self.codec``
-    (:class:`_ServerCodec`); stream frames go to ``self.stream_codec``
-    (:class:`_ServerStreamCodec`). INIT meta is cached here per
+    (:class:`_TrpcServerCodec`); stream frames go to ``self.stream_codec``
+    (:class:`_TrpcServerStreamCodec`). INIT meta is cached here per
     ``session_id`` / ``stream_id`` so later DATA / CLOSE / FEEDBACK
     frames can restore ``server_rpc_name``. A successful CLOSE encode
     drops that cache entry.
@@ -163,8 +162,8 @@ class ServerCodec(BaseCodec):
 
     def __init__(self):
         super().__init__()
-        self.codec = _ServerCodec()
-        self.stream_codec = _ServerStreamCodec()
+        self.codec = _TrpcServerCodec()
+        self.stream_codec = _TrpcServerStreamCodec()
         self.init_metas: Dict[int, Dict[int, StreamInitMeta]] = {}
 
     def store_init_meta(self, msg: TrpcMessage, init_meta: StreamInitMeta):

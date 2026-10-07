@@ -10,10 +10,6 @@
 ``stream_id``. Later ``send`` / ``recv`` / ``close`` look it up. The
 queue is filled either by a background :meth:`ClientConn.recv` loop or
 by :meth:`ClientConn.push_data_to_recv_queue`.
-
-``need_close`` is False when ``options.is_task_stream`` is True: the
-task process still owns the pooled connection, so ending the stream
-must not return it to the pool.
 """
 
 from __future__ import annotations
@@ -36,9 +32,7 @@ class ClientConn:
 
     Args:
         conn: Pooled connection obtained by ``start``.
-        options: Round-trip options, including the frame parser and the
-            ``is_task_stream`` flag that decides whether ``close`` may
-            return the connection to the pool.
+        options: Round-trip options, including the frame parser.
     """
 
     def __init__(self, conn: PooledConnection, options: RoundTripOptions):
@@ -51,15 +45,6 @@ class ClientConn:
     def recv_queue(self):
         """Queue that holds frames pushed by :meth:`push_data_to_recv_queue`."""
         return self._recv_queue
-
-    @property
-    def need_close(self) -> bool:
-        """Whether ending the stream should return the conn to the pool.
-
-        Task streams keep the pooled connection alive for the task
-        process, so this is False when ``options.is_task_stream``.
-        """
-        return self._options.is_task_stream is False
 
     def push_data_to_recv_queue(self, data: Any):
         """Push a frame onto the recv queue.

@@ -6,7 +6,7 @@
 
 """Type hints for the stream-frame Cython client / server codec.
 
-Python :class:`~trpc_sdk.codec.ClientCodec` / ``ServerCodec`` hold one
+Python :class:`~trpc_sdk.codec.TrpcClientCodec` / ``TrpcServerCodec`` hold one
 instance each as ``self.stream_codec`` and call ``encode_stream`` /
 ``decode_stream``, which dispatch INIT / DATA / CLOSE / FEEDBACK. Unary frames use
 :mod:`trpc_sdk.codec._cython._codec`.
@@ -21,7 +21,7 @@ from trpc_sdk.abc import TrpcMessage
 from trpc_sdk.abc._cython._codec import _Codec
 
 
-class _ClientStreamCodec(_Codec):
+class _TrpcClientStreamCodec(_Codec):
     """Client-side stream codec: INIT / DATA / CLOSE / FEEDBACK.
 
     Stream-only; ``encode`` / ``decode`` keep the ``_Codec`` default.
@@ -141,7 +141,7 @@ class _ClientStreamCodec(_Codec):
         ...
 
 
-class _ServerStreamCodec(_Codec):
+class _TrpcServerStreamCodec(_Codec):
     """Server-side stream codec: INIT / DATA / CLOSE / FEEDBACK.
 
     Stream-only; ``encode`` / ``decode`` keep the ``_Codec`` default.
@@ -223,7 +223,7 @@ class _ServerStreamCodec(_Codec):
         """Parse a client INIT and fill caller / callee / func / dyeing.
 
         Later DATA / CLOSE frames recover ``server_rpc_name`` from the
-        INIT cache in :meth:`trpc_sdk.codec.ServerCodec.set_init_meta`.
+        INIT cache in :meth:`trpc_sdk.codec.TrpcServerCodec.set_init_meta`.
 
         Args:
             message: Fresh server stream state to fill.

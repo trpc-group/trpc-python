@@ -15,10 +15,9 @@ from typing import Dict
 
 from trpc_sdk.config import ClientServiceConfig
 from trpc_sdk.config import TrpcConfig
-from trpc_sdk.config import merge_client_service_config as _merge_client_service_config
 
 
-def get_client_backend_config(service_name: str) -> ClientServiceConfig:
+def get_client_service_config(service_name: str) -> ClientServiceConfig:
     """Return the backend config registered under ``service_name``.
 
     Deprecated: use :meth:`TrpcConfig.client_service_config`.
@@ -43,21 +42,6 @@ def parse_client_config(conf):
     return TrpcConfig.parse_client_config(conf)
 
 
-def merge_backend_config(client_conf, service: ClientServiceConfig):
-    """Copy unset fields from the client-level defaults onto ``service``.
-
-    Deprecated: use :func:`~trpc_sdk.config.merge_client_service_config`.
-
-    Args:
-        client_conf: Shared client-level defaults from YAML.
-        service: Per-backend config to fill in.
-
-    Returns:
-        The same ``service`` instance after merging.
-    """
-    return _merge_client_service_config(client_conf, service)
-
-
 def set_default_client_config(conf: Dict[str, ClientServiceConfig]):
     """Replace the whole backend-config registry after the user parsed config.
 
@@ -69,7 +53,7 @@ def set_default_client_config(conf: Dict[str, ClientServiceConfig]):
     return TrpcConfig.set_client_service_configs(conf)
 
 
-def set_client_backend_config(callee_service_name: str, conf: ClientServiceConfig):
+def set_client_service_config(callee_service_name: str, conf: ClientServiceConfig):
     """Register a single backend config after the user parsed config.
 
     Not safe for concurrent calls.

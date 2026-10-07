@@ -42,12 +42,9 @@ class RoundTripOptions(BaseClientTransportOption):
             uses this instead of the framework default.
         pool_opts: Options for the framework-built pool. Ignored when
             ``pool`` is already set.
-        req_type: :attr:`RequestType.SendAndRecv` waits for a response;
-            :attr:`RequestType.SendOnly` writes and returns.
+        req_type: :attr:`RequestType.SEND_AND_RECV` waits for a response;
+            :attr:`RequestType.SEND_ONLY` writes and returns.
         ssl_context: TLS context for HTTPS.
-        is_task_stream: When True, :class:`ClientConn` must not close the
-            pooled connection after the stream ends; the task process
-            still owns it.
         disable_reuse_http_session: When True, do not reuse the HTTP
             session across calls. Default is False (reuse is allowed).
     """
@@ -59,18 +56,17 @@ class RoundTripOptions(BaseClientTransportOption):
         self.pool = None
         self.pool_opts = None
 
-        self.req_type = RequestType.SendAndRecv
+        self.req_type = RequestType.SEND_AND_RECV
 
         self.ssl_context = None
-        self.is_task_stream = False
         self.disable_reuse_http_session = False
 
     def set_req_type(self, req_type: int):
         """Set whether this call waits for a response.
 
         Args:
-            req_type: :attr:`RequestType.SendAndRecv` or
-                :attr:`RequestType.SendOnly`.
+            req_type: :attr:`RequestType.SEND_AND_RECV` or
+                :attr:`RequestType.SEND_ONLY`.
         """
         self.req_type = req_type
 

@@ -61,7 +61,7 @@ async def tcp_round_trip(ctx: TrpcContext, req_data: bytes, options: RoundTripOp
         options: Address, pool, frame parser, and ``req_type``.
 
     Returns:
-        Response frame bytes, or empty bytes for ``SendOnly``.
+        Response frame bytes, or empty bytes for ``SEND_ONLY``.
 
     Raises:
         ClientTimeoutError: Deadline expired on connect or read.
@@ -74,7 +74,7 @@ async def tcp_round_trip(ctx: TrpcContext, req_data: bytes, options: RoundTripOp
         logger.debug("%s|get conn=%s", options.endpoint, conn)
 
         get_message(ctx)
-        set_addr_to_ctx_from_transport(ctx, conn.stream_conn.transport)
+        set_addr_to_ctx_from_transport(ctx, conn.transport)
         send_us = now_us()
         ctx.rpcz_data.client_post_sched_send_msg_us = send_us
         ctx.rpcz_data.client_pre_io_send_msg_us = send_us
@@ -83,7 +83,7 @@ async def tcp_round_trip(ctx: TrpcContext, req_data: bytes, options: RoundTripOp
         ctx.rpcz_data.client_post_io_send_msg_us = now_us()
         logger.debug("%s|write data len=%d", options.endpoint, len(req_data))
 
-        if options.req_type != RequestType.SendOnly:
+        if options.req_type != RequestType.SEND_ONLY:
             rsp = await asyncio.wait_for(options.checker.read_frame(conn), get_remain_time(ctx.deadline))
             ctx.rpcz_data.client_post_sched_recv_msg_us = now_us()
             ctx.with_meta_data(RPCZ_CLIENT_RSP_SIZE_CTX_KEY, len(rsp))

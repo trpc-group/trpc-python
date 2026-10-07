@@ -43,8 +43,6 @@ DEFAULT_MEMORY_INSPECTION_FILENAME_PREFIX: str = "tracemalloc"
 
 # Worker count used when neither the cgroup CPU quota nor the CPU count is known.
 DEFAULT_WORKER_NUM_FALLBACK: int = 2
-# Thread count multiplier applied to the resolved CPU core / worker count.
-DEFAULT_THREAD_NUM_PER_CORE: int = 5
 # Server read-buffer size, 8 MiB.
 DEFAULT_MAX_READ_BUF_SIZE: int = 8 * 1024 * 1024
 # Task-process batch wait duration, in milliseconds.

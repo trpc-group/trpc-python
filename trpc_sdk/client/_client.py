@@ -32,6 +32,7 @@ from trpc_sdk.common import get_or_create_event_loop
 from trpc_sdk.compressor import compress
 from trpc_sdk.compressor import decompress
 from trpc_sdk.config import SocketType
+from trpc_sdk.config import TrpcConfig
 from trpc_sdk.exceptions import ClientConnectionError
 from trpc_sdk.exceptions import ClientEncodeError
 from trpc_sdk.exceptions import ClientRouteError
@@ -45,7 +46,7 @@ from trpc_sdk.serialization import deserialize
 from trpc_sdk.serialization import serialize
 from trpc_sdk.transport import ClientTimeoutReason
 from trpc_sdk.transport import RequestType
-from trpc_sdk.utils import asynclib
+from trpc_sdk.utils import get_async_lib
 from trpc_sdk.utils import now_ms
 from trpc_sdk.utils import singleton
 from ._options import Options
@@ -77,7 +78,7 @@ async def _invoke_backend(ctx: TrpcContext, req: Any, rsp: Any, opts: Options) -
     Returns:
         ``rsp`` after deserialize, or ``None`` for send-only requests.
     """
-    msg = ctx.get_client_message()
+    msg = ctx.get_message()
     serialization_type = msg.serialization_type
     compress_type = msg.compress_type
     # current_* >= 0 is a per-call override of the types stored on the message.
@@ -104,7 +105,7 @@ async def _invoke_backend(ctx: TrpcContext, req: Any, rsp: Any, opts: Options) -
     except ConnectionError as err:
         raise ClientConnectionError(f"Client invoke backend bad connection to {opts.call_options.address} {err}") from err
 
-    if opts.call_options.req_type == RequestType.SendOnly:
+    if opts.call_options.req_type == RequestType.SEND_ONLY:
         return
     rsp_body = client_codec.decode_data(ctx, rsp_buff)
 
@@ -210,9 +211,9 @@ def set_timeout(ctx: TrpcContext, msg: TrpcMessage, opts: Options, begin: int) -
 
     When the client deadline is sooner (or the server set none), a later
     timeout is blamed on the downstream and reported to the selector as
-    :attr:`~trpc_sdk.transport.ClientTimeoutReason.DownstreamTimeout`. When
+    :attr:`~trpc_sdk.transport.ClientTimeoutReason.DOWNSTREAM_TIMEOUT`. When
     the server deadline is sooner, the timeout is
-    :attr:`~trpc_sdk.transport.ClientTimeoutReason.CurrentServiceTimeout`
+    :attr:`~trpc_sdk.transport.ClientTimeoutReason.CURRENT_SERVICE_TIMEOUT`
     and is not treated as downstream failure.
 
     Args:
@@ -227,7 +228,7 @@ def set_timeout(ctx: TrpcContext, msg: TrpcMessage, opts: Options, begin: int) -
     Raises:
         ClientTimeoutError: Remaining time is already negative.
     """
-    timeout_reason = ClientTimeoutReason.DownstreamTimeout
+    timeout_reason = ClientTimeoutReason.DOWNSTREAM_TIMEOUT
     if opts.timeout > 0:
         client_deadline = begin + opts.timeout
         if client_deadline < ctx.deadline or ctx.deadline == 0:
@@ -235,7 +236,7 @@ def set_timeout(ctx: TrpcContext, msg: TrpcMessage, opts: Options, begin: int) -
             ctx.timeout = opts.timeout
         else:
             ctx.timeout = ctx.deadline - begin
-            timeout_reason = ClientTimeoutReason.CurrentServiceTimeout
+            timeout_reason = ClientTimeoutReason.CURRENT_SERVICE_TIMEOUT
         if ctx.timeout < 0:
             raise ClientTimeoutError("client reach deadline")
         msg.set_timeout(ctx.timeout)
@@ -272,7 +273,7 @@ class Client(BaseClient):
         return err is not None and isinstance(err, TrpcException) and \
                (err.code == TrpcErrorCode.TRPC_CLIENT_CONNECT_ERR or
                 (err.code == TrpcErrorCode.TRPC_CLIENT_INVOKE_TIMEOUT_ERR and
-                 timeout_reason == ClientTimeoutReason.DownstreamTimeout))
+                 timeout_reason == ClientTimeoutReason.DOWNSTREAM_TIMEOUT))
 
     @staticmethod
     def check_client_rsp_err(err, msg):
@@ -306,7 +307,7 @@ class Client(BaseClient):
         try:
             loop = get_or_create_event_loop()
         except RuntimeError:
-            loop = asynclib.new_event_loop()
+            loop = get_async_lib(TrpcConfig.global_config().enable_uvloop).new_event_loop()
             asyncio.set_event_loop(loop)
 
         return loop.run_until_complete(self.invoke(ctx, req, rsp_cls, options))
@@ -329,7 +330,7 @@ class Client(BaseClient):
         Returns:
             The filled response instance.
         """
-        msg = ctx.get_client_message()
+        msg = ctx.get_message()
         # Fresh Options per request so concurrent calls do not share state.
         opts = get_options(msg, options)
 

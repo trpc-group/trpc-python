@@ -9,7 +9,8 @@
 :class:`SerializationCode` (ContentType) feeds
 :class:`~trpc_sdk.serialization._types.SerializationType`. 0-4 match
 ``TrpcContentEncodeType``. ``NOOP_ENCODE`` is 4 so it does not collide
-with compress ``NOOP`` (0). 128 / 129 / 200 are local codes.
+with compress ``NOOP`` (0). 129 / 200 are local codes; ``UNSUPPORTED``
+(-1) is a skip sentinel.
 """
 
 from __future__ import annotations
@@ -26,8 +27,10 @@ class SerializationCode(IntEnum):
     and compared against a decoded ``content_type`` without a cast.
     """
 
+    # Skip sentinel: serialize / deserialize do nothing; never sent on the wire.
+    UNSUPPORTED = -1
+
     # Built-in serializers; 0-4 align with TrpcContentEncodeType.
-    # PROTO is the proto name; SerializationType.PB is the historical alias.
     PROTO = 0
     JCE = 1
     JSON = 2
@@ -35,7 +38,6 @@ class SerializationCode(IntEnum):
     # Distinct from compress NOOP = 0; this is TrpcContentEncodeType 4.
     NOOP_ENCODE = 4
 
-    # Local compatibility codes. Not present on TrpcContentEncodeType.
-    UNSUPPORTED = 128
+    # Local codes. Not present on TrpcContentEncodeType.
     FORM = 129
     WUP = 200

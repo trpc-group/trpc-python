@@ -11,28 +11,44 @@ import ...``.
 
 The package is split by responsibility:
 
-- :mod:`~trpc_sdk.utils._constants` — :class:`ProcessType`, :class:`TcpState`,
-  :class:`TimerType`, :data:`UNIX_TYPE`
+- :mod:`~trpc_sdk.utils._constants` — :class:`TcpState`, :data:`UNIX_TYPE`,
+  :class:`RegisterStatus` and :data:`TRPC_SHARE_MEM_LOCK`
 - :mod:`~trpc_sdk.utils._dict_to_pb` — fill a protobuf message from a dict
-- :mod:`~trpc_sdk.utils._types` — IP/port aliases and timer records
+- :mod:`~trpc_sdk.utils._types` — address/IP/port aliases
 - :mod:`~trpc_sdk.utils._address` — parse/format listen and peer addresses
 - :mod:`~trpc_sdk.utils._network` — IP conversion and port-availability probes
-- :mod:`~trpc_sdk.utils._loop_lib` — event-loop policy and ``asynclib``
-- :mod:`~trpc_sdk.utils._timer` — timer tasks and executors
-- :mod:`~trpc_sdk.utils._timer_process` — dedicated timer processes
-- :mod:`~trpc_sdk.utils._multi_process` — process-local type/name accessors
+- :mod:`~trpc_sdk.utils._loop_lib` — event-loop policy via :func:`get_async_lib`
+- :mod:`~trpc_sdk.utils._timer` — :class:`TimerType`, :class:`TimerTaskInfo`,
+  timer tasks and executors
 - :mod:`~trpc_sdk.utils._queue` — async hand-off queue
 - :mod:`~trpc_sdk.utils._time_utils` — millisecond / microsecond clocks
-- :mod:`~trpc_sdk.utils._str_utils` — :func:`strtobool`
+- :mod:`~trpc_sdk.utils._str_utils` — :func:`str2bool`
 - :mod:`~trpc_sdk.utils._singleton` — :func:`singleton`
-- :mod:`~trpc_sdk.utils._testing` — :func:`run_async_test`
-- :mod:`~trpc_sdk.utils._thread_pool` — process-wide ``ThreadPoolExecutor``
-  used to offload blocking calls off the event loop
+- :mod:`~trpc_sdk.utils._process_sync` — cross-process sync primitives:
+  the IO-worker startup barrier (:func:`inc_io_wait_count` /
+  :func:`io_ready_reached`), the register flag
+  (:func:`register_enable` / :func:`register_spinlock`) and the registry
+  heartbeat pause counter (:func:`pause_heartbeat` /
+  :func:`resume_heartbeat` / :func:`should_heartbeat`)
 
-:class:`TimerHook` lives in :mod:`trpc_sdk.abc`.
+Importing this package constructs the ``multiprocessing.Value`` / ``Lock``
+objects in :mod:`~trpc_sdk.utils._process_sync`, so it must happen before
+the first ``fork``.
+
+:class:`TimerHook` lives in :mod:`trpc_sdk.abc`. The process-role accessors
+(``get_process_type``, ``is_worker_process``, ...) are re-exported from
+:mod:`trpc_sdk.common`.
 """
 
 from __future__ import annotations
+
+from trpc_sdk.common import get_current_process_var
+from trpc_sdk.common import get_process_name
+from trpc_sdk.common import get_process_type
+from trpc_sdk.common import is_task_process
+from trpc_sdk.common import is_timer_process
+from trpc_sdk.common import is_worker_process
+from trpc_sdk.common import set_current_process_var
 
 from ._address import convert_address_to_str
 from ._address import get_addr_from_transport
@@ -40,23 +56,16 @@ from ._address import get_address_from_str
 from ._address import make_addr_info_to_bytes
 from ._address import parse_addr_info_from_bytes
 from ._address import set_addr_to_ctx_from_transport
-from ._constants import ProcessType
+from ._constants import TRPC_SHARE_MEM_LOCK
+from ._constants import RegisterStatus
 from ._constants import TcpState
-from ._constants import TimerType
 from ._constants import UNIX_TYPE
 from ._dict_to_pb import EXTENSION_CONTAINER
 from ._dict_to_pb import TYPE_CALLABLE_MAP
 from ._dict_to_pb import dict_to_protobuf
-from ._loop_lib import asynclib
+from ._loop_lib import get_async_lib
 from ._loop_lib import get_or_create_event_loop
-from ._multi_process import get_current_process_var
-from ._multi_process import get_process_name
-from ._multi_process import get_process_type
-from ._multi_process import is_dispatcher_process
-from ._multi_process import is_task_process
-from ._multi_process import is_timer_process
-from ._multi_process import is_worker_process
-from ._multi_process import set_current_process_var
+from ._loop_lib import is_uvloop_enabled
 from ._network import bytes_to_ip
 from ._network import close_socket
 from ._network import create_probe_socket
@@ -82,34 +91,39 @@ from ._network import set_tcp_keep_alive
 from ._network import set_tcp_no_delay
 from ._network import unix_path_valid
 from ._network import unlink_unix_socket_file
+from ._process_sync import REGISTER_STATUE
+from ._process_sync import get_register_status
+from ._process_sync import inc_io_wait_count
+from ._process_sync import io_ready_reached
+from ._process_sync import pause_heartbeat
+from ._process_sync import register_enable
+from ._process_sync import register_spinlock
+from ._process_sync import remove_lock_file
+from ._process_sync import resume_heartbeat
+from ._process_sync import set_register_status
+from ._process_sync import should_heartbeat
+from ._process_sync import wait_notify_in_io
+from ._process_sync import warm_up
 from ._queue import Queue
 from ._singleton import singleton
-from ._str_utils import strtobool
-from ._testing import run_async_test
-from ._thread_pool import init_thread_pool
-from ._thread_pool import submit
+from ._str_utils import str2bool
 from ._time_utils import now_ms
 from ._time_utils import now_us
 from ._timer import TimerExecutor
 from ._timer import TimerTask
+from ._timer import TimerTaskInfo
+from ._timer import TimerType
 from ._timer import register_timer_task
-from ._timer_process import TimerProcess
-from ._timer_process import get_register_timer_process
-from ._timer_process import register_timer_process
 from ._types import IpType
 from ._types import PortType
-from ._types import TimerProcessInfo
-from ._types import TimerTaskInfo
 
 __all__ = [
     "IpType",
     "PortType",
     "UNIX_TYPE",
-    "ProcessType",
     "TcpState",
     "TimerType",
     "TimerTaskInfo",
-    "TimerProcessInfo",
     "convert_address_to_str",
     "get_addr_from_transport",
     "get_address_from_str",
@@ -142,30 +156,39 @@ __all__ = [
     "set_tcp_keep_alive",
     "close_socket",
     "Queue",
-    "init_thread_pool",
-    "submit",
     "now_ms",
     "now_us",
-    "strtobool",
+    "str2bool",
     "dict_to_protobuf",
     "EXTENSION_CONTAINER",
     "TYPE_CALLABLE_MAP",
     "singleton",
     "TimerTask",
     "TimerExecutor",
-    "TimerProcess",
     "register_timer_task",
-    "register_timer_process",
-    "get_register_timer_process",
-    "run_async_test",
     "set_current_process_var",
     "get_current_process_var",
     "get_process_type",
     "get_process_name",
     "is_worker_process",
-    "is_dispatcher_process",
     "is_task_process",
     "is_timer_process",
-    "asynclib",
+    "get_async_lib",
+    "is_uvloop_enabled",
     "get_or_create_event_loop",
+    "TRPC_SHARE_MEM_LOCK",
+    "RegisterStatus",
+    "REGISTER_STATUE",
+    "warm_up",
+    "remove_lock_file",
+    "get_register_status",
+    "set_register_status",
+    "register_enable",
+    "register_spinlock",
+    "wait_notify_in_io",
+    "io_ready_reached",
+    "inc_io_wait_count",
+    "pause_heartbeat",
+    "resume_heartbeat",
+    "should_heartbeat",
 ]

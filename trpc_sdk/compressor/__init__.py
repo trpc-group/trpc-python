@@ -11,7 +11,7 @@ modules; callers should only ``from trpc_sdk.compressor import ...``.
 
 The package is split by responsibility:
 
-- :mod:`~trpc_sdk.compressor._types` — ``CompressType`` with proto fallback
+- :mod:`~trpc_sdk.compressor._types` — ``CompressType`` ContentEncoding codes
 - :mod:`~trpc_sdk.compressor._compressor` — built-in gzip / zlib / snappy plugins
 - :mod:`~trpc_sdk.compressor._utils` — ``compress`` / ``decompress`` / ``get_compress``
 - :mod:`~trpc_sdk.compressor._constants` — ``CompressCode`` wire values

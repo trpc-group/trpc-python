@@ -4,7 +4,7 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
-"""Default client transport plugin and its task-stream subclass.
+"""Default client transport plugin.
 
 Importing this module registers :class:`ClientTransport` as
 ``PluginType.CLIENT_TRANSPORT`` / ``"trpc"``. The package ``__init__``
@@ -80,7 +80,7 @@ class ClientTransport(BaseClientStreamTransport):
             options: Address, network, and pool knobs.
 
         Returns:
-            Response frame bytes, or empty bytes for ``SendOnly``.
+            Response frame bytes, or empty bytes for ``SEND_ONLY``.
 
         Raises:
             ValueError: ``options.network`` is neither ``tcp`` nor ``udp``.
@@ -109,7 +109,7 @@ class ClientTransport(BaseClientStreamTransport):
             ServerSystemError: No conn for this ``stream_id`` (already
                 closed, or :meth:`start` was never called).
         """
-        msg = ctx.get_client_message()
+        msg = ctx.get_message()
         stream_id = msg.stream_id
         if stream_id not in self.stream_id_to_conn:
             raise ServerSystemError("Connection is Closed")
@@ -135,7 +135,7 @@ class ClientTransport(BaseClientStreamTransport):
             ClientTimeoutError: Deadline expired while waiting.
             ClientInvokeError: Any other read failure.
         """
-        msg = ctx.get_client_message()
+        msg = ctx.get_message()
         stream_id = msg.stream_id
         if stream_id not in self.stream_id_to_conn:
             raise ServerSystemError("Connection is Closed")
@@ -147,19 +147,17 @@ class ClientTransport(BaseClientStreamTransport):
     def close(self, ctx: TrpcContext):
         """Close the stream conn for ``ctx`` and drop it from the map.
 
-        ``ClientConn.close`` is called with :attr:`ClientConn.need_close`.
-        That flag is False when ``options.is_task_stream``: the task
-        process still owns the pooled connection, so ending the stream
-        must not return it to the pool. Missing ``stream_id`` is a no-op.
+        The pooled connection is force-closed rather than returned to the
+        pool. Missing ``stream_id`` is a no-op.
 
         Args:
             ctx: Stream context whose message carries ``stream_id``.
         """
-        msg = ctx.get_client_message()
+        msg = ctx.get_message()
         stream_id = msg.stream_id
         if stream_id in self.stream_id_to_conn:
             client_conn: ClientStreamConn = self.stream_id_to_conn[stream_id]
-            client_conn.close(client_conn.need_close)
+            client_conn.close(True)
             self.stream_id_to_conn.pop(stream_id)
 
     async def start_stream(self, ctx: TrpcContext, options: RoundTripOptions):
@@ -178,32 +176,9 @@ class ClientTransport(BaseClientStreamTransport):
         options.short_conn = False
         conn = await get_pool_connection(options, get_remain_time(ctx.deadline))
 
-        msg = ctx.get_client_message()
+        msg = ctx.get_message()
         client_conn = ClientStreamConn(conn=conn, options=options)
         self.stream_id_to_conn[msg.stream_id] = client_conn
-
-
-class ClientTaskStreamTransport(ClientTransport):
-    """Client transport for the inner worker-to-task stream.
-
-    Framework-only: :mod:`trpc_sdk.client` installs this when the caller
-    did not supply a transport for a task stream. Send / recv / start /
-    close are inherited; unary :meth:`round_trip` is not a legal
-    operation on this path.
-    """
-
-    async def round_trip(self, ctx, req_data: bytes, options: RoundTripOptions):
-        """Reject unary round trips; task streams use start/send/recv.
-
-        Args:
-            ctx: Unused; present to match the ABC.
-            req_data: Unused.
-            options: Unused.
-
-        Raises:
-            RuntimeError: Always. Call :meth:`start` instead.
-        """
-        raise RuntimeError("task stream client transport not support 'round_trip'")
 
 
 def get_client_transport(name: str):

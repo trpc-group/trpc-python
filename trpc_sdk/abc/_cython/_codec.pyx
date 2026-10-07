@@ -177,8 +177,8 @@ cdef class BaseServerProtocolChecker:
         """Feed data to the parser."""
         self._buffer.extend(data)
 
-    cpdef bytes read(self):
-        """Read data from the parser."""
+    cpdef list read(self):
+        """Return every complete frame currently buffered."""
         raise NotImplementedError("BaseServerProtocolChecker.read is not implemented")
 
     cpdef void reset(self) except *:

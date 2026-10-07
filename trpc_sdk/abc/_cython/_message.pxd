@@ -63,7 +63,7 @@ cdef class TrpcMessage:
         public str callee_server
         public str callee_service
         public str callee_method
-        public str local_addr                # Local network endpoint for the RPC.
+        public str local_ip                  # Local IP of the RPC, without port.
         public str remote_addr               # Peer network endpoint for the RPC.
         public str logger                    # Logger category or identifier.
         public str caller_method             # Method invoked by the upstream caller.
@@ -130,7 +130,7 @@ cdef class TrpcMessage:
     cpdef void set_client_rsp_head(self, object client_rsp_head) except *
     cpdef void set_server_raw_req(self, object server_raw_req) except *
     cpdef void set_server_raw_rsp(self, object server_raw_rsp) except *
-    cpdef void set_local_addr(self, str local_addr) except *
+    cpdef void set_local_ip(self, str local_ip) except *
     cpdef void set_remote_addr(self, str remote_addr) except *
     cpdef void set_logger(self, str logger) except *
     cpdef void set_caller_app(self, str caller_app) except *

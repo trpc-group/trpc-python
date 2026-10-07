@@ -178,7 +178,7 @@ cdef class Service(BaseService):
         msg.set_callee_service_name(self.opt.service_name)
         # Rewrite after decode so a codec cannot leave stale addresses.
         msg.set_remote_addr(ctx.remote_ip)
-        msg.set_local_addr(ctx.local_ip)
+        msg.set_local_ip(ctx.local_ip)
 
     cdef (float, long, long) _prepare_request_budget(self, TrpcContext ctx):
         """Fill ``ctx.msg`` from ``opt`` and compute the unary timeout budgets.

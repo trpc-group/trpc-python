@@ -37,8 +37,7 @@ class CompressNoop(BaseCompress):
     head says the body is already raw bytes.
     """
 
-    @classmethod
-    def compress(cls, data: bytes) -> bytes:
+    def compress(self, data: bytes) -> bytes:
         """Return ``data`` unchanged.
 
         Args:
@@ -46,8 +45,7 @@ class CompressNoop(BaseCompress):
         """
         return data
 
-    @classmethod
-    def decompress(cls, data: bytes) -> bytes:
+    def decompress(self, data: bytes) -> bytes:
         """Return ``data`` unchanged.
 
         Args:
@@ -64,25 +62,23 @@ class CompressGZip(BaseCompress):
     a gzip header-only blob.
     """
 
-    @classmethod
-    def compress(cls, data: bytes) -> bytes:
+    def compress(self, data: bytes) -> bytes:
         """Compress ``data`` with :func:`gzip.compress`.
 
         Args:
             data: Raw body bytes.
         """
-        if len(data) == 0:
+        if not data:
             return data
         return gzip.compress(data)
 
-    @classmethod
-    def decompress(cls, data: bytes) -> bytes:
+    def decompress(self, data: bytes) -> bytes:
         """Decompress ``data`` with :func:`gzip.decompress`.
 
         Args:
             data: gzip-compressed body bytes.
         """
-        if len(data) == 0:
+        if not data:
             return data
         return gzip.decompress(data)
 
@@ -95,25 +91,23 @@ class CompressZlib(BaseCompress):
     a zlib header-only blob.
     """
 
-    @classmethod
-    def compress(cls, data: bytes) -> bytes:
+    def compress(self, data: bytes) -> bytes:
         """Compress ``data`` with :func:`zlib.compress`.
 
         Args:
             data: Raw body bytes.
         """
-        if len(data) == 0:
+        if not data:
             return data
         return zlib.compress(data)
 
-    @classmethod
-    def decompress(cls, data: bytes) -> bytes:
+    def decompress(self, data: bytes) -> bytes:
         """Decompress ``data`` with :func:`zlib.decompress`.
 
         Args:
             data: zlib-compressed body bytes.
         """
-        if len(data) == 0:
+        if not data:
             return data
         return zlib.decompress(data)
 
@@ -124,7 +118,7 @@ class CompressSnappy(BaseCompress):
 
     ``python-snappy`` is imported on first use so processes that never
     send or receive snappy frames do not need the optional dependency.
-    The same class is also registered as ``TRPC_SNAPPY_BLOCK_COMPRESS``.
+    The same class is also registered as ``CompressType.SnappyBlock``.
     """
 
     def __init__(self) -> None:
@@ -169,17 +163,14 @@ class CompressSnappy(BaseCompress):
         return self._decompress(data)  # pylint: disable=not-callable
 
 
-# Same block implementation as CompressType.Snappy (proto code 2).
-# Slot 5 is the Go-aligned explicit block type, not in this repo's
-# TrpcCompressType. Frames that write ContentEncoding=5 need this
-# second registration; 2 stays for historical proto callers.
-register_plugin(PluginType.COMPRESS, CompressType.TRPC_SNAPPY_BLOCK_COMPRESS,
-                init_pos=PluginInitPos.WORKER)(CompressSnappy)
+# SnappyBlock (5) uses the same block implementation as the deprecated
+# Snappy (2); both codes stay registered so either value decodes.
+register_plugin(PluginType.COMPRESS, CompressType.SnappyBlock, init_pos=PluginInitPos.WORKER)(CompressSnappy)
 
 
-@register_plugin(PluginType.COMPRESS, CompressType.TRPC_SNAPPY_STREAM_COMPRESS, init_pos=PluginInitPos.WORKER)
+@register_plugin(PluginType.COMPRESS, CompressType.SnappyStream, init_pos=PluginInitPos.WORKER)
 class CompressStreamSnappy(CompressSnappy):
-    """Stream-mode snappy compressor for ``TRPC_SNAPPY_STREAM_COMPRESS``.
+    """Stream-mode snappy compressor registered as ``CompressType.SnappyStream``.
 
     ``snappy.stream_compress`` / ``stream_decompress`` take file-like
     objects, so this subclass wraps the body in ``BytesIO`` rather than

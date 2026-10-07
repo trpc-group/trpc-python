@@ -11,11 +11,6 @@ Workers reach it over an IPC pipe instead of calling the handler inline, so
 the two sides need a small common vocabulary: the wire-level status codes,
 the request/response records the task process queues internally, and the
 name-to-connection tables the worker uses to route a call.
-
-The registries live here rather than in :mod:`trpc_sdk.task._utils` because
-:class:`TaskStreamClientMap` resolves multi-process task names through
-:class:`TaskRegistry`; keeping them apart would make the two modules import
-each other.
 """
 
 from __future__ import annotations
@@ -26,6 +21,7 @@ from asyncio import Future
 from asyncio.transports import Transport
 from collections.abc import MutableMapping
 from dataclasses import dataclass
+from dataclasses import field
 from enum import IntEnum
 from enum import unique
 from typing import Dict
@@ -33,24 +29,7 @@ from typing import Iterator
 from typing import Optional
 from typing import Tuple
 
-from trpc_sdk.abc import BaseTaskStreamClientHandler
-from trpc_sdk.abc import BaseTaskStreamServiceHandler
 from trpc_sdk.utils import now_ms
-
-
-@dataclass
-class TaskStreamHandler:
-    """Both halves of a streaming task, registered together on a task.
-
-    The two handlers end up in different processes: ``service`` runs inside
-    the task child and serves the stream, while ``client`` is kept by every
-    worker so business code can open a stream towards that child. They are
-    declared as one pair at registration time because a streaming task is
-    unusable with only one side.
-    """
-
-    client: BaseTaskStreamClientHandler
-    service: BaseTaskStreamServiceHandler
 
 
 @unique
@@ -70,6 +49,7 @@ class TaskStatusCode(IntEnum):
     RSP_WRONG_LENGTH = 4
 
 
+@dataclass
 class TaskRequest:
     """One decoded request waiting in the task process request queue.
 
@@ -77,25 +57,23 @@ class TaskRequest:
     outlive the caller's deadline. ``recv_time`` is the worker-side receive
     timestamp shipped in the frame head, not the time this object was built,
     which lets the task drop already-dead work before invoking the handler.
+
+    Attributes:
+        task_conn_index: Index of the worker pipe the response goes back on.
+            The task child is connected to every worker.
+        pkg_id: Per-connection request id used to match the response to the
+            caller's future.
+        recv_time: Worker-side receive time in milliseconds.
+        timeout: Caller deadline in milliseconds; ``0`` disables it.
+        obj: Decoded request body handed to the user handler. Left out of
+            ``repr`` because it can be arbitrarily large.
     """
 
-    def __init__(self, task_conn_index: int, pkg_id: int, recv_time: int, timeout: int, obj: object):
-        """Initialize a queued task request.
-
-        Args:
-            task_conn_index: Index of the worker pipe the response goes back
-                on. The task child is connected to every worker.
-            pkg_id: Per-connection request id used to match the response to
-                the caller's future.
-            recv_time: Worker-side receive time in milliseconds.
-            timeout: Caller deadline in milliseconds; ``0`` disables it.
-            obj: Decoded request body handed to the user handler.
-        """
-        self.task_conn_index = task_conn_index
-        self.pkg_id = pkg_id
-        self.recv_time = recv_time
-        self.timeout = timeout
-        self.obj = obj
+    task_conn_index: int
+    pkg_id: int
+    recv_time: int
+    timeout: int
+    obj: object = field(repr=False)
 
     def is_timeout(self) -> bool:
         """Report whether the caller deadline has already passed.
@@ -230,45 +208,3 @@ class TaskRegistry:
             index = random.randrange(task_num)
         cls.cur_select[task_name] = index
         return f"{task_name}:{index}"
-
-
-class TaskStreamClientMap:
-    """Stream client handlers of the running tasks, keyed by task name.
-
-    Populated by the worker once per task child at startup. Business code
-    looks a handler up by the plain task name; multi-process tasks are
-    registered under their indexed names and resolved through
-    :meth:`TaskRegistry.next_child_name`.
-    """
-
-    _stream_client_map: Dict[str, BaseTaskStreamClientHandler] = {}
-
-    @classmethod
-    def register_task_stream_client(cls, name: str, task_stream_client: BaseTaskStreamClientHandler):
-        """Publish the stream client of one task child.
-
-        Args:
-            name: Task name, or ``"<name>:<index>"`` for a task with more
-                than one child.
-            task_stream_client: Client half of that task's stream handler.
-        """
-        cls._stream_client_map[name] = task_stream_client
-
-    @classmethod
-    def get_task_stream_client(cls, name: str) -> Optional[BaseTaskStreamClientHandler]:
-        """Look up the stream client to use for a task.
-
-        Args:
-            name: Task name as declared in the server config.
-
-        Returns:
-            The registered handler, or ``None`` when the name is unknown or
-            the selected child has not registered yet.
-        """
-        if name in cls._stream_client_map:
-            return cls._stream_client_map[name]
-
-        child_name = TaskRegistry.next_child_name(name)
-        if child_name is None:
-            return None
-        return cls._stream_client_map.get(child_name, None)

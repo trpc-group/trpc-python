@@ -26,6 +26,28 @@ class Network(str, Enum):
     HTTP = "http"
 
 
+@unique
+class AddressKind(Enum):
+    """Which listener serves one listen address.
+
+    Decided by :func:`~trpc_sdk.server._listeners.classify_address`, in the
+    order the members are listed: a registered user protocol first, then the
+    network type. Both modes use the same decision; they differ only in
+    *which process* binds each kind.
+    """
+
+    # A starter registered with ``register_protocol_handle`` binds it.
+    USER = "user"
+    # tRPC frames over a stream socket; cut into frames by a checker.
+    TCP = "tcp"
+    # tRPC over datagrams; each serving loop binds with SO_REUSEPORT.
+    UDP = "udp"
+    # aiohttp application.
+    HTTP = "http"
+    # No listener matches; a configuration error.
+    UNKNOWN = "unknown"
+
+
 # Process models for ServerOption.mode (YAML server.mode).
 # merge: the worker accepts and runs handlers in one process, spreading
 # connections over `worker_thread_num` event-loop threads.
@@ -144,3 +166,13 @@ LISTEN_BACKLOG = 1024
 WORKER_PRODUCER_PREFIX = "worker"
 # Producer name prefix of the rpc task processes a separate-mode worker forks.
 RPC_TASK_PRODUCER_PREFIX = "rpc_task"
+
+# Process lifecycle.
+
+# Seconds between polls of the task-ready counter while the worker waits for
+# ``io_wait_count`` notifications, before it binds any address.
+IO_WAIT_POLL_INTERVAL = 1.0
+# Seconds a child gets to shut down after noticing its parent died, before it
+# is killed with ``os._exit``. Long enough for a normal SIGTERM path, short
+# enough that a task stuck in inference does not hold a GPU for long.
+PARENT_EXIT_GRACE_SECONDS = 5.0

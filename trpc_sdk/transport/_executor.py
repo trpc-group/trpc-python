@@ -26,6 +26,7 @@ from trpc_sdk.log import logger
 from trpc_sdk.task import inner_decode_task_rsp
 from trpc_sdk.task import receive_from_task
 from trpc_sdk.telemetry import report_attr
+from trpc_sdk.utils import now_ms
 from trpc_sdk.utils import set_addr_to_ctx_from_transport
 
 from ._cython import InnerStreamParser
@@ -85,6 +86,7 @@ class ExecutorUDPConnection(BaseConnection):
         for package in packages:
             ctx = TrpcContext()
             ctx.timeout = self.timeout
+            ctx.recv_time = now_ms()
             get_message(ctx)
             set_addr_to_ctx_from_transport(ctx, self.aio_connection)
             ctx.remote_ip = addr[0]
@@ -97,7 +99,7 @@ class ExecutorUDPConnection(BaseConnection):
             data: Datagram payload.
             addr: Peer ``(host, port)``.
         """
-        self.parser.feeds_data(data)
+        self.parser.feed_data(data)
 
         while True:
             try:

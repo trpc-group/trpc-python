@@ -36,8 +36,9 @@ from typing import Any
 from typing import Callable
 from typing import Optional
 
+from trpc_sdk.config import TrpcConfig
 from trpc_sdk.log import logger
-from trpc_sdk.utils import asynclib
+from trpc_sdk.utils import get_async_lib
 
 
 class LoopThread:
@@ -92,7 +93,7 @@ class LoopThread:
         ``asyncio.get_event_loop()`` off the running-loop path must find this
         thread's loop and not the worker's main one.
         """
-        loop = asynclib.new_event_loop()
+        loop = get_async_lib(TrpcConfig.global_config().enable_uvloop).new_event_loop()
         asyncio.set_event_loop(loop)
         self.loop = loop
         # Runs on the first turn of the loop, i.e. once run_forever is in.
@@ -107,7 +108,7 @@ class LoopThread:
     def submit(self, func: Callable[[], Any]) -> Any:
         """Run ``func`` on this thread's loop and block until it finishes.
 
-        Used for the setup a front end has to perform on the loop that will
+        Used for the setup a listener has to perform on the loop that will
         serve it, such as an aiohttp ``AppRunner.setup()`` whose ``Server``
         binds to whichever loop is running when it is constructed.
 

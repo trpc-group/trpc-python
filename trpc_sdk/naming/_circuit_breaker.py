@@ -10,7 +10,7 @@
 :data:`~trpc_sdk.naming._constants.DEFAULT_CIRCUITBREAKER_NAME`. It reports
 every node as available and ignores :meth:`report`. Real breakers
 (Polar, and so on) replace it through
-:func:`set_default_circuitbreaker` or
+:func:`~trpc_sdk.naming.set_default_circuitbreaker` or
 :meth:`~trpc_sdk.abc.SelectorOption.set_circuit_breaker`.
 """
 
@@ -23,7 +23,6 @@ from trpc_sdk.abc import Node
 from trpc_sdk.abc import PluginType
 from trpc_sdk.plugin import register_plugin
 from ._constants import DEFAULT_CIRCUITBREAKER_NAME
-from ._defaults import set_default_circuitbreaker
 
 
 @register_plugin(PluginType.NAMING_CIRCUIT_BREAKER, DEFAULT_CIRCUITBREAKER_NAME)
@@ -55,4 +54,4 @@ class NoopCircuitBreaker(BaseCircuitBreaker):
             cost: Call duration; ignored.
             success: Call result; ignored.
         """
-        pass
+        return None

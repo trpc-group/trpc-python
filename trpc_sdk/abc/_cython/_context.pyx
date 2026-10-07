@@ -57,11 +57,12 @@ cdef class TrpcContext:
         """Remove and return a metadata value or the supplied default."""
         return self.meta_data.pop(key, default)
 
-    cpdef object get_client_message(self):
+    cpdef object get_message(self):
         """Return the message attached to this context.
 
-        :func:`trpc_sdk.abc.get_message` creates it when missing. The
-        client invoke path reads codec state from this object.
+        Unlike the module-level :func:`trpc_sdk.abc.get_message`, this never
+        creates one, so it can return ``None``. The client invoke path reads
+        codec state from this object.
 
         Returns:
             The :class:`TrpcMessage`, or ``None`` before one is attached.

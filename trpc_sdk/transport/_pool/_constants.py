@@ -6,9 +6,9 @@
 
 """Constants used by the connection-pool package.
 
-:data:`DEFAULT_STREAM_LIMIT` is the read buffer half-limit passed to
-:func:`~trpc_sdk.transport._pool.open_connection` /
-:func:`~trpc_sdk.transport._pool._tcp_connection.open_unix_connection`.
+:data:`DEFAULT_STREAM_LIMIT` is the read buffer half-limit
+:func:`~trpc_sdk.transport._pool._dial.dial_connection` passes to
+``asyncio.open_connection`` / ``asyncio.open_unix_connection``.
 """
 
 from __future__ import annotations

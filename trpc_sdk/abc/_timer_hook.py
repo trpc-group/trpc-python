@@ -6,10 +6,10 @@
 
 """Abstract lifecycle contract for dedicated timer processes.
 
-:class:`TimerHook` is registered in the parent through
-:func:`trpc.utils._timer_process.register_timer_process` and carried into
-the child on the :class:`~trpc.utils._types.TimerProcessInfo` record. All
-three callbacks therefore run in the child process, not the parent.
+The public SDK no longer ships a timer-process implementation, so nothing
+in :mod:`trpc_sdk` registers a :class:`TimerHook`. The contract is kept for
+an implementation that registers the hook in the parent and runs all three
+callbacks in the forked child.
 """
 
 from __future__ import annotations

@@ -8,24 +8,25 @@
 # cython: language_level=3, boundscheck=False, wraparound=False
 
 # Length-only tRPC frame splitter. Checks magic + package_len; does
-# not parse RequestProtocol. mem_cpy is the leftover byte-by-byte
-# compact replaced by memmove in read.
+# not parse RequestProtocol.
+
+from libc.stdint cimport uint16_t
+from libc.stdint cimport uint32_t
+
+from trpc_sdk.abc._cython cimport BaseServerProtocolChecker
 
 cdef extern from "arpa/inet.h":
-    unsigned short ntohs(unsigned short netshort)
-    unsigned int ntohl(unsigned int netlong)
-    unsigned short htons(unsigned short hostshort)
-    unsigned int htonl(unsigned int hostlong)
+    uint16_t ntohs(uint16_t netshort)
+    uint32_t ntohl(uint32_t netlong)
 
 
-cdef class CServerParser:
+cdef class TrpcServerProtocolChecker(BaseServerProtocolChecker):
     cdef:
-        cdef char* buf      # Growable stream buffer; a half-frame survives across feeds_data.
+        cdef char* buf      # Growable stream buffer; a half-frame survives across feed_data.
         cdef int length     # Bytes currently valid in buf.
         cdef int size       # Allocated capacity; grow uses (size + append) * 2.
 
-    cpdef void feeds_data(self, bytes data)
+    cpdef void feed_data(self, bytes data) except *
     cpdef list read(self)
-    cdef void mem_cpy(self, int start_index, int length)
     cpdef void resize(self, size_t new_number)
-    cpdef void reset(self)
+    cpdef void reset(self) except *

@@ -29,17 +29,13 @@ from ._client import select_node
 from ._client import set_timeout
 from ._client import update_message
 from ._stream import Stream
-from ._stream import TaskClientStream
 from ._stream_factory import create_stream
-from ._stream_factory import create_task_client_stream
 
 __all__ = [
     "Client",
     "Options",
     "Stream",
-    "TaskClientStream",
     "create_stream",
-    "create_task_client_stream",
     "get_client",
     "get_options",
     "normalize_options",

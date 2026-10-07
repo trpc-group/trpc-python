@@ -19,8 +19,7 @@ The package is split by responsibility:
 - :mod:`~trpc_sdk.naming._discovery` — :class:`IpDiscovery` and
   :func:`resolve_host`
 - :mod:`~trpc_sdk.naming._load_balance` — :class:`RandomLoadBalance`
-- :mod:`~trpc_sdk.naming._registry` — :func:`get_registry` and
-  heartbeat gating
+- :mod:`~trpc_sdk.naming._registry` — :func:`get_registry`
 - :mod:`~trpc_sdk.naming._circuit_breaker` — :class:`NoopCircuitBreaker`
 - :mod:`~trpc_sdk.naming._service_router` — :class:`NoopServiceRouter`
 - :mod:`~trpc_sdk.naming._ip_selector` — :class:`IpSelector` and
@@ -59,11 +58,7 @@ from ._ip_selector import get_random_addr
 from ._load_balance import RandomLoadBalance
 from ._registry import defaultRegistry
 from ._registry import get_registry
-from ._registry import pause_heartbeat
-from ._registry import resume_heartbeat
-from ._registry import should_heartbeat
 from ._selector_lookup import get_default_selector
-from ._selector_lookup import get_default_selector as default_selector
 from ._selector_lookup import get_selector
 from ._service_router import NoopServiceRouter
 from ._trpc_selector import TrpcSelector
@@ -96,9 +91,6 @@ __all__ = [
     # Registry
     "defaultRegistry",
     "get_registry",
-    "pause_heartbeat",
-    "resume_heartbeat",
-    "should_heartbeat",
     # Circuit breaker
     "NoopCircuitBreaker",
     # Service router
@@ -111,6 +103,5 @@ __all__ = [
     "ResolveSelector",
     "get_selector",
     "get_default_selector",
-    "default_selector",
     "get_random_addr",
 ]

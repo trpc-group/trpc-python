@@ -16,18 +16,10 @@ from __future__ import annotations
 from importlib import import_module
 
 from .pb import trpc_pb2
-from .share_memory import register_spinlock
-from .share_memory import remove_lock_file
-from .share_memory import wait_notify_in_io
-from .share_memory import warm_up
 
 __all__ = [
     "MemoryInspector",
-    "register_spinlock",
-    "remove_lock_file",
     "trpc_pb2",
-    "wait_notify_in_io",
-    "warm_up",
 ]
 
 

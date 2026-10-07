@@ -26,5 +26,5 @@ cdef class BaseServerProtocolChecker:
         bytearray _buffer  # Mutable receive buffer retained across feed calls.
 
     cpdef void feed_data(self, bytes data) except *
-    cpdef bytes read(self)
+    cpdef list read(self)
     cpdef void reset(self) except *

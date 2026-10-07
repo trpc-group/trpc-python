@@ -28,6 +28,9 @@ class PluginSpec:
     :class:`~trpc_sdk.abc.BasePlugin` subclass, but a slot may also be
     filled by a factory function or by a Cython extension type, so the
     only guarantee is that calling it produces the instance.
+
+    ``report`` marks the plugin for version statistics: a reporter reads
+    the specs and sends ``{plugin_name: version}`` only for the marked ones.
     """
 
     cls: Optional[Callable[[], object]]
@@ -36,6 +39,7 @@ class PluginSpec:
     plugin_name: str
     task_info: Optional[TaskInfo] = None
     version: str = ""
+    report: bool = False
 
 
 class _PluginManager:

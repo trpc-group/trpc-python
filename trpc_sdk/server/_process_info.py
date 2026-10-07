@@ -29,8 +29,8 @@ class ProcessTaskInfo:
 
     # Task names paired with ``task_pipe_conn``.
     task_name: List[str] = field(default_factory=list)
-    # IPC pipes between this process and its tasks. ``None`` for stream
-    # tasks, which connect over a Unix-domain socket instead.
+    # IPC pipes between this process and its tasks. ``None`` for a task
+    # this process has no pipe to.
     task_pipe_conn: List[Optional[PipeConnection]] = field(default_factory=list)
 
 

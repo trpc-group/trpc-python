@@ -9,7 +9,7 @@
 :func:`start_service_registry` gives every service with a configured
 registry a :class:`ServiceRegistrar`, which runs register / heartbeat /
 deregister on a :class:`RegistryThread` with its own event loop, not the
-master's. The engine's ``registry_semaphore`` (initialised to
+worker's. The engine's ``registry_semaphore`` (initialised to
 ``service_num``) is the handshake that lets ``TrpcServerEngine.close``
 wait for deregister before SIGTERM.
 """
@@ -24,16 +24,17 @@ from typing import Awaitable
 from typing import Callable
 from typing import Optional
 
-from trpc_sdk._inner import register_spinlock
-from trpc_sdk._inner import remove_lock_file
-from trpc_sdk._inner import warm_up
-from trpc_sdk.utils import asynclib
+from trpc_sdk.config import TrpcConfig
+from trpc_sdk.utils import get_async_lib
+from trpc_sdk.utils import register_spinlock
+from trpc_sdk.utils import remove_lock_file
+from trpc_sdk.utils import warm_up
 
 
 class RegistryThread(threading.Thread):
     """Background thread that runs naming-service register/heartbeat on its own loop.
 
-    Registration does **not** run on the master's event loop. This thread
+    Registration does **not** run on the worker's event loop. This thread
     creates ``get_or_create_event_loop()`` in ``__init__`` (still on the
     caller's thread) and installs it with ``asyncio.set_event_loop`` once
     :meth:`run` starts.
@@ -80,7 +81,8 @@ class RegistryThread(threading.Thread):
         self._running: bool = True
         self.deregister_done: threading.Semaphore = deregister_done
         self.daemon = daemon
-        self._loop: asyncio.AbstractEventLoop = asynclib.new_event_loop()
+        self._loop: asyncio.AbstractEventLoop = get_async_lib(
+            TrpcConfig.global_config().enable_uvloop).new_event_loop()
 
     def terminate(self) -> None:
         """Ask the retry loop to stop and cancel the in-flight register task.
@@ -174,11 +176,13 @@ class ServiceRegistrar:
 def start_service_registry(server: Any) -> None:
     """Start naming-service registration for every service on ``server``.
 
-    :func:`create_server` registers this as a fork hook. When YAML
-    ``server.registry_after_fork`` is true it runs in the parent after
-    fork; otherwise it runs in the parent before fork, so children inherit
-    the already-started :class:`RegistryThread`. There is no master
-    process.
+    :meth:`~trpc_sdk.server.Server.serve` appends this to the worker's
+    ``ready_callbacks``, so it runs in the server process once the listen
+    addresses are bound, after every child has been forked. Children never
+    see a :class:`RegistryThread`: fork does not copy threads, and none
+    exists before the fork any more. ``server.registry_after_fork`` no
+    longer affects the timing; ``registry_delay`` is an extra wait after
+    the bind.
 
     Args:
         server: The :class:`~trpc_sdk.server.Server` whose ``services``

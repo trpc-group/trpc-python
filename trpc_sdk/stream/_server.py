@@ -142,7 +142,7 @@ class ServerStream(BaseServerStream):
             rsp: Compressed DATA payload.
             body: Empty object filled in place.
         """
-        msg = self.ctx.get_client_message()
+        msg = self.ctx.get_message()
         compress_type = msg.compress_type
         if self.opts.current_compress_type >= 0:
             compress_type = self.opts.current_compress_type
@@ -161,7 +161,7 @@ class ServerStream(BaseServerStream):
         Args:
             body: Object to send.
         """
-        msg = self.ctx.get_client_message()
+        msg = self.ctx.get_message()
         new_ctx, new_msg = clone_context_and_message(self.ctx)
 
         frame_head = create_frame_head(trpc_pb2.TRPC_STREAM_FRAME, trpc_pb2.TRPC_STREAM_FRAME_DATA, self.stream_id)
@@ -205,7 +205,7 @@ class ServerStream(BaseServerStream):
             ret_code: Framework / business return code on the close meta.
             ret_msg: Human-readable close message, encoded as UTF-8.
         """
-        msg = self.ctx.get_client_message()
+        msg = self.ctx.get_message()
         new_ctx, new_msg = clone_context_and_message(self.ctx)
 
         frame_head = create_frame_head(trpc_pb2.TRPC_STREAM_FRAME, trpc_pb2.TRPC_STREAM_FRAME_CLOSE, self.stream_id)
@@ -247,26 +247,18 @@ class StreamDispatcher:
 
     ``stream_to_ss[session_id][stream_id]`` is the :class:`ServerStream`
     created at INIT. Subsequent DATA / CLOSE / FEEDBACK frames look the
-    same pair up. ``is_task`` selects the inner worker-to-task transport
-    at :meth:`init` time.
+    same pair up.
     """
 
-    def __init__(self, is_task=False) -> None:
+    def __init__(self) -> None:
         self.stream_to_ss: Dict[int, Dict[int, ServerStream]] = defaultdict(dict)
         self.opts = None
-        self._is_task = is_task
-
-    @property
-    def is_task(self) -> bool:
-        """Return whether this dispatcher serves the inner task stream."""
-        return self._is_task
 
     def init(self, opts) -> None:
         """Attach ``opts.transport`` as the stream write path.
 
-        Imported here, not at module level: ``trpc_sdk.stream._server`` is loaded
-        while ``trpc_sdk.server._task`` is still importing this package, and
-        ``trpc_sdk.transport`` reaches ``trpc_sdk.task`` and then this module again.
+        ``TrpcServerStreamTransport`` is imported here, not at module level,
+        so loading this package does not pull in ``trpc_sdk.transport``.
 
         Args:
             opts: A :class:`~trpc_sdk.server.ServiceOption` whose
@@ -292,7 +284,7 @@ class StreamDispatcher:
             session_id: Connection-lifetime id of the client TCP.
             stream_id: Stream id from the tRPC frame head.
         """
-        return f"{info} session_id: {session_id}, stream_id: {stream_id}, is_task: {self._is_task}"
+        return f"{info} session_id: {session_id}, stream_id: {stream_id}"
 
     def store_server_stream(self, ctx: TrpcContext, server_stream: ServerStream) -> None:
         """Remember ``server_stream`` under ``(session_id, stream_id)``.
@@ -532,16 +524,13 @@ class StreamDispatcher:
         return self.handle_by_stream_frame_type(ctx, stream_handle, req_buf)
 
 
-def create_stream_dispatcher(is_task: bool = False) -> StreamDispatcher:
+def create_stream_dispatcher() -> StreamDispatcher:
     """Build a :class:`StreamDispatcher`.
-
-    Args:
-        is_task: ``True`` for the inner worker-to-task stream.
 
     Returns:
         A new dispatcher with an empty stream map.
     """
-    return StreamDispatcher(is_task)
+    return StreamDispatcher()
 
 
 def create_server_stream(ctx: TrpcContext, stream_id: int, opts) -> ServerStream:

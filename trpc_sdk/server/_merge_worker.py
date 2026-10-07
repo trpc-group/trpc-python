@@ -12,9 +12,11 @@ serves each connection on one of ``worker_thread_num`` event-loop threads. A
 request therefore never crosses a process boundary, which is what removes the
 IPC hop that ``separate`` mode pays.
 
-The front ends are the same three this framework has always served — tRPC over
+The listeners are the same three this framework has always served — tRPC over
 TCP, tRPC over UDP, and HTTP through aiohttp — plus whatever a user registered
-in ``user_protocol_handles``. What changed is where they run:
+with :func:`~trpc_sdk.server.register_protocol_handle`. Which listener serves
+an address is decided by :func:`~trpc_sdk.server._listeners.classify_address`,
+the same function ``separate`` mode uses. What changed is where they run:
 
 * TCP and HTTP go through :class:`~trpc_sdk.server._acceptor.Acceptor`: one bind,
   accept on the main thread, ``connect_accepted_socket`` onto a loop thread.
@@ -25,7 +27,7 @@ in ``user_protocol_handles``. What changed is where they run:
   threaded there. It still serves correctly, just without the parallelism.
 
 ``worker_thread_num: 1`` skips all of that: no thread is created and every
-front end is attached straight to the main loop, exactly as the multi-listener
+listener is attached straight to the main loop, exactly as the multi-listener
 executor did. This is both the cheapest configuration and the one that proves
 the threaded paths did not change behaviour.
 
@@ -37,34 +39,37 @@ wants ``separate`` mode, where handlers run in separate rpc task processes.
 
 from __future__ import annotations
 
-import socket
+import asyncio
 import sys
 from functools import partial
 from typing import Any
-from typing import Callable
 from typing import Dict
 from typing import List
 from typing import Optional
 
-from aiohttp import hdrs
 from aiohttp import web
 
-from trpc_sdk.common import ProcessType
-from trpc_sdk.config import TrpcConfig
+from trpc_sdk.abc import ProcessType
 from trpc_sdk.http import HttpMessageHandle
 from trpc_sdk.log import logger
-from trpc_sdk.transport import ExecutorUDPConnection
 from trpc_sdk.transport import TCPConnection
 from trpc_sdk.transport import create_server_socket
 from ._acceptor import Acceptor
 from ._constants import LISTEN_BACKLOG
-from ._constants import Network
+from ._constants import AddressKind
+from ._listeners import classify_address
+from ._listeners import create_http_msg_handle
+from ._listeners import create_udp_socket
+from ._listeners import setup_http_runner
+from ._listeners import start_http_site
+from ._listeners import start_udp
+from ._listeners import start_user_protocol
+from ._listeners import stop_http_sites
+from ._listeners import udp_protocol_factory
 from ._loop_thread import LoopThread
 from ._task import worker_producer_name
 from ._types import AcceptTarget
-from ._utils import add_user_route
 from ._utils import get_https_certs
-from ._utils import reg_static_file
 from ._worker import BaseWorker
 
 
@@ -79,10 +84,6 @@ class MergeWorker(BaseWorker):
             the main loop serves them and no thread is created.
         loop_threads: The threads themselves; empty when ``thread_num`` is 1.
         acceptors: One per stream endpoint that hands connections to threads.
-        user_protocol_handles: Protocol name -> starter registered by the user
-            for a custom protocol. Takes precedence over the built-in tcp/udp/
-            http dispatch; the callable receives the address index and is
-            expected to bind its own socket.
     """
 
     def __init__(self, engine, name: str = "merge_worker") -> None:
@@ -107,49 +108,51 @@ class MergeWorker(BaseWorker):
         self.loop_threads: List[LoopThread] = []
         self.acceptors: List[Acceptor] = []
 
-        self.user_protocol_handles: Dict[str, Callable[[int], None]] = {}
         # Bridge between aiohttp requests and the tRPC handler, one per HTTP
         # address index. Shared by every thread serving that address: it holds
         # no loop state, only the address index and this worker.
         self._http_msg_handles: Dict[int, HttpMessageHandle] = {}
         # aiohttp runners kept alive for cleanup, one per (address, loop).
         self._http_runners: List[web.AppRunner] = []
+        # Listen servers and aiohttp sites bound on the main loop when
+        # ``thread_num`` is 1; closed by ``_stop_accepting``.
+        self._servers: List[asyncio.AbstractServer] = []
+        self._http_sites: List[web.BaseSite] = []
 
     def start_worker_process(self) -> None:
         """Start the loop threads, then bind every configured endpoint.
 
         Called by :meth:`~trpc_sdk.server._worker.BaseWorker._prepare_to_serve`
         once plugins and task connections are up. Threads come first because a
-        front end needs its targets to exist before it can route to them.
+        listener needs its targets to exist before it can route to them.
 
-        For each listen address, in priority order:
-
-        1. A protocol registered in ``user_protocol_handles`` wins, so a custom
-           protocol can replace the built-in ones on that port.
-        2. Otherwise the network type selects TCP, UDP or HTTP. A composite
-           network such as ``tcp,http`` matches TCP first, as it always has.
-        3. An unknown network type is a configuration error with no sane
-           fallback, so the process exits rather than starting up
-           half-listening.
+        Each listen address goes to the listener
+        :func:`~trpc_sdk.server._listeners.classify_address` picks for it: a
+        registered user protocol first, so a custom protocol can replace the
+        built-in ones on that port, then TCP, UDP or HTTP by network type. An
+        unknown network type is a configuration error with no sane fallback,
+        so the process exits with status 1 rather than starting up
+        half-listening.
         """
         logger.info("[merge worker] MergeWorker start_worker_process(), threads: %s", self.thread_num)
-        is_base64 = TrpcConfig.server_config().encode_base64
 
         self._start_loop_threads()
 
         for i, _ in enumerate(self.addresses):
-            service_adapter = self.services[i]
-            if service_adapter.opt.protocol in self.user_protocol_handles:
-                self.user_protocol_handles[service_adapter.opt.protocol](i)
-            elif self.networks[i].find(Network.TCP) != -1:
+            kind = classify_address(self, i)
+            if kind is AddressKind.USER:
+                start_user_protocol(self, i)
+            elif kind is AddressKind.TCP:
                 self._start_tcp(i)
-            elif self.networks[i].find(Network.UDP) != -1:
+            elif kind is AddressKind.UDP:
                 self._start_udp(i)
-            elif self.networks[i].find(Network.HTTP) != -1:
-                self._http_msg_handles[i] = HttpMessageHandle(i, self, is_base64=is_base64)
+            elif kind is AddressKind.HTTP:
+                self._http_msg_handles[i] = create_http_msg_handle(self, i)
                 self._start_http(i)
             else:
-                sys.exit()
+                logger.error("[merge worker] unsupported network %r for address %s", self.networks[i],
+                             self.addresses[i])
+                sys.exit(1)
 
     def _task_producer_names(self) -> List[str]:
         """Give every serving loop its own producer identity, and its own pipes.
@@ -256,7 +259,7 @@ class MergeWorker(BaseWorker):
         if not self.loop_threads:
             sock = create_server_socket(self.addresses[index], self.socket_types[index], True)
             server = self.loop.create_server(handle, sock=sock, reuse_port=True, backlog=LISTEN_BACKLOG)
-            self.loop.run_until_complete(server)
+            self._servers.append(self.loop.run_until_complete(server))
             return
 
         self._start_acceptor(index, [AcceptTarget(thread, handle) for thread in self.loop_threads])
@@ -273,40 +276,19 @@ class MergeWorker(BaseWorker):
             index: Position of the address in ``addresses``; the same index
                 selects the checker, handler and timeout to use.
         """
-        handle = partial(ExecutorUDPConnection,
-                         app=self,
-                         checker=self.checkers[index],
-                         handle=self.handlers[index],
-                         timeout=self.timeouts[index])
-
         if not self.loop_threads:
-            sock = self._create_udp_socket(index)
-            endpoint = self.loop.create_datagram_endpoint(protocol_factory=handle, sock=sock)
-            self.loop.run_until_complete(endpoint)
+            start_udp(self, index, self.loop)
             return
 
+        handle = udp_protocol_factory(self, index)
         for thread in self.loop_threads:
-            sock = self._create_udp_socket(index)
+            sock = create_udp_socket(self, index)
             thread.submit(partial(thread.loop.create_datagram_endpoint, protocol_factory=handle, sock=sock))
-
-    def _create_udp_socket(self, index: int) -> socket.socket:
-        """Bind one datagram socket for the address at ``index``.
-
-        The trailing ``stream=False`` is what makes ``create_server_socket``
-        hand back a ``SOCK_DGRAM`` socket instead of a listening stream one.
-
-        Args:
-            index: Position of the address in ``addresses``.
-
-        Returns:
-            A bound, non-blocking datagram socket with ``SO_REUSEPORT`` set.
-        """
-        return create_server_socket(self.addresses[index], self.socket_types[index], True, False)
 
     def _start_http(self, index: int) -> None:
         """Serve one HTTP endpoint, one aiohttp application per serving loop.
 
-        Unlike the tRPC protocols, aiohttp cannot share a front end across
+        Unlike the tRPC protocols, aiohttp cannot share a listener across
         loops: ``AppRunner.setup()`` builds a ``web.Server`` bound to the loop
         running at that moment, and every request handler it produces inherits
         that loop. So each thread gets its own application, runner and protocol
@@ -320,20 +302,14 @@ class MergeWorker(BaseWorker):
                 ``_http_msg_handles`` must already exist, and its ``tran_opts``
                 entry decides whether the endpoint is HTTPS.
         """
-        # None unless the transport options carry a cert/key pair.
-        ssl_context = get_https_certs(self.tran_opts[index])
-
         if not self.loop_threads:
-            runner = self.loop.run_until_complete(self._setup_http_runner(index))
-            site = web.TCPSite(runner,
-                               host=self.addresses[index][0],
-                               port=self.addresses[index][1],
-                               reuse_port=True,
-                               backlog=LISTEN_BACKLOG,
-                               ssl_context=ssl_context)
-            self.loop.run_until_complete(site.start())
+            runner, site = start_http_site(self, index, self._http_msg_handles[index], self.loop)
+            self._http_runners.append(runner)
+            self._http_sites.append(site)
             return
 
+        # None unless the transport options carry a cert/key pair.
+        ssl_context = get_https_certs(self.tran_opts[index])
         targets = []
         for thread in self.loop_threads:
             runner = thread.submit(partial(self._setup_http_runner, index))
@@ -341,10 +317,7 @@ class MergeWorker(BaseWorker):
         self._start_acceptor(index, targets, ssl_context=ssl_context)
 
     async def _setup_http_runner(self, index: int) -> web.AppRunner:
-        """Build and start an aiohttp runner on the loop that will serve it.
-
-        Must be awaited on the target loop: ``setup()`` is where the runner's
-        ``web.Server`` captures its loop.
+        """Build an aiohttp runner on the calling loop thread and keep it alive.
 
         Args:
             index: Position of the address in ``addresses``.
@@ -353,36 +326,25 @@ class MergeWorker(BaseWorker):
             A runner whose ``server`` attribute is usable as a protocol
             factory.
         """
-        runner = web.AppRunner(self._build_http_app(index))
-        await runner.setup()
+        runner = await setup_http_runner(self, index, self._http_msg_handles[index])
         self._http_runners.append(runner)
         return runner
 
-    def _build_http_app(self, index: int) -> web.Application:
-        """Assemble the aiohttp application for one HTTP endpoint.
+    def _stop_accepting(self) -> None:
+        """Close every listen socket; open connections keep being served.
 
-        Routes are added most specific first: user routes, then static files,
-        then a catch-all that forwards anything left to the tRPC handler.
-        Registering the catch-all earlier would shadow the other two.
-
-        Args:
-            index: Position of the address in ``addresses``.
-
-        Returns:
-            An application ready to be handed to an ``AppRunner``.
+        Acceptors for the threaded path, the asyncio servers and aiohttp
+        sites for the single-loop one. UDP endpoints stay open: there is no
+        connection to refuse, and in-flight datagrams are answered on them.
         """
-        service_adapter = self.services[index]
-        app = web.Application(client_max_size=TrpcConfig.server_config().max_rbuf_size)
-        msg_handle: HttpMessageHandle = self._http_msg_handles[index]
-
-        add_user_route(app, service_adapter.opt.service_name, msg_handle)
-
-        reg_static_file(app)
-
-        resource = app.router.add_resource(r'/{name:.*}')
-        resource.add_route(hdrs.METH_ANY, msg_handle.handle_http_request)
-
-        return app
+        for acceptor in self.acceptors:
+            acceptor.close()
+        self.acceptors.clear()
+        for server in self._servers:
+            server.close()
+        self._servers.clear()
+        stop_http_sites(self.loop, self._http_sites)
+        self._http_sites.clear()
 
     def _on_graceful_exit(self) -> None:
         """Stop accepting, then shut the serving threads down.

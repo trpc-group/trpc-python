@@ -6,6 +6,7 @@
 
 from abc import abstractmethod
 from typing import Any
+from typing import List
 from typing import Optional
 
 from trpc_sdk.abc import BasePlugin
@@ -68,8 +69,8 @@ class BaseServerProtocolChecker:
         ...
 
     @abstractmethod
-    def read(self) -> bytes:
-        """Read data from the parser."""
+    def read(self) -> List[bytes]:
+        """Return every complete frame currently buffered."""
         ...
 
     @abstractmethod

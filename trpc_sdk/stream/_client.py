@@ -12,9 +12,7 @@ the socket; it pops a queue filled by the background :meth:`ClientStream.dispatc
 task that is the only reader of the client transport.
 
 Stream ids ``0..99`` are reserved; :func:`create_stream_client` starts at
-:data:`STREAM_ID` so the first public call is ``100``. The inner
-worker-to-task client starts at :data:`TASK_CLIENT_STREAM_ID` so the
-two id spaces cannot collide on a shared connection.
+:data:`STREAM_ID` so the first call is ``100``.
 """
 
 from __future__ import annotations
@@ -31,9 +29,7 @@ from trpc_sdk.abc import clone_context_and_message
 from trpc_sdk.abc import create_frame_head
 from trpc_sdk.client import Options
 from trpc_sdk.client import create_stream
-from trpc_sdk.client import create_task_client_stream
 from trpc_sdk.client import get_options
-from trpc_sdk.client import normalize_options
 from trpc_sdk.client import update_message
 from trpc_sdk.common import get_or_create_event_loop
 from trpc_sdk.compressor import decompress
@@ -46,7 +42,6 @@ from trpc_sdk.utils import Queue
 from trpc_sdk._inner import trpc_pb2
 from ._constants import DEFAULT_INIT_WINDOW_SIZE
 from ._constants import STREAM_ID
-from ._constants import TASK_CLIENT_STREAM_ID
 from ._flow_control import ReceiveControl
 from ._flow_control import SendControl
 from ._options import get_window_size
@@ -68,7 +63,7 @@ class ClientStream(BaseClientStream):
         self.desc = desc  # Method descriptor (RPC name plus client-streams flag).
         self.method = method  # RPC name stamped on INIT / DATA / FEEDBACK frames.
         self.stream_id = stream_id  # Allocated by Client; 0..99 are reserved.
-        self.stream = create_stream()  # Transport-level stream; _TaskClientStream swaps in the unix one.
+        self.stream = create_stream()  # Transport-level stream used for send / recv / close.
         self.recv_queue = Queue()  # Filled only by dispatch(); recv_msg never touches the socket.
         self.client_closed = False  # We sent CLOSE.
         self.server_closed = False  # Peer sent CLOSE, or a recv failure was treated as one.
@@ -132,7 +127,7 @@ class ClientStream(BaseClientStream):
             if self.opts.r_control is not None:
                 await self.opts.r_control.on_recv(len(rsp))
 
-            client_msg = self.ctx.get_client_message()
+            client_msg = self.ctx.get_message()
             # Prefer per-call overrides; otherwise take compress / serialization
             # from the backend's INIT/DATA response metadata.
             compress_type = client_msg.compress_type
@@ -175,7 +170,7 @@ class ClientStream(BaseClientStream):
             ctx: Context whose client message holds the decoded frame head.
             rsp_data: DATA payload, ignored for CLOSE / FEEDBACK.
         """
-        msg: TrpcMessage = ctx.get_client_message()
+        msg: TrpcMessage = ctx.get_message()
         frame_state = msg.frame_head.frame_state
 
         if frame_state == trpc_pb2.TRPC_STREAM_FRAME_DATA:
@@ -228,8 +223,8 @@ class ClientStream(BaseClientStream):
                 logger.error(f"recv frame from conn failed, err: {repr(err)}")
                 self.server_closed = True
 
-                ctx.get_client_message().frame_head.frame_state = trpc_pb2.TRPC_STREAM_FRAME_CLOSE
-                ctx.get_client_message().client_rsp_err = ClientTimeoutError("recv frame from conn timeout")
+                ctx.get_message().frame_head.frame_state = trpc_pb2.TRPC_STREAM_FRAME_CLOSE
+                ctx.get_message().client_rsp_err = ClientTimeoutError("recv frame from conn timeout")
                 self.handle_frame(ctx, None)
                 break
 
@@ -275,16 +270,13 @@ class ClientStream(BaseClientStream):
 
         self.opts.s_control = SendControl(window_size)
 
-    async def init_stream(self, options: List[Callable], is_task_stream: bool = False) -> None:
+    async def init_stream(self, options: List[Callable]) -> None:
         """Send INIT and start :meth:`dispatch`.
 
-        Public RPC streams go through client filters and naming;
-        inner task streams skip those and only apply option callables
-        plus metadata.
+        The INIT handshake goes through client filters and naming.
 
         Args:
             options: Client option callables for this call.
-            is_task_stream: ``True`` selects the inner worker-to-task path.
         """
         ctx, msg = clone_context_and_message(self.ctx)
         frame_head = create_frame_head(trpc_pb2.TRPC_STREAM_FRAME, trpc_pb2.TRPC_STREAM_FRAME_INIT, self.stream_id)
@@ -292,10 +284,7 @@ class ClientStream(BaseClientStream):
         msg.set_stream_id(self.stream_id)
         msg.set_client_rpc_name(self.method)
 
-        if not is_task_stream:
-            await self._rpc_stream(ctx, msg, options)
-        else:
-            await self._task_stream(ctx, msg, options)
+        await self._rpc_stream(ctx, msg, options)
 
     async def _rpc_stream(self, ctx, msg, options: List[Callable]) -> None:
         """INIT handshake for a public ``trpc_sdk.stream`` call."""
@@ -311,22 +300,6 @@ class ClientStream(BaseClientStream):
 
         if client_options.enable_stream_filter:
             return await client_options.filters.handle(ctx, None, _wrapper_filter)
-        await self.invoke(ctx, msg, client_options)
-
-    async def _task_stream(self, ctx, msg, options: List[Callable]) -> None:
-        """INIT handshake for the inner worker-to-task stream.
-
-        Naming / filters are skipped: the Unix path is already on the
-        options. Metadata from ``options`` is merged onto the cloned
-        client message before INIT.
-        """
-        client_options = Options()
-        for func in normalize_options(options):
-            func(client_options)
-        if client_options.metadata:
-            meta_data = msg.client_meta_data or {}
-            meta_data.update(client_options.metadata)
-            msg.set_client_meta_data(meta_data)
         await self.invoke(ctx, msg, client_options)
 
     async def invoke(self, ctx, msg, client_options: Options) -> None:
@@ -366,21 +339,12 @@ class ClientStream(BaseClientStream):
         loop.create_task(self.dispatch())
 
 
-class _TaskClientStream(ClientStream):
-    """:class:`ClientStream` that dials the inner worker-to-task transport."""
-
-    def __init__(self, ctx: TrpcContext, desc: ClientStreamDesc, stream_id: int, method: str) -> None:
-        super().__init__(ctx, desc, stream_id, method)
-        self.stream = create_task_client_stream()
-
-
 # pylint: disable=too-few-public-methods
 class Client:
     """Allocates monotonically increasing stream ids and opens streams."""
 
-    def __init__(self, stream_id: int, is_task_stream: bool = False) -> None:
+    def __init__(self, stream_id: int) -> None:
         self.stream_id = stream_id
-        self._is_task_stream = is_task_stream
 
     async def create_client_stream(
             self,
@@ -398,16 +362,11 @@ class Client:
             options: Client option callables.
 
         Returns:
-            An initialized :class:`ClientStream` (or the inner-task
-            variant when this client was built with ``is_task_stream``).
+            An initialized :class:`ClientStream`.
         """
         self.stream_id += 1
-        if self._is_task_stream:
-            client_stream = _TaskClientStream(ctx, desc, self.stream_id, method)
-        else:
-            client_stream = ClientStream(ctx, desc, self.stream_id, method)
-
-        await client_stream.init_stream(options, self._is_task_stream)
+        client_stream = ClientStream(ctx, desc, self.stream_id, method)
+        await client_stream.init_stream(options)
         return client_stream
 
 
@@ -420,16 +379,4 @@ def create_stream_client() -> Client:
     return Client(STREAM_ID)
 
 
-def create_task_stream_client() -> Client:
-    """Build an inner worker-to-task stream client.
-
-    Returns:
-        A :class:`Client` whose first allocated id is
-        ``TASK_CLIENT_STREAM_ID + 1``.
-    """
-    return Client(TASK_CLIENT_STREAM_ID, is_task_stream=True)
-
-
 default_stream_client = create_stream_client()
-
-default_task_stream_client = create_task_stream_client()

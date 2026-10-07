@@ -8,19 +8,19 @@
 
 The ``_``-prefixed codec types are framework internals used only by
 :mod:`trpc_sdk.codec._codec`; the public codec plugins are
-:class:`~trpc_sdk.codec.ClientCodec` / :class:`~trpc_sdk.codec.ServerCodec`.
+:class:`~trpc_sdk.codec.TrpcClientCodec` / :class:`~trpc_sdk.codec.TrpcServerCodec`.
 """
 
-from ._codec import _ClientCodec  # pyright: ignore[reportMissingModuleSource]
-from ._codec import _ServerCodec  # pyright: ignore[reportMissingModuleSource]
-from ._codec_stream import _ClientStreamCodec  # pyright: ignore[reportMissingModuleSource]
-from ._codec_stream import _ServerStreamCodec  # pyright: ignore[reportMissingModuleSource]
-from ._codec_parser import CServerParser  # pyright: ignore[reportMissingModuleSource]
+from ._codec import _TrpcClientCodec  # pyright: ignore[reportMissingModuleSource]
+from ._codec import _TrpcServerCodec  # pyright: ignore[reportMissingModuleSource]
+from ._codec_stream import _TrpcClientStreamCodec  # pyright: ignore[reportMissingModuleSource]
+from ._codec_stream import _TrpcServerStreamCodec  # pyright: ignore[reportMissingModuleSource]
+from ._codec_parser import TrpcServerProtocolChecker  # pyright: ignore[reportMissingModuleSource]
 
 __all__ = [
-    "CServerParser",
-    "_ClientCodec",
-    "_ClientStreamCodec",
-    "_ServerCodec",
-    "_ServerStreamCodec",
+    "TrpcServerProtocolChecker",
+    "_TrpcClientCodec",
+    "_TrpcClientStreamCodec",
+    "_TrpcServerCodec",
+    "_TrpcServerStreamCodec",
 ]

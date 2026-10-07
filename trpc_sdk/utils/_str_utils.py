@@ -6,7 +6,7 @@
 
 """String helpers used by config parsing.
 
-:func:`strtobool` is the distutils-style truth parser consumed by
+:func:`str2bool` is the distutils-style truth parser consumed by
 YAML / env flag readers. It returns the integers ``1`` and ``0``, not
 ``True`` / ``False``.
 """
@@ -14,7 +14,7 @@ YAML / env flag readers. It returns the integers ``1`` and ``0``, not
 from __future__ import annotations
 
 
-def strtobool(val: str) -> bool:
+def str2bool(val: str) -> bool:
     """Convert a truthy string to ``1`` or ``0``.
 
     The annotation is ``bool`` for historical callers; the values

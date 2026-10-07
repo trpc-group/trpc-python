@@ -135,7 +135,7 @@ cdef class TrpcMessage:
         self.callee_server = ""
         self.callee_service = ""
         self.callee_method = ""
-        self.local_addr = ""
+        self.local_ip = ""
         self.remote_addr = ""
         self.logger = ""
         self.namespace = ""
@@ -430,13 +430,13 @@ cdef class TrpcMessage:
         """
         self.server_raw_rsp = server_raw_rsp
 
-    cpdef void set_local_addr(self, str local_addr) except *:
-        """Set the local network endpoint of this RPC.
+    cpdef void set_local_ip(self, str local_ip) except *:
+        """Set the local IP of this RPC.
 
         Args:
-            local_addr: Local address.
+            local_ip: Local IP, without port.
         """
-        self.local_addr = local_addr
+        self.local_ip = local_ip
 
     cpdef void set_remote_addr(self, str remote_addr) except *:
         """Set the peer network endpoint of this RPC.

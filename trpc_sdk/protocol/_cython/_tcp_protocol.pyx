@@ -71,7 +71,6 @@ async def handle_request(handle, req_buf, conn, ctx, skip_empty_write=False):
             ctx.rpcz_data.server_post_io_send_msg_us = now_us()
             submit_server_span_on_executor_post_io(ctx)
             logger.debug("[executor] rpcz submit on executor post-io completed")
-            # TODO use await conn.drain() to flush write buffer.
     except Exception as err:  # pylint: disable=broad-except
         report_attr("trpc_executor_tcp_write_err", 1)
         logger.error(f"[executor] failed to send rsp to tcp client, err: {err}", exc_info=True)
@@ -130,7 +129,7 @@ cdef class TCPConnection:
         Args:
             data: Newly received TCP bytes, not necessarily one frame.
         """
-        self.checker.feeds_data(data)
+        self.checker.feed_data(data)
 
         packages = []
         while True:
@@ -212,6 +211,5 @@ cdef class TCPConnection:
 
         Write flow-control is not wired yet; this only flips ``paused``.
         """
-        # TODO Use asyncio.feature to control conn write buffer
         assert self.paused
         self.paused = False

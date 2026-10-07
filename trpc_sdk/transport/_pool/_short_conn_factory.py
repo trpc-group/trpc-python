@@ -43,13 +43,18 @@ class ShortConnFactory:
         Args:
             options: Transport options with the remote address / sock.
             timeout: Dial timeout in seconds.
-            loop: Event loop passed to ``open_connection``.
+            loop: Event loop the dial runs on.
 
         Returns:
             A short-lived :class:`PooledConnection`.
         """
-        conn = await dial_connection(options=options, timeout=timeout, loop=loop)
-        return PooledConnection(conn=conn, pool=self, address=options.address, is_short=True)
+        reader, writer = await dial_connection(options=options, timeout=timeout, loop=loop)
+        return PooledConnection(reader=reader,
+                                writer=writer,
+                                loop=loop,
+                                pool=self,
+                                address=options.address,
+                                is_short=True)
 
     @staticmethod
     def put(pool_conn: PooledConnection, _: bool = True) -> None:

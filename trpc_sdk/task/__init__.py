@@ -49,8 +49,6 @@ from ._types import TaskRegistry
 from ._types import TaskRequest
 from ._types import TaskResponse
 from ._types import TaskStatusCode
-from ._types import TaskStreamClientMap
-from ._types import TaskStreamHandler
 from ._utils import get_task_conn
 from ._utils import get_task_pkg_id
 from ._utils import receive_from_task
@@ -70,8 +68,6 @@ __all__ = [
     "TaskRequest",
     "TaskResponse",
     "TaskStatusCode",
-    "TaskStreamClientMap",
-    "TaskStreamHandler",
     # Worker-side registration and response pairing
     "get_task_conn",
     "get_task_pkg_id",

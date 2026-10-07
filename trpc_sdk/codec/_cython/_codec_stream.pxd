@@ -24,7 +24,7 @@ cdef extern from "arpa/inet.h":
     unsigned int htonl(unsigned int hostlong)
 
 
-cdef class _ClientStreamCodec(_Codec):
+cdef class _TrpcClientStreamCodec(_Codec):
     cpdef object encode_stream(self, TrpcMessage message, object body)
     cpdef object decode_stream(self, TrpcMessage message, object buffer)
 
@@ -41,7 +41,7 @@ cdef class _ClientStreamCodec(_Codec):
     cpdef bytes decode_feedback_frame(self, TrpcMessage message, bytes body)
 
 
-cdef class _ServerStreamCodec(_Codec):
+cdef class _TrpcServerStreamCodec(_Codec):
     cpdef object encode_stream(self, TrpcMessage message, object body)
     cpdef object decode_stream(self, TrpcMessage message, object buffer)
 

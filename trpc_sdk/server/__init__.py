@@ -23,6 +23,8 @@ are ``merge`` and ``separate``:
 - ``separate`` — the worker only does I/O and forwards frames to
   ``rpc_task_num`` rpc task processes, which is where handlers run. This is
   what a CPU-bound service needs; ``merge`` will not scale it across cores.
+  Only tRPC-over-TCP addresses pass through the worker; UDP, HTTP and
+  user-protocol addresses are bound by every rpc task with ``SO_REUSEPORT``.
 
 The package is split by responsibility:
 
@@ -36,11 +38,12 @@ The package is split by responsibility:
 - :mod:`~trpc_sdk.server._server` — ``Server``: config, service table,
   :func:`create_server`, and the startup order that forks children before
   creating a loop
-- :mod:`~trpc_sdk.server._modes`, :mod:`~trpc_sdk.server._compat` — internal
-  mode lookup, and translation of retired YAML values during the migration
-  window
+- :mod:`~trpc_sdk.server._modes` — internal mode lookup
 - :mod:`~trpc_sdk.server._worker` — ``BaseWorker``: the lifecycle template
   every serving process follows, and the fork and supervision of children
+- :mod:`~trpc_sdk.server._listeners` — which listener serves each listen
+  address (shared by both modes), the registry of user protocols, and the
+  single-loop UDP / HTTP listeners
 - :mod:`~trpc_sdk.server._merge_worker`, :mod:`~trpc_sdk.server._acceptor`,
   :mod:`~trpc_sdk.server._loop_thread` — merge mode
 - :mod:`~trpc_sdk.server._separate_worker` — separate mode and its rpc tasks
@@ -52,7 +55,8 @@ The package is split by responsibility:
   :mod:`~trpc_sdk.server._types` — shared defaults, runtime switches, and
   metadata used across processes. The socketpair primitives those tables hold
   live in :mod:`trpc_sdk.ipc`
-- :mod:`~trpc_sdk.server._healthy_checker` — worker/child heartbeat monitoring
+- :mod:`~trpc_sdk.server._healthy_checker` — heartbeat monitoring of the
+  task processes, by the worker that forked them
 
 Application code normally reaches this package through :func:`create_server`,
 which returns a :class:`Server`. Generated stub code uses :class:`Server`,
@@ -70,6 +74,7 @@ from ._constants import MODE_MERGE
 from ._constants import MODE_SEPARATE
 from ._constants import Network
 from ._engine import TrpcServerEngine
+from ._listeners import register_protocol_handle
 from ._merge_worker import MergeWorker
 from ._option import ServerOption
 from ._option import ServiceOption
@@ -122,11 +127,9 @@ __all__ = [
     # Config values shared with the YAML schema
     "MODE_MERGE",
     "MODE_SEPARATE",
-    "NETWORK_HTTP",
-    "NETWORK_TCP",
-    "NETWORK_UDP",
     "Network",
     # Lifecycle hooks
+    "register_protocol_handle",
     "register_timeout_callback",
     "set_signal_handle",
     # Runtime feature switches

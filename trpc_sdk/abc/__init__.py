@@ -72,11 +72,6 @@ from ._server import ProcessType
 from ._server import ServiceDesc
 from ._server import StreamDesc
 from ._service_registry import BaseServiceRegistry
-from ._stream import BaseTaskStreamClientHandler
-from ._stream import BaseTaskStreamClientMethod
-from ._stream import BaseTaskStreamServerMethod
-from ._stream import BaseTaskStreamServiceHandler
-from ._stream import TaskStreamMethodType
 from ._task_info import TaskInfo
 from ._timer_hook import TimerHook
 from ._transport import AddrType
@@ -120,10 +115,6 @@ __all__ = [
     "BaseService",
     "BaseServiceRegistry",
     "BaseServiceRouter",
-    "BaseTaskStreamClientHandler",
-    "BaseTaskStreamClientMethod",
-    "BaseTaskStreamServerMethod",
-    "BaseTaskStreamServiceHandler",
     "BaseTrpcServerEngine",
     "BaseWriter",
     "CallResult",
@@ -153,7 +144,6 @@ __all__ = [
     "StreamDesc",
     "TaskCodec",
     "TaskInfo",
-    "TaskStreamMethodType",
     "TimerHook",
     "TrpcContext",
     "TrpcFrameHead",

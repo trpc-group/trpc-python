@@ -8,10 +8,7 @@
 
 A task is registered with ``@trpc.task`` and runs in its own process, so slow
 or blocking work does not sit on a worker's event loop. Workers hand work over
-one IPC pipe per ``(task, worker)`` pair, created by the master before fork; a
-task that serves a stream handler uses a Unix-domain socket instead, because a
-stream needs a full-duplex connection per call rather than a datagram-shaped
-hand-off.
+one IPC pipe per ``(task, worker)`` pair, created by the master before fork.
 
 This module provides:
 
@@ -27,8 +24,6 @@ The pre-fork record is :class:`~trpc_sdk.server._types.TaskInfo`.
 
 from __future__ import annotations
 
-import asyncio
-import os
 from functools import partial
 from multiprocessing import Process
 from typing import Any
@@ -38,25 +33,21 @@ from typing import Dict
 from typing import List
 from typing import Optional
 
-from trpc_sdk.abc import BaseTaskStreamServiceHandler
-from trpc_sdk.common import ProcessType
+from trpc_sdk.abc import ProcessType
 from trpc_sdk.ipc import PipeConnection
 from trpc_sdk.ipc import PipeEnd
 from trpc_sdk.ipc import PipeKind
 from trpc_sdk.ipc import create_pipe
 from trpc_sdk.log import logger
-from trpc_sdk.naming import pause_heartbeat as pause_registry_heartbeat
-from trpc_sdk.naming import resume_heartbeat
 from trpc_sdk.plugin import get_registered_tasks
 from trpc_sdk.plugin import init_task_plugins
-from trpc_sdk.stream import TaskStreamServiceAdapter
 from trpc_sdk.task import TaskConsumer
 from trpc_sdk.task import consume_response
 from trpc_sdk.task import register_task_num
 from trpc_sdk.task import task_init
-from trpc_sdk.transport import TaskStreamConnection
 from trpc_sdk.transport import TaskWorkerConnection
-from trpc_sdk.utils import unlink_unix_socket_file
+from trpc_sdk.utils import pause_heartbeat as pause_registry_heartbeat
+from trpc_sdk.utils import resume_heartbeat
 from ._constants import WORKER_PRODUCER_PREFIX
 from ._types import TaskInfo
 from ._worker import BaseWorker
@@ -109,7 +100,6 @@ def build_task_infos() -> List[TaskInfo]:
 
         for i in range(task_handler.task_num):
             task = TaskInfo()
-            task.task_stream_handler = task_handler.task_stream_handler
             task.name = f"{task_handler.name}:{i}"
             task.handle = handle
             task.task_handle = (task_handler.initializer, task_handler.handler)
@@ -185,10 +175,6 @@ class TaskIpcMesh:
         for column, task in enumerate(self.task_infos):
             task.producer_names = list(self.producer_names)
             task.task_pipe_conn = [None] * len(self.producer_names)
-            if task.task_stream_handler is not None:
-                # Stream tasks bind a Unix-domain socket instead: a stream
-                # needs a connection per call, not a shared datagram pipe.
-                continue
             for row, producer in enumerate(self.producer_names):
                 if not self._has_edge(producer, task):
                     continue
@@ -315,7 +301,7 @@ class BaseTaskProcess(BaseWorker, Process):
     was never set.
 
     Subclasses implement :meth:`BaseWorker._prepare_to_serve` to attach the
-    pipes (or Unix socket) they are fed from.
+    pipes they are fed from.
     """
 
     def _init_plugins(self) -> None:
@@ -330,20 +316,14 @@ class BaseTaskProcess(BaseWorker, Process):
 
 
 class TaskProcess(BaseTaskProcess):
-    """Python task child: drain worker IPC (or a Unix stream socket) off the workers.
+    """Python task child: drain worker IPC off the workers.
 
     Constructed in the master **before fork**. After fork,
     :class:`BaseTaskProcess` builds the event loop and plugins; this class
-    only fills in task-specific wiring in :meth:`_prepare_to_serve`.
-
-    Two serving modes:
-
-    * Stream task — bind ``.__{name}`` and accept full-duplex Unix connections
-      from workers. There is no socketpair; the matching
-      ``task_pipe_conn`` entries are ``None``.
-    * Non-stream task — wrap each worker socketpair in :class:`TaskConnection`,
-      start :class:`TaskConsumer` threads that pull batches from the global
-      queue, and schedule :func:`consume_response` to write results back.
+    only fills in task-specific wiring in :meth:`_prepare_to_serve`: wrap
+    each worker socketpair in :class:`TaskConnection`, start
+    :class:`TaskConsumer` threads that pull batches from the global queue,
+    and schedule :func:`consume_response` to write results back.
 
     ``run()`` and SIGTERM handling stay on :class:`BaseTaskProcess`.
     """
@@ -357,7 +337,7 @@ class TaskProcess(BaseTaskProcess):
         Args:
             task_info: Master-side task record. ``task_handle`` is
                 ``(initializer, handler)``; ``task_pipe_conn`` is index-aligned
-                with the worker list (``None`` for stream tasks).
+                with the producer list.
             engine: Master engine. The child inherits this object through fork
                 and reads ``opts.task_*`` defaults from it.
         """
@@ -368,8 +348,7 @@ class TaskProcess(BaseTaskProcess):
         self.task_info: TaskInfo = task_info
         # Inbound: this task's end of each producer <-> task IPC pipe,
         # index-aligned with ``task_info.producer_names``. ``None`` for a
-        # stream task (which is reached over a Unix-domain socket instead) and
-        # for a peer producer that did not declare this task.
+        # peer producer that did not declare this task.
         #
         # Distinct from the inherited ``BaseWorker.task_pipe_conn``, which is
         # the *outbound* direction: this task's producer-side ends toward the
@@ -399,38 +378,11 @@ class TaskProcess(BaseTaskProcess):
 
         # Capacity of the global C task queue created in ``_init_plugins``.
         self.queue_size: int = engine.opts.task_queue_size
-        # Number of :class:`TaskConsumer` threads started for a non-stream task.
+        # Number of :class:`TaskConsumer` threads started by this task.
         self.consumer_num: int = engine.opts.task_consumer_num
         # If True, registry heartbeats were paused at registration and must be
         # resumed in ``_prepare_to_serve`` after the initializer returns.
         self.pause_heartbeat: bool = task_info.pause_heartbeat
-        # Unix-domain path a stream task binds; unused for non-stream tasks.
-        self._unix_path: str = f".__{task_info.name}"
-        # asyncio server returned by ``create_unix_server``; ``None`` until a
-        # stream task binds, and ``None`` again after graceful exit.
-        self._unix_srv: Optional[asyncio.AbstractServer] = None
-        # Stream-task service implementation; ``None`` for non-stream tasks.
-        self._task_stream_service: Optional[BaseTaskStreamServiceHandler] = (
-            task_info.task_stream_handler.service if task_info.task_stream_handler else None
-        )
-
-    def _create_unix_server(self) -> None:
-        """Bind ``.__{name}`` so workers can open a full-duplex stream.
-
-        Unlinks a leftover socket file first: a previous incarnation may have
-        crashed without removing it, and ``create_unix_server`` would then fail
-        to bind. Called only when ``_task_stream_service`` is set.
-
-        Uses ``loop.run_until_complete`` because this runs in
-        :meth:`_prepare_to_serve`, before the loop is serving.
-        """
-        service_adapter = TaskStreamServiceAdapter(task_service=self._task_stream_service)
-        handler = partial(TaskStreamConnection, service_adapter=service_adapter, loop=self.loop)
-        if os.path.exists(self._unix_path):
-            logger.info(f"'{self._unix_path}' file is already exist, must delete to avoid error")
-            unlink_unix_socket_file(self._unix_path)
-        coros = self.loop.create_unix_server(handler, path=self._unix_path)
-        self._unix_srv = self.loop.run_until_complete(coros)
 
     def _create_producer_conns(self) -> None:
         """Attach each producer IPC pipe, then start consumers and the rsp pump.
@@ -448,7 +400,7 @@ class TaskProcess(BaseTaskProcess):
         ``task_handle``, and schedule :func:`consume_response` so completed
         work is written back to the originating worker.
 
-        Called only for non-stream tasks. ``None`` entries are producers that
+        ``None`` entries are producers that
         cannot reach this task, which happens once another task declares
         ``peers``; they are skipped so ``index`` stays the producer index the
         response has to be routed back on.
@@ -488,9 +440,8 @@ class TaskProcess(BaseTaskProcess):
 
         If ``pause_heartbeat`` was set at registration, registry heartbeats
         resume after the initializer so the service is not advertised until
-        the task is ready. A stream task then binds its Unix socket; a
-        non-stream task attaches the producer pipes and starts consumers.
-        Peer connections are opened last, so a task can call
+        the task is ready. The task then attaches the producer pipes and
+        starts consumers. Peer connections are opened last, so a task can call
         :func:`~trpc_sdk.task.send_to_task` from its handler.
         """
         self._close_foreign_pipes()
@@ -500,11 +451,7 @@ class TaskProcess(BaseTaskProcess):
         if self.pause_heartbeat:
             resume_heartbeat()
 
-        if self._task_stream_service:
-            self._create_unix_server()
-        else:
-            self._create_producer_conns()
-
+        self._create_producer_conns()
         self._connect_tasks()
 
     def _owned_producer_names(self) -> List[str]:
@@ -520,13 +467,5 @@ class TaskProcess(BaseTaskProcess):
         """Log the SIGTERM; the base class then exits through ``SystemExit``."""
         logger.error("[task] worker exit")
 
-    def _on_graceful_exit(self) -> None:
-        """Close the Unix server and unlink its socket file, if one was bound.
-
-        The next incarnation of this task reuses ``.__{name}`` and cannot bind
-        while the old file is still on disk.
-        """
-        if self._unix_srv is not None:
-            self._unix_srv.close()
-            unlink_unix_socket_file(self._unix_path)
-            self._unix_srv = None
+    def _on_drained(self) -> None:
+        """No user worker-exit callbacks in a task process."""

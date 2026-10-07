@@ -6,24 +6,26 @@
 
 """Type hints for the length-only tRPC frame splitter.
 
-``CServerParser`` is exported as ``TrpcServerParser``. It checks magic
-``2352`` and ``package_len`` only; protocol decode happens later.
+``TrpcServerProtocolChecker`` checks magic ``2352`` and ``package_len``
+only; protocol decode happens later.
 """
 
 from __future__ import annotations
 
 from typing import List
 
+from trpc_sdk.abc import BaseServerProtocolChecker
 
-class CServerParser:
+
+class TrpcServerProtocolChecker(BaseServerProtocolChecker):
     """Split a TCP stream into complete tRPC frames.
 
     A frame is 16-byte head plus ``package_len - 16`` more bytes.
     ``read`` returns every complete package currently buffered; an
-    incomplete tail stays in the buffer across ``feeds_data``.
+    incomplete tail stays in the buffer across ``feed_data``.
     """
 
-    def feeds_data(self, data: bytes) -> None:
+    def feed_data(self, data: bytes) -> None:
         """Append ``data`` to the growable parse buffer.
 
         Args:

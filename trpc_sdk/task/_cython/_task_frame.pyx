@@ -29,7 +29,7 @@ from trpc_sdk.exceptions import ServerDecodeError
 from .._default_codec import get_default_codec
 
 # magic number
-cdef ushort INNER_MAGIC_VALUE = 1314
+cdef uint16_t INNER_MAGIC_VALUE = 1314
 
 
 cdef char* inner_encode_task_req_c(TaskRequestHead* req) nogil:
@@ -46,17 +46,17 @@ cdef char* inner_encode_task_req_c(TaskRequestHead* req) nogil:
     """
     cdef char* to_ptr = <char *> malloc(req.package_len * sizeof(char))
 
-    (<ushort *>(to_ptr))[0] = req.magic
-    (<uint *>(to_ptr+2))[0] = req.package_len
-    (<uint *>(to_ptr+6))[0] = req.pkg_id
-    (<ulong *>(to_ptr+10))[0] = req.recv_time
-    (<ulong *>(to_ptr+18))[0] = req.timeout
+    (<uint16_t *>(to_ptr))[0] = req.magic
+    (<uint32_t *>(to_ptr+2))[0] = req.package_len
+    (<uint32_t *>(to_ptr+6))[0] = req.pkg_id
+    (<uint64_t *>(to_ptr+10))[0] = req.recv_time
+    (<uint64_t *>(to_ptr+18))[0] = req.timeout
     if req.package_len - TASK_REQ_HEAD_LEN > 0:
         memcpy(to_ptr+TASK_REQ_HEAD_LEN, req.body, req.package_len - TASK_REQ_HEAD_LEN)
 
     return to_ptr
 
-cpdef bytes inner_encode_task_req(uint pkg_id, ulong recv_time, ulong timeout, object data):
+cpdef bytes inner_encode_task_req(uint32_t pkg_id, uint64_t recv_time, uint64_t timeout, object data):
     """Pack one Python-protocol request frame.
 
     ``req.body`` aliases the buffer of ``data_bytes``, which stays alive for
@@ -74,7 +74,7 @@ cpdef bytes inner_encode_task_req(uint pkg_id, ulong recv_time, ulong timeout, o
         The complete frame, head included.
     """
     data_bytes = get_default_codec().encode(data)
-    cdef uint data_len = len(data_bytes)
+    cdef uint32_t data_len = len(data_bytes)
 
     cdef TaskRequestHead* req = <TaskRequestHead *> malloc(sizeof(TaskRequestHead))
     req.magic = INNER_MAGIC_VALUE
@@ -111,17 +111,17 @@ cdef TaskRequestHead* inner_decode_task_req_c(char* from_prt) nogil:
         Failing this way rather than raising is what keeps the function
         callable without the GIL.
     """
-    cdef ushort magic = (<ushort *>(from_prt))[0]
+    cdef uint16_t magic = (<uint16_t *>(from_prt))[0]
     if magic != INNER_MAGIC_VALUE:
         return NULL
 
     cdef TaskRequestHead* req = <TaskRequestHead *> malloc(sizeof(TaskRequestHead))
 
     req.magic = magic
-    req.package_len = (<uint *>(from_prt+2))[0]
-    req.pkg_id = (<uint *>(from_prt+6))[0]
-    req.recv_time = (<ulong *>(from_prt+10))[0]
-    req.timeout = (<ulong *>(from_prt+18))[0]
+    req.package_len = (<uint32_t *>(from_prt+2))[0]
+    req.pkg_id = (<uint32_t *>(from_prt+6))[0]
+    req.recv_time = (<uint64_t *>(from_prt+10))[0]
+    req.timeout = (<uint64_t *>(from_prt+18))[0]
     # req.body = from_prt + TASK_REQ_HEAD_LEN
 
     return req
@@ -179,17 +179,17 @@ cdef char* inner_encode_task_rsp_c(TaskResponseHead* rsp) nogil:
     """
     cdef char* to_ptr = <char *> malloc(rsp.package_len * sizeof(char))
 
-    (<ushort *>(to_ptr))[0] = rsp.magic
-    (<uint *>(to_ptr+2))[0] = rsp.package_len
-    (<uint *>(to_ptr+6))[0] = rsp.pkg_id
-    (<uint *>(to_ptr+10))[0] = rsp.ret_code
+    (<uint16_t *>(to_ptr))[0] = rsp.magic
+    (<uint32_t *>(to_ptr+2))[0] = rsp.package_len
+    (<uint32_t *>(to_ptr+6))[0] = rsp.pkg_id
+    (<uint32_t *>(to_ptr+10))[0] = rsp.ret_code
     if rsp.package_len - TASK_RSP_HEAD_LEN > 0:
         memcpy(to_ptr+TASK_RSP_HEAD_LEN, rsp.body, rsp.package_len - TASK_RSP_HEAD_LEN)
 
     return to_ptr
 
 
-cpdef bytes inner_encode_task_rsp(uint pkg_id, uint ret_code, object data):
+cpdef bytes inner_encode_task_rsp(uint32_t pkg_id, uint32_t ret_code, object data):
     """Pack one Python-protocol response frame.
 
     Same body-aliasing contract as :func:`inner_encode_task_req`.
@@ -203,7 +203,7 @@ cpdef bytes inner_encode_task_rsp(uint pkg_id, uint ret_code, object data):
         The complete frame, head included.
     """
     data_bytes = get_default_codec().encode(data)
-    cdef uint data_len = len(data_bytes)
+    cdef uint32_t data_len = len(data_bytes)
 
     cdef TaskResponseHead* rsp = <TaskResponseHead *> malloc(sizeof(TaskResponseHead))
     rsp.magic = INNER_MAGIC_VALUE
@@ -235,16 +235,16 @@ cdef TaskResponseHead* inner_decode_task_rsp_c(char* from_prt) nogil:
         A malloc'd head owned by the caller, or ``NULL`` on a magic mismatch,
         like :func:`inner_decode_task_req_c`.
     """
-    cdef ushort magic = (<ushort *>(from_prt))[0]
+    cdef uint16_t magic = (<uint16_t *>(from_prt))[0]
     if magic != INNER_MAGIC_VALUE:
         return NULL
 
     cdef TaskResponseHead* rsp = <TaskResponseHead *> malloc(sizeof(TaskResponseHead))
 
     rsp.magic = magic
-    rsp.package_len = (<uint *>(from_prt+2))[0]
-    rsp.pkg_id = (<uint *>(from_prt+6))[0]
-    rsp.ret_code = (<uint *>(from_prt+10))[0]
+    rsp.package_len = (<uint32_t *>(from_prt+2))[0]
+    rsp.pkg_id = (<uint32_t *>(from_prt+6))[0]
+    rsp.ret_code = (<uint32_t *>(from_prt+10))[0]
 
     return rsp
 

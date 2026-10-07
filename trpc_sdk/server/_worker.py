@@ -26,16 +26,31 @@ This module provides:
   ``separate`` workers own their process outright and do not consume one;
   :func:`current_worker` and :func:`trpc_sdk.server.send_msg_worker` still
   read it when a custom mode does.
+
+Process-tree contract. The worker the application started is the only
+supervisor in the tree, and nothing supervises it: an external supervisor
+(systemd, Kubernetes, ...) has to restart the whole tree. In return:
+
+* a child that dies makes the worker exit with status 1, not 0, so a
+  supervisor that restarts only on failure notices;
+* every child the framework forks exits when its parent does, even when the
+  parent was killed with SIGKILL: through ``PR_SET_PDEATHSIG`` on Linux,
+  and through the parent sentinel watched on the child's loop everywhere;
+* restarting a single child (``reboot_child``) is not supported in this
+  version and is treated as ``false``.
 """
 
 from __future__ import annotations
 
 import asyncio
+import multiprocessing
 import os
 import signal
 import sys
 import threading
+import time
 from functools import partial
+from multiprocessing.process import BaseProcess
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Callable
@@ -46,21 +61,23 @@ from typing import Tuple
 
 from trpc_sdk.abc import BaseServerProtocolChecker
 from trpc_sdk.abc import BaseServerTransportOption
-from trpc_sdk.common import ProcessType
+from trpc_sdk.abc import ProcessType
+from trpc_sdk.common import bind_lifetime_to_parent
 from trpc_sdk.common import execute_after_in_child
 from trpc_sdk.common import execute_before_loop_run_in_child
-from trpc_sdk.common import get_or_create_event_loop
+from trpc_sdk.common import set_current_process_var
 from trpc_sdk.config import TrpcConfig
 from trpc_sdk.ipc import PipeConnection
 from trpc_sdk.log import logger
 from trpc_sdk.plugin import init_worker_plugins
-from trpc_sdk.task import TaskStreamClientMap
 from trpc_sdk.task import register_task_conn
 from trpc_sdk.transport import WorkerMessageConnection
 from trpc_sdk.transport import WorkerTaskConnection
 from trpc_sdk.utils import TimerExecutor
-from trpc_sdk.utils import asynclib
-from trpc_sdk.utils import init_thread_pool
+from trpc_sdk.utils import get_async_lib
+from trpc_sdk.utils import io_ready_reached
+from ._constants import IO_WAIT_POLL_INTERVAL
+from ._constants import PARENT_EXIT_GRACE_SECONDS
 from ._signals import run_worker_signal_handle
 from ._types import ChildRecord
 from ._types import TaskInfo
@@ -72,6 +89,38 @@ if TYPE_CHECKING:
 
 
 _current_worker: Optional[WorkerInfo] = None
+
+
+def _raise_system_exit(signum: int, frame: Any) -> None:
+    """``signal.signal`` handler that turns SIGTERM into ``SystemExit``.
+
+    Only used before the event loop exists, when the loop's own handler
+    cannot be installed yet.
+
+    Args:
+        signum: Signal number, unused.
+        frame: Interrupted frame, unused.
+    """
+    del signum, frame
+    raise SystemExit(0)
+
+
+def _run_callbacks(owner: str, kind: str, callbacks: List[Callable[[], None]]) -> None:
+    """Run lifecycle callbacks in order, logging failures instead of raising.
+
+    One failing callback must not stop the rest, nor keep the process alive
+    (or keep it from becoming ready).
+
+    Args:
+        owner: Process name, for log messages.
+        kind: Which list this is, for log messages.
+        callbacks: Zero-argument callables to run.
+    """
+    for callback in callbacks:
+        try:
+            callback()
+        except Exception as err:  # pylint: disable=broad-except
+            logger.error("[%s] %s callback failed: %s", owner, kind, repr(err))
 
 
 def current_worker() -> Optional[WorkerInfo]:
@@ -106,8 +155,8 @@ class BaseWorker:
     call a ``target`` that was never set.
 
     :meth:`run` is that sequence, and it is deliberately fixed: the event loop
-    has to exist before plugins are initialized, plugins before the front end
-    is attached, and the front end before the loop starts turning. Subclasses
+    has to exist before plugins are initialized, plugins before the listener
+    is attached, and the listener before the loop starts turning. Subclasses
     fill in the parts that differ:
 
     * :meth:`start_worker_process` — attach the request source. The IPC pipe
@@ -122,6 +171,12 @@ class BaseWorker:
       this process runs user handlers. Infrastructure roles narrow it to the
       non-business set.
     * :meth:`_before_event_loop` — work that must happen before a loop exists.
+    * :meth:`_start_timers` — the per-process timer executor. A process that
+      runs no business code turns it off.
+    * :meth:`_stop_accepting` — close the listen sockets when shutdown starts,
+      so in-flight requests can drain while no new connection arrives.
+    * :meth:`_on_drained` — run the user worker-exit callbacks once the drain
+      is over. A process that runs no business code turns it off.
     * :meth:`_on_sigterm_received`, :meth:`_on_graceful_exit`,
       :meth:`_on_unhandled_exception` — the exit lifecycle hooks.
 
@@ -175,8 +230,8 @@ class BaseWorker:
         self.worker_id: int = 0
 
         # This worker's end of each task IPC pipe; index-aligned with
-        # ``task_name`` and ``task_records``. ``None`` for stream tasks, which
-        # connect over a Unix socket instead.
+        # ``task_name`` and ``task_records``. ``None`` for a task this process
+        # has no pipe to.
         self.task_pipe_conn: List[Optional[PipeConnection]] = []
         # Task names paired with ``task_pipe_conn``.
         self.task_name: List[str] = []
@@ -190,11 +245,34 @@ class BaseWorker:
         # OS pid -> the record that produced it, for SIGCHLD lookups.
         self._children_by_pid: Dict[int, ChildRecord] = {}
         # Whether a dead child is replaced or brings the whole worker down.
-        self.reboot_child: bool = TrpcConfig.server_config().reboot_child
+        # Always False: restarting one child is not supported yet, whatever
+        # ``server.reboot_child`` says. ``_spawn_children`` warns about it.
+        self.reboot_child: bool = False
         # Callables run on SIGTERM before the user callbacks, in registration
         # order. This is where the server puts service deregistration, so the
         # process leaves the naming service before it stops answering.
         self.exit_callbacks: List[Callable[[], None]] = []
+        # Callables run once the listen sockets are bound, in registration
+        # order. This is where the server puts naming registration, so callers
+        # are never pointed at an address nobody listens on yet.
+        self.ready_callbacks: List[Callable[[], None]] = []
+        # Callables run after the drain period, right before the process exits.
+        self.post_drain_callbacks: List[Callable[[], None]] = []
+        # Seconds in-flight requests get to finish after SIGTERM, with the
+        # listen sockets already closed. ``0`` exits at once.
+        self.drain_seconds: float = 0.0
+        # Task-ready notifications to wait for before binding any address;
+        # ``0`` means do not wait. Only set on the process that listens.
+        self.io_wait_count: int = 0
+        # True once SIGTERM handling started; a second SIGTERM exits at once
+        # and a dying child is no longer treated as a fault.
+        self._exiting: bool = False
+        # True once ``_on_drained`` ran, so a second SIGTERM during the drain
+        # does not run the user worker-exit callbacks twice.
+        self._drained: bool = False
+        # Status this process exits with. Set to 1 when it goes down because a
+        # child died or never became ready, so a supervisor sees a failure.
+        self._exit_code: int = 0
 
         # Public listen addresses as ``(host, port)``; parallel with handlers.
         self.addresses: List[Tuple[str, int]] = []
@@ -318,16 +396,17 @@ class BaseWorker:
         parent's readiness state.
 
         Pipes are all created before the first fork because a task-to-task
-        pair joins two children, so neither of them can create it. Timer
-        children are forked after the tasks; they do not share the mesh.
+        pair joins two children, so neither of them can create it.
         """
         # Local import: ``_task`` needs ``BaseWorker`` from this module, so the
         # dependency can only run one way at import time.
-        from trpc_sdk.utils import get_register_timer_process
         from ._healthy_checker import init_healthy_checker
         from ._task import TaskIpcMesh
         from ._task import build_task_infos
         from ._task import set_task_ipc_mesh
+
+        self._warn_unsupported_reboot_child()
+        self._warn_threads_before_fork()
 
         self.task_infos = build_task_infos()
         self.task_name = [task_info.name for task_info in self.task_infos]
@@ -348,11 +427,30 @@ class BaseWorker:
         for task_info in self.task_infos:
             self._spawn(task_info.name, partial(task_info.handle, task_info, self.server_engine))
 
-        # Timers used to be forked by the master engine. That path is gone, so
-        # the worker that owns this process forks them here, and they join
-        # ``children`` for restart and shutdown.
-        for timer_info in get_register_timer_process().values():
-            self._spawn(timer_info.name, partial(timer_info.timer_handle, timer_info))
+    def _warn_unsupported_reboot_child(self) -> None:
+        """Warn once that ``server.reboot_child: true`` is treated as false.
+
+        Called from :meth:`_spawn_children` rather than ``__init__``: every
+        child object is constructed in this process before it forks, and
+        warning from the constructor would repeat the message once per child.
+        """
+        if TrpcConfig.server_config().reboot_child:
+            logger.warning("[%s] server.reboot_child is not supported in this version and is treated as false: "
+                           "a child that dies takes the whole worker down, for the supervisor to restart",
+                           self.name)
+
+    def _warn_threads_before_fork(self) -> None:
+        """Warn when this process already runs other threads before forking.
+
+        Fork copies only the calling thread. A lock another thread holds at
+        that moment (logging's, for instance) stays locked forever in the
+        child. Only a warning, since a third-party import may start a thread
+        this process cannot do anything about.
+        """
+        if threading.active_count() <= 1:
+            return
+        names = [thread.name for thread in threading.enumerate() if thread is not threading.current_thread()]
+        logger.warning("[%s] forking children while other threads are running: %s", self.name, names)
 
     def _spawn(self, name: str, factory: Callable[[], Any]) -> None:
         """Fork one child and remember how to rebuild it.
@@ -449,8 +547,13 @@ class BaseWorker:
 
         ``reboot_child`` is the choice between availability and noticing: left
         off, a child that dies is treated as a fault of the whole service and
-        the worker exits so its supervisor sees it. Turned on, the child is
-        re-forked and the outage is limited to the work it was holding.
+        the worker exits with status 1 so its supervisor sees it. Turned on,
+        the child would be re-forked; that path is kept for a later version
+        and unreachable today, since ``reboot_child`` is always False.
+
+        Once shutdown has started, children exiting is expected (a supervisor
+        often signals the whole process group), so it is neither restarted
+        nor counted as a failure.
 
         Args:
             pid: OS pid reported by ``waitpid``.
@@ -460,8 +563,13 @@ class BaseWorker:
             # A child of a library, or one already handled. Not ours to judge.
             return
 
+        if self._exiting:
+            logger.info("[%s] child %s (pid %s) exited during shutdown", self.name, record.name, pid)
+            return
+
         logger.error("[%s] child %s (pid %s) exited unexpectedly", self.name, record.name, pid)
         if not self.reboot_child:
+            self._exit_code = 1
             self._handle_sigterm()
             return
         self._start_child(record)
@@ -490,12 +598,22 @@ class BaseWorker:
         For a forked role this is the first code that executes in the child,
         which is why the loop is created here and not in ``__init__``: an
         event loop cannot cross a fork. The two process-hook calls let plugins
-        repair inherited state; they dispatch on the process role and are
-        no-ops in a process that was not forked.
+        repair inherited state; they dispatch on the process role.
+
+        The role is stamped onto ``multiprocessing.current_process()`` first.
+        For a forked role that object is ``self`` and the stamp repeats what
+        ``__init__`` set; for a worker that *is* the main process it is what
+        makes ``is_worker_process()`` true, and therefore what makes the
+        ``WORKER`` child callbacks run here at all.
         """
+        if isinstance(self, BaseProcess):
+            bind_lifetime_to_parent()
+        set_current_process_var("type", self.type)
+        self._wait_until_tasks_ready()
+
         self._before_event_loop()
 
-        self.loop = asynclib.new_event_loop()
+        self.loop = get_async_lib(TrpcConfig.global_config().enable_uvloop).new_event_loop()
         asyncio.set_event_loop(self.loop)
 
         execute_after_in_child()
@@ -505,13 +623,57 @@ class BaseWorker:
 
         self._serve()
 
+    def _wait_until_tasks_ready(self) -> None:
+        """Block until tasks sent ``io_wait_count`` notifications, before any bind.
+
+        Template step of :meth:`run`, run before the event loop exists. Only
+        the process that owns the listen sockets is given a count; an rpc task
+        needs no wait of its own, because no request reaches it until the I/O
+        process listens.
+
+        Neither the SIGCHLD nor the SIGTERM handler is installed yet, so this
+        covers both itself: a child that dies (say, a task crashing while it
+        loads its model) would keep the count from ever arriving, and a
+        SIGTERM with the default action would orphan every child. Either way
+        the children are stopped before this process exits.
+
+        Raises:
+            SystemExit: SIGTERM arrived (status 0) or a child died (status 1).
+        """
+        if not self.io_wait_count:
+            return
+
+        logger.info("[%s] waiting for %d task notification(s) before listening", self.name, self.io_wait_count)
+        in_main_thread = threading.current_thread() is threading.main_thread()
+        previous = signal.signal(signal.SIGTERM, _raise_system_exit) if in_main_thread else None
+        try:
+            while not io_ready_reached(self.io_wait_count):
+                dead = [record.name for record in self.children
+                        if record.process is not None and not record.process.is_alive()]
+                if dead:
+                    logger.error("[%s] child %s exited before the tasks were ready", self.name, dead)
+                    self._exit_code = 1
+                    raise SystemExit(1)
+                time.sleep(IO_WAIT_POLL_INTERVAL)
+        except SystemExit:
+            self._stop_children()
+            sys.exit(self._exit_code)
+        finally:
+            if in_main_thread:
+                signal.signal(signal.SIGTERM, previous if previous is not None else signal.SIG_DFL)
+
     def _serve(self) -> None:
-        """Take over SIGTERM and run the loop until the process exits."""
+        """Take over SIGTERM and run the loop until the process exits.
+
+        Exits with :attr:`_exit_code` once the loop has unwound, so a worker
+        brought down by a dead child reports failure.
+        """
         try:
             if threading.current_thread() is threading.main_thread():
                 # Only the main thread may install signal handlers; a worker
                 # started from another thread just runs its loop.
                 self._register_signal_handlers()
+            self._watch_parent()
             if self.block:
                 self.loop.run_forever()
         except (SystemExit, KeyboardInterrupt):
@@ -522,6 +684,44 @@ class BaseWorker:
             self.loop.stop()
             self._stop_children()
             self._on_unhandled_exception(err)
+        if self._exit_code:
+            sys.exit(self._exit_code)
+
+    def _watch_parent(self) -> None:
+        """Shut down when the process that forked this one dies.
+
+        The portable half of the parent-death binding (``PR_SET_PDEATHSIG``
+        is the Linux half): ``multiprocessing`` gives every child a sentinel
+        fd that becomes readable once the parent is gone.
+
+        Known limit: a sibling forked later inherits the write end of this
+        child's sentinel, so this child only sees EOF once that sibling has
+        exited too. Children therefore go down one after another, not at once.
+        A no-op in a process ``multiprocessing`` did not fork.
+        """
+        if not isinstance(self, BaseProcess):
+            return
+        parent = multiprocessing.parent_process()
+        if parent is None or parent.sentinel is None:
+            return
+        self.loop.add_reader(parent.sentinel, self._on_parent_exit, parent.sentinel)
+
+    def _on_parent_exit(self, sentinel: int) -> None:
+        """Event callback: the parent died, so take the normal SIGTERM path.
+
+        A daemon timer kills the process after
+        :data:`PARENT_EXIT_GRACE_SECONDS` in case the shutdown never gets
+        there, for instance because a task is stuck inside inference.
+
+        Args:
+            sentinel: The parent sentinel fd that became readable.
+        """
+        self.loop.remove_reader(sentinel)
+        logger.error("[%s] parent process exited; shutting down", self.name)
+        killer = threading.Timer(PARENT_EXIT_GRACE_SECONDS, os._exit, args=(1,))
+        killer.daemon = True
+        killer.start()
+        self._handle_sigterm()
 
     def _supervise(self) -> None:
         """Run the loop of a worker that only watches its children.
@@ -535,22 +735,76 @@ class BaseWorker:
         self._serve()
 
     def _handle_sigterm(self) -> None:
-        """Run the exit callbacks, then leave the loop through ``SystemExit``.
+        """Start shutdown: deregister, stop accepting, drain, then exit.
 
-        ``exit_callbacks`` run first and are kept apart from
-        :meth:`_on_sigterm_received` on purpose: subclasses override that hook
-        to log their own shutdown, and shutdown work registered by the server
-        must not depend on each of them remembering to call ``super()``.
+        The sequence is:
+
+        1. ``exit_callbacks`` (service deregistration).
+        2. :meth:`_on_sigterm_received`.
+        3. :meth:`_stop_accepting`, so no new connection arrives.
+        4. After :attr:`drain_seconds`, scheduled with ``call_later`` so the
+           loop keeps writing responses meanwhile, :meth:`_exit_after_drain`:
+           ``post_drain_callbacks`` (the user server-exit callbacks), then
+           :meth:`_on_drained` (the user worker-exit callbacks), then exit.
+
+        ``exit_callbacks`` are kept apart from :meth:`_on_sigterm_received` on
+        purpose: subclasses override that hook to log their own shutdown, and
+        shutdown work registered by the server must not depend on each of
+        them remembering to call ``super()``.
+
+        A second call while draining skips the rest of the drain and exits.
         """
-        for callback in self.exit_callbacks:
-            try:
-                callback()
-            except Exception as err:  # pylint: disable=broad-except
-                # One failing callback must not stop the rest, nor keep the
-                # process alive.
-                logger.error("[%s] exit callback failed: %s", self.name, repr(err))
+        if self._exiting:
+            logger.warning("[%s] shutdown requested again while draining; exiting now", self.name)
+            self._exit_after_drain()
+            return
+        self._exiting = True
+
+        _run_callbacks(self.name, "exit", self.exit_callbacks)
         self._on_sigterm_received()
+        try:
+            self._stop_accepting()
+        except Exception as err:  # pylint: disable=broad-except
+            # The loop would swallow this and the exit below would never be
+            # scheduled, leaving the process up after SIGTERM.
+            logger.error("[%s] failed to stop accepting: %s", self.name, repr(err))
+
+        if self.drain_seconds > 0 and self.loop is not None and self.loop.is_running():
+            logger.warning("[%s] draining in-flight requests for %.3f s", self.name, self.drain_seconds)
+            self.loop.call_later(self.drain_seconds, self._exit_after_drain)
+            return
+        self._exit_after_drain()
+
+    def _exit_after_drain(self) -> None:
+        """Run ``post_drain_callbacks``, then :meth:`_on_drained`, then leave the loop through ``SystemExit``.
+
+        Each runs at most once, even when a second SIGTERM cuts the drain
+        short and calls this again.
+        """
+        _run_callbacks(self.name, "post-drain", self.post_drain_callbacks)
+        self.post_drain_callbacks = []
+        if not self._drained:
+            self._drained = True
+            try:
+                self._on_drained()
+            except Exception as err:  # pylint: disable=broad-except
+                logger.error("[%s] drained hook failed: %s", self.name, repr(err))
         sys.exit()
+
+    def _on_drained(self) -> None:
+        """Hook: run the user worker-exit callbacks, after the server-exit ones.
+
+        Runs once the drain period is over, so the callbacks may release what
+        in-flight requests were using. Processes that run no handlers override
+        it with a no-op.
+        """
+        run_worker_signal_handle()
+
+    def _stop_accepting(self) -> None:
+        """Hook: close the listen sockets; connections already open stay up.
+
+        No-op here. Workers that listen override it.
+        """
 
     def _on_graceful_exit(self) -> None:
         """Hook: release resources after the loop stopped on a normal exit."""
@@ -572,7 +826,7 @@ class BaseWorker:
                                 pipe_conn: PipeConnection,
                                 task_info: TaskInfo,
                                 loop: Optional[asyncio.AbstractEventLoop] = None) -> None:
-        """Attach this worker's end of a non-stream task IPC pipe to a loop.
+        """Attach this worker's end of a task IPC pipe to a loop.
 
         Drops the unused socketpair end inherited across fork, wraps the
         remaining fd in
@@ -601,23 +855,6 @@ class BaseWorker:
         (transport, _) = await coros
         register_task_conn(task_info.name, transport)
 
-    def _create_unix_conn(self, task_info: TaskInfo) -> None:
-        """Point the stream-task client at the Unix socket the task will bind.
-
-        Stream tasks do not share a socketpair. After fork the task listens
-        on ``.__{name}`` and this worker's client connects there. The client
-        is stored in :class:`TaskStreamClientMap` so handlers can look it
-        up by name.
-
-        Args:
-            task_info: Stream task whose ``task_stream_handler.client`` is
-                configured here. The matching ``task_pipe_conn`` entry is
-                ``None``.
-        """
-        task_stream_client = task_info.task_stream_handler.client
-        task_stream_client.set_unix_path(f".__{task_info.name}")
-        TaskStreamClientMap.register_task_stream_client(task_info.name, task_stream_client)
-
     def _before_event_loop(self) -> None:
         """Start tracemalloc before the event loop (or anything else) allocates.
 
@@ -634,13 +871,8 @@ class BaseWorker:
         This process runs user handlers, so filters, naming, metrics and the
         rest must be fully set up. Infrastructure roles that never execute
         user code narrow this to ``init_task_plugins()``.
-
-        The thread pool is not a plugin, but it is built here for the same
-        reason: it must be created after fork, in the process that will
-        ``submit`` blocking work from a handler.
         """
         init_worker_plugins()
-        init_thread_pool()
 
     def _prepare_to_serve(self) -> None:
         """Wire task IPC, the message pipe, the request source, then timers.
@@ -650,24 +882,58 @@ class BaseWorker:
 
         1. Publish this process as ``current_worker()`` so
            ``send_msg_worker`` can tag messages with this worker's id.
-        2. Connect to each task (pipe, or Unix socket for stream tasks).
-        3. If ``on_worker_message`` is set, listen on ``read_message_pipe``.
-        4. :meth:`start_worker_process` — subclass attaches to the
+        2. Drop inherited pipe ends that belong to other processes, and
+           attach (or drop) the task heartbeat pipes.
+        3. Connect to each task over its IPC pipe.
+        4. If ``on_worker_message`` is set, listen on ``read_message_pipe``.
+        5. :meth:`start_worker_process` — subclass attaches to the
            dispatcher pipe or binds listen sockets.
-        5. Start the timer executor.
+        6. ``ready_callbacks`` — the addresses are reachable now, so this is
+           the earliest moment naming registration is truthful.
+        7. :meth:`_start_timers`.
 
         Uses ``loop.run_until_complete`` for connection setup, so the loop
         must already exist.
         """
         self._publish_current_worker()
-        self.timer = TimerExecutor(loop=self.loop, name=f"worker:{self.worker_id}")
 
         self._bind_task_mesh()
         self._close_foreign_pipes()
+        self._attach_heartbeats()
         self._connect_tasks()
         self._listen_for_worker_messages()
 
         self.start_worker_process()
+        _run_callbacks(self.name, "ready", self.ready_callbacks)
+        self._start_timers()
+
+    def _attach_heartbeats(self) -> None:
+        """Monitor the tasks this process forked, or drop pipes it only inherited.
+
+        The process that forked the tasks owns the monitor end of every
+        heartbeat pipe and watches them on its own loop, now that the last
+        fork is behind it. Any other child of that process (an rpc task, say)
+        inherited both ends of every pipe and closes them, so a dead task's
+        pipe actually reaches EOF. Task processes do not come through here:
+        their sender is started from a ``TASK`` child callback.
+        """
+        # Local import: the heartbeat module registers a plugin at import time.
+        from ._healthy_checker import close_heartbeat_pipes
+        from ._healthy_checker import start_heartbeat_monitor
+
+        if self.children:
+            start_heartbeat_monitor(self.loop)
+        else:
+            close_heartbeat_pipes()
+
+    def _start_timers(self) -> None:
+        """Start this process's timer executor, labelled ``worker:<id>``.
+
+        Template step, last in :meth:`_prepare_to_serve`. A process that runs
+        no business code overrides it with a no-op, so that a timer without a
+        target name runs once per handler process and not once more there.
+        """
+        self.timer = TimerExecutor(loop=self.loop, name=f"worker:{self.worker_id}")
         self.timer.run()
 
     def _publish_current_worker(self) -> None:
@@ -716,9 +982,7 @@ class BaseWorker:
             pipe_conns = self.task_pipe_conn
         for i, pipe_conn in enumerate(pipe_conns):
             task_info: TaskInfo = records[i]
-            if task_info.task_stream_handler:
-                self._create_unix_conn(task_info)
-            elif pipe_conn is not None:
+            if pipe_conn is not None:
                 await self._create_pipe_conn(task_info=task_info, pipe_conn=pipe_conn, loop=loop)
 
     def _listen_for_worker_messages(self) -> None:
@@ -749,13 +1013,12 @@ class BaseWorker:
         self._watch_children()
 
     def _on_sigterm_received(self) -> None:
-        """Run user worker-exit callbacks, then log the exit.
+        """Log the exit.
 
-        Invoked on the event-loop signal path, so callbacks must not block.
-        ``sys.exit()`` is issued by the base :meth:`_handle_sigterm` after
-        this returns.
+        Invoked on the event-loop signal path. The base :meth:`_handle_sigterm`
+        stops accepting after this returns; the user worker-exit callbacks run
+        later, from :meth:`_on_drained`, once the drain period is over.
         """
-        run_worker_signal_handle()
         logger.error("[worker] worker exit")
 
     def start_worker_process(self) -> None:

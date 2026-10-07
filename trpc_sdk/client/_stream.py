@@ -7,9 +7,6 @@
 """Client-side stream implementations.
 
 ``Stream`` is the public ``trpc_sdk.stream`` protocol transport.
-``TaskClientStream`` is the inner worker-to-task IPC stream: it skips
-node selection and installs ``TaskStreamClientCodec`` /
-``ClientTaskStreamTransport`` when the caller left those options unset.
 
 Build instances through :func:`trpc_sdk.client.create_stream`. ``opts`` stays
 ``None`` until :meth:`Stream.start` injects the per-call transport,
@@ -22,11 +19,8 @@ from typing import Optional
 
 from trpc_sdk.abc import BaseClientStreamConnection
 from trpc_sdk.abc import TrpcContext
-from trpc_sdk.codec import TaskStreamClientCodec
-from trpc_sdk.codec import TaskStreamClientParser
 from trpc_sdk.compressor import compress
 from trpc_sdk.serialization import serialize
-from trpc_sdk.transport import ClientTaskStreamTransport
 from trpc_sdk.utils import now_ms
 from ._client import select_node
 from ._client import set_timeout
@@ -52,7 +46,7 @@ class Stream(BaseClientStreamConnection):
         Returns:
             The decompressed-and-unframed body bytes from the codec.
         """
-        msg = ctx.get_client_message()
+        msg = ctx.get_message()
         begin = now_ms()
         # Reset so a reused context cannot keep a previous call's deadline.
         ctx.deadline = 0
@@ -73,7 +67,7 @@ class Stream(BaseClientStreamConnection):
             ctx: Client context whose message holds encode state.
             req: Business request object, or ``None`` for a control frame.
         """
-        msg = ctx.get_client_message()
+        msg = ctx.get_message()
 
         serialization_type = msg.serialization_type
         compress_type = msg.compress_type
@@ -114,7 +108,7 @@ class Stream(BaseClientStreamConnection):
             The same ``client_options``, with ``node`` cost filled in when
             the caller attached a selector node recorder.
         """
-        msg = ctx.get_client_message()
+        msg = ctx.get_message()
 
         begin = now_ms()
         set_timeout(ctx, msg, client_options, begin)
@@ -130,44 +124,4 @@ class Stream(BaseClientStreamConnection):
             client_options.node.service_name = node.service_name
             client_options.node.cost_time = cost
 
-        return client_options
-
-
-class TaskClientStream(Stream):
-    """Inner worker-to-task IPC stream.
-
-    Unlike :class:`Stream`, this path does not select a naming node. It
-    writes serialization / compress types onto the message, then installs
-    ``TaskStreamClientCodec`` and ``ClientTaskStreamTransport`` when the
-    caller left those options unset.
-    """
-
-    async def start(self, ctx: TrpcContext, client_options: Options) -> Options:
-        """Open the inner task-stream transport without node selection.
-
-        Args:
-            ctx: Client context whose message receives serialization types.
-            client_options: Per-call options; codec and transport are
-                filled in when missing.
-
-        Returns:
-            The same ``client_options`` stored on ``self.opts``.
-        """
-        msg = ctx.get_client_message()
-        if client_options.serialization_type >= 0:
-            msg.set_serialization_type(client_options.serialization_type)
-        if client_options.compress_type >= 0:
-            msg.set_compress_type(client_options.compress_type)
-
-        begin = now_ms()
-        set_timeout(ctx, msg, client_options, begin)
-        if client_options.codec is None:
-            client_options.codec = TaskStreamClientCodec()
-            client_options.call_options.set_codec(client_options.codec)
-            client_options.call_options.set_checker(TaskStreamClientParser())
-        client_options.transport = client_options.transport or ClientTaskStreamTransport()
-
-        self.opts = client_options
-        self.opts.call_options.is_task_stream = True
-        await self.opts.transport.start_stream(ctx, client_options.call_options)
         return client_options

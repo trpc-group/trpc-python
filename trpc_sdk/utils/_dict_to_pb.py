@@ -4,12 +4,13 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
-"""Fill a protobuf message from a dict (form / query-string path).
+# Adapted from protobuf-to-dict by Ben Hodgson
+# (https://github.com/benhodgson/protobuf-to-dict, via
+# https://github.com/kaporzhu/protobuf-to-dict). That work is dedicated
+# to the public domain under the Unlicense. This file keeps only the
+# dict-to-protobuf direction.
 
-Adapted from https://github.com/kaporzhu/protobuf-to-dict. Only the
-dict-to-protobuf direction is kept: nested messages are skipped, and
-repeated fields only accept scalar items. Extension fields travel
-under :data:`EXTENSION_CONTAINER`.
+"""Fill a protobuf message from a dict (form / query-string path).
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ import six
 from google.protobuf.descriptor import FieldDescriptor
 from google.protobuf.message import Message as PbMessage
 
-from ._str_utils import strtobool
+from ._str_utils import str2bool
 
 # Sentinel dict key under which extension field numbers travel.
 EXTENSION_CONTAINER = "___X"
@@ -44,7 +45,7 @@ TYPE_CALLABLE_MAP = {
     FieldDescriptor.TYPE_FIXED64: int if six.PY3 else six.integer_types[1],
     FieldDescriptor.TYPE_SFIXED32: int,
     FieldDescriptor.TYPE_SFIXED64: int if six.PY3 else six.integer_types[1],
-    FieldDescriptor.TYPE_BOOL: strtobool,
+    FieldDescriptor.TYPE_BOOL: str2bool,
     FieldDescriptor.TYPE_STRING: six.text_type,
     FieldDescriptor.TYPE_BYTES: six.binary_type,
     FieldDescriptor.TYPE_ENUM: int,

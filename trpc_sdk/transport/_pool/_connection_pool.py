@@ -58,14 +58,12 @@ class ConnectionPool(BasePool):
     ``max_idle`` sizes the idle :class:`asyncio.Queue`. ``max_active``
     caps how many conns may exist; when the cap is hit, ``wait`` either
     blocks on that queue or raises :class:`ClientPoolLimitError`.
-    Task-stream pools skip idle/lifetime eviction so the worker-to-task
-    Unix conn stays up.
 
     Args:
-        dial: Coroutine that opens a
-            :class:`~trpc_sdk.transport._pool.Connection`.
+        dial: Coroutine that opens a stream and returns its
+            ``(reader, writer)`` pair.
         trans_opt: Client transport options, including the remote
-            address and the ``is_task_stream`` flag.
+            address.
         options: Idle / active / lifetime tunables. Must not be
             ``None`` at runtime; callers pass a :class:`ConnPoolOptions`.
         loop: Event loop bound to the idle queue, or ``None`` to pick
@@ -86,7 +84,6 @@ class ConnectionPool(BasePool):
         self._active_conn_num = 0
         self._active_conns = set()
         self._idle_conns = create_object_with_loop(asyncio.Queue, self._pool_options.max_idle, loop=self.loop)
-        self._is_task_stream = getattr(trans_opt, "is_task_stream", False)
 
     @property
     def active_conn_num(self) -> int:
@@ -130,8 +127,13 @@ class ConnectionPool(BasePool):
                 raise ClientPoolLimitError("ErrPoolLimit")
             return await self._idle_conns.get()
 
-        conn = await self._dial(options=self._trans_opt, timeout=timeout, loop=self.loop)
-        pool_conn = PooledConnection(conn=conn, pool=self, address=self.address, is_short=False)
+        reader, writer = await self._dial(options=self._trans_opt, timeout=timeout, loop=self.loop)
+        pool_conn = PooledConnection(reader=reader,
+                                     writer=writer,
+                                     loop=self.loop,
+                                     pool=self,
+                                     address=self.address,
+                                     is_short=False)
         self._active_conn_num += 1
         self._active_conns.add(pool_conn)
         return pool_conn
@@ -203,10 +205,8 @@ class ConnectionPool(BasePool):
     def _checker(self, pool_conn: PooledConnection) -> bool:
         """Return True if ``pool_conn`` must not be handed out again.
 
-        Remote errors always fail. Task-stream conns skip idle and
-        lifetime checks so the inner Unix socket is kept. Otherwise
-        idle_timeout is measured from ``begin_time`` and
-        max_conn_lifetime from ``created_time``.
+        Remote errors always fail. Otherwise idle_timeout is measured
+        from ``begin_time`` and max_conn_lifetime from ``created_time``.
 
         Args:
             pool_conn: Idle conn being considered for reuse.
@@ -216,9 +216,6 @@ class ConnectionPool(BasePool):
         """
         if pool_conn.check_remote_error():
             return True
-
-        if self._is_task_stream:
-            return False
 
         now = time.time()
         idle_timeout = self._pool_options.idle_timeout
@@ -245,7 +242,7 @@ class ConnectionPool(BasePool):
             for _ in range(self._idle_conns.qsize()):
                 pool_conn: PooledConnection = self._idle_conns.get_nowait()
                 if self._checker(pool_conn):
-                    logger.debug(f" pool conn remote error, is task stream: {self._is_task_stream}")
+                    logger.debug("pool conn remote error")
                     pool_conn.close(True)
                 else:
                     self._idle_conns.put_nowait(pool_conn)
