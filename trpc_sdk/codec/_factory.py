@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 from typing import Optional
 
 from trpc_sdk._inner import trpc_pb2
-from trpc_sdk.abc import BaseClientProtocolChecker
+from trpc_sdk.abc import BaseClientProtocolParser
 from trpc_sdk.abc import BasePluginFactory
 from trpc_sdk.abc import PluginInitPos
 from trpc_sdk.abc import PluginType
@@ -74,7 +74,7 @@ def get_server_checker(name: str) -> Optional[TrpcServerCheckerFactory]:
 
 
 @register_plugin(PluginType.CLIENT_CHECKER, "trpc", init_pos=PluginInitPos.WORKER)
-class TrpcClientParser(BaseClientProtocolChecker):
+class TrpcClientParser(BaseClientProtocolParser):
     """Read one complete tRPC frame off a pooled client connection."""
 
     async def read_frame(self, conn: PooledConnection) -> bytes:
@@ -105,7 +105,7 @@ class TrpcClientParser(BaseClientProtocolChecker):
         return frame_head_buff + left_pkg
 
 
-def get_client_checker(name: str) -> Optional[BaseClientProtocolChecker]:
+def get_client_checker(name: str) -> Optional[BaseClientProtocolParser]:
     """Return the client checker registered as ``name``.
 
     Args:

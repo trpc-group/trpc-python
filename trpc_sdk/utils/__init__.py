@@ -91,6 +91,9 @@ from ._network import set_tcp_keep_alive
 from ._network import set_tcp_no_delay
 from ._network import unix_path_valid
 from ._network import unlink_unix_socket_file
+from ._network import create_new_socket
+from ._network import create_inet_socket
+from ._network import create_unix_socket
 from ._process_sync import REGISTER_STATUE
 from ._process_sync import get_register_status
 from ._process_sync import inc_io_wait_count
@@ -116,6 +119,10 @@ from ._timer import TimerType
 from ._timer import register_timer_task
 from ._types import IpType
 from ._types import PortType
+from .ipc import PipeConnection
+from .ipc import PipeEnd
+from .ipc import PipeKind
+from .ipc import create_pipe
 
 __all__ = [
     "IpType",
@@ -191,4 +198,8 @@ __all__ = [
     "pause_heartbeat",
     "resume_heartbeat",
     "should_heartbeat",
-]
+    "PipeConnection",
+    "PipeEnd",
+    "PipeKind",
+    "create_pipe",
+  ]

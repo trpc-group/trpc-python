@@ -28,8 +28,8 @@ from typing import Optional
 from typing import Tuple
 from typing import Type
 
-from trpc_sdk.ipc import PipeConnection
 from trpc_sdk.transport import encode_worker_msg_req
+from trpc_sdk.utils import PipeConnection
 from ._loop_thread import LoopThread
 
 

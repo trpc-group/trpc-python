@@ -21,7 +21,7 @@ class _Context:
         self.deadline = 0
         self.timeout = 0
 
-    def get_client_message(self):
+    def get_message(self):
         return self.message
 
 

@@ -14,10 +14,10 @@ from __future__ import annotations
 
 from typing import List
 
-from trpc_sdk.abc import BaseServerProtocolChecker
+from trpc_sdk.abc import BaseServerProtocolParser
 
 
-class TrpcServerProtocolChecker(BaseServerProtocolChecker):
+class TrpcServerProtocolChecker(BaseServerProtocolParser):
     """Split a TCP stream into complete tRPC frames.
 
     A frame is 16-byte head plus ``package_len - 16`` more bytes.

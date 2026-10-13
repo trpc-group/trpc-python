@@ -6,7 +6,7 @@
 
 # cython: language_level=3, boundscheck=False, wraparound=False
 
-from ._message cimport TrpcMessage
+from ._context cimport TrpcContext
 
 
 # Private C-level codec root. Framework Cython codecs inherit it through
@@ -15,13 +15,13 @@ from ._message cimport TrpcMessage
 # body=None, a Python ``decode`` override may return a coroutine, and
 # overriding cpdef signatures must match exactly.
 cdef class _Codec:
-    cpdef object encode(self, TrpcMessage message, object body)
-    cpdef object decode(self, TrpcMessage message, object buffer)
-    cpdef object encode_stream(self, TrpcMessage message, object body)
-    cpdef object decode_stream(self, TrpcMessage message, object buffer)
+    cpdef object encode_data(self, TrpcContext context, object body)
+    cpdef object decode_data(self, TrpcContext context, object buffer)
+    cpdef object encode_stream(self, TrpcContext context, object body)
+    cpdef object decode_stream(self, TrpcContext context, object buffer)
 
 
-cdef class BaseServerProtocolChecker:
+cdef class BaseServerProtocolParser:
     cdef:
         bytearray _buffer  # Mutable receive buffer retained across feed calls.
 

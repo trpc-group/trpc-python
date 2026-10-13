@@ -18,9 +18,9 @@ from typing import List
 from typing import Optional
 from typing import Tuple
 
-from trpc_sdk.abc import BaseServerProtocolChecker
+from trpc_sdk.abc import BaseServerProtocolParser
 from trpc_sdk.abc import BaseServerTransportOption
-from trpc_sdk.ipc import PipeConnection
+from trpc_sdk.utils import PipeConnection
 
 
 @dataclass
@@ -59,7 +59,7 @@ class ProcessInfo:
     networks: List[str] = field(default_factory=list)
     # Protocol checkers used to inspect inbound client connections. ``None``
     # where no checker plugin is registered for the service protocol.
-    checkers: List[Optional[BaseServerProtocolChecker]] = field(default_factory=list)
+    checkers: List[Optional[BaseServerProtocolParser]] = field(default_factory=list)
     # Request handlers for each listen address.
     handlers: List[Callable[..., Any]] = field(default_factory=list)
     # Idle/request timeout (ms) for each listen address.
@@ -121,7 +121,7 @@ class ProcessInfo:
         """
         self.networks.append(network)
 
-    def add_checker(self, checker: Optional[BaseServerProtocolChecker]) -> None:
+    def add_checker(self, checker: Optional[BaseServerProtocolParser]) -> None:
         """Append a protocol checker for the latest listen address.
 
         Args:

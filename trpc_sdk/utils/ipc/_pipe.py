@@ -22,7 +22,6 @@ import socket
 from typing import Optional
 from typing import Tuple
 
-from trpc_sdk.log import logger
 from ._constants import PipeEnd
 from ._constants import PipeKind
 
@@ -95,6 +94,7 @@ class PipeConnection:
         try:
             self.process_socket.sendall(data)
         except BlockingIOError:
+            from trpc_sdk.log import logger
             logger.warning("send data to pipe failed: %s", data)
 
     def recv(self, length: int) -> Optional[bytes]:
@@ -130,6 +130,7 @@ class PipeConnection:
             elif self.process_type == PipeEnd.RIGHT:
                 self.socket_pair[0].close()
         except Exception as err:  # pylint: disable=broad-except
+            from trpc_sdk.log import logger
             logger.warning("close extra pipe conn failed: %s", err)
 
     def close(self) -> None:

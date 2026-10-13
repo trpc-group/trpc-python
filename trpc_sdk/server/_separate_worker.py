@@ -63,10 +63,6 @@ from typing import Tuple
 from aiohttp import web
 
 from trpc_sdk.abc import ProcessType
-from trpc_sdk.ipc import PipeConnection
-from trpc_sdk.ipc import PipeEnd
-from trpc_sdk.ipc import PipeKind
-from trpc_sdk.ipc import create_pipe
 from trpc_sdk.log import logger
 from trpc_sdk.plugin import init_task_plugins
 from trpc_sdk.telemetry import report_attr
@@ -76,6 +72,10 @@ from trpc_sdk.transport import DispatcherRpczConnection
 from trpc_sdk.transport import DispatcherWorkerConnection
 from trpc_sdk.transport import WorkerDispatcherConnection
 from trpc_sdk.transport import create_server_socket
+from trpc_sdk.utils import PipeConnection
+from trpc_sdk.utils import PipeEnd
+from trpc_sdk.utils import PipeKind
+from trpc_sdk.utils import create_pipe
 from ._constants import LISTEN_BACKLOG
 from ._constants import RPC_TASK_PRODUCER_PREFIX
 from ._constants import AddressKind

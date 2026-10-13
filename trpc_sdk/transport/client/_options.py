@@ -19,7 +19,7 @@ from socket import socket
 from typing import Optional
 
 from trpc_sdk.abc import AddrType
-from trpc_sdk.abc import BaseClientProtocolChecker
+from trpc_sdk.abc import BaseClientProtocolParser
 from trpc_sdk.abc import BaseClientTransportOption
 from trpc_sdk.abc import BaseCodec
 from trpc_sdk.codec import TrpcClientParser
@@ -104,7 +104,7 @@ class RoundTripOptions(BaseClientTransportOption):
         """
         self.pool_opts = pool_opts
 
-    def set_checker(self, checker: Optional[BaseClientProtocolChecker]) -> None:
+    def set_checker(self, checker: Optional[BaseClientProtocolParser]) -> None:
         """Install the protocol frame checker used to split the response.
 
         Args:

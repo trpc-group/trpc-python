@@ -12,10 +12,9 @@ from typing import Any
 # Imported from the submodules rather than the ``trpc_sdk.abc`` package so
 # this module can be pulled in while that package's ``__init__`` is still
 # executing. ``_message_builder`` does not import ``_codec`` back.
-from trpc_sdk.abc._plugin import BasePlugin
+from trpc_sdk.abc import BasePlugin
 
-from ._message cimport TrpcMessage
-from ._message_builder cimport get_message
+from ._context cimport TrpcContext
 
 
 cdef class _Codec:
@@ -33,7 +32,7 @@ cdef class _Codec:
     :class:`BaseCodec` instead.
     """
 
-    cpdef object encode(self, TrpcMessage message, object body):
+    cpdef object encode_data(self, TrpcContext context, object body):
         """Encode a body and a message into a transport frame.
 
         Args:
@@ -49,7 +48,7 @@ cdef class _Codec:
         """
         raise NotImplementedError("BaseCodec.encode is not implemented")
 
-    cpdef object decode(self, TrpcMessage message, object buffer):
+    cpdef object decode_data(self, TrpcContext context, object buffer):
         """Decode a complete transport frame into its body.
 
         Python subclasses may override this with a plain function or a
@@ -69,7 +68,7 @@ cdef class _Codec:
         """
         raise NotImplementedError("BaseCodec.decode is not implemented")
 
-    cpdef object encode_stream(self, TrpcMessage message, object body):
+    cpdef object encode_stream(self, TrpcContext context, object body):
         """Encode one stream frame selected by ``frame_head.frame_state``.
 
         Args:
@@ -86,7 +85,7 @@ cdef class _Codec:
         """
         raise NotImplementedError("BaseCodec.encode_stream is not implemented")
 
-    cpdef object decode_stream(self, TrpcMessage message, object buffer):
+    cpdef object decode_stream(self, TrpcContext context, object buffer):
         """Decode one stream frame selected by ``frame_head.frame_state``.
 
         Args:
@@ -130,40 +129,7 @@ class BaseCodec(_Codec, BasePlugin):
         # plugin registry reads ``.name``.
         BasePlugin.__init__(self)
 
-    def encode_data(self, context, body):
-        """Encode a body using the message the context owns.
-
-        Args:
-            context: :class:`TrpcContext` carrying the message to encode.
-            body: Serialized request or response body, or ``None`` for
-                stream INIT / CLOSE / FEEDBACK frames.
-
-        Returns:
-            Whatever :meth:`encode` returns, normally a complete frame.
-        """
-        return self.encode(get_message(context), body)
-
-    def decode_data(self, context, buffer):
-        """Decode a frame using the message the context owns.
-
-        Deliberately not ``async``: the return value of :meth:`decode` is
-        passed straight through, so an ``async`` subclass hook still lets
-        the caller ``await`` this. Wrapping it in a coroutine here would
-        make that ``await`` yield the inner coroutine object instead.
-
-        Args:
-            context: :class:`TrpcContext` whose message receives decoded
-                metadata.
-            buffer: Complete transport frame bytes.
-
-        Returns:
-            Whatever :meth:`decode` returns: the decoded body, or a
-            coroutine when the subclass hook is ``async``.
-        """
-        return self.decode(get_message(context), buffer)
-
-
-cdef class BaseServerProtocolChecker:
+cdef class BaseServerProtocolParser:
     """Maintain a reusable byte buffer for incremental frame parsing.
 
     Subclasses implement ``read`` and may access ``_buffer`` directly from
@@ -179,14 +145,14 @@ cdef class BaseServerProtocolChecker:
 
     cpdef list read(self):
         """Return every complete frame currently buffered."""
-        raise NotImplementedError("BaseServerProtocolChecker.read is not implemented")
+        raise NotImplementedError("BaseServerProtocolParser.read is not implemented")
 
     cpdef void reset(self) except *:
         """Reset the parser."""
         self._buffer.clear()
 
 
-class BaseClientProtocolChecker(BasePlugin):
+class BaseClientProtocolParser(BasePlugin):
     """Define asynchronous client-side frame reading."""
 
     @abstractmethod

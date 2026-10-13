@@ -42,7 +42,7 @@ cdef uint16_t TRPC_MAGIC_VALUE = 2352
 cdef uint32_t FRAME_HEAD_LEN = 16
 
 
-cdef class TrpcServerProtocolChecker(BaseServerProtocolChecker):
+cdef class TrpcServerProtocolChecker(BaseServerProtocolParser):
     """Split a TCP stream into complete tRPC frames.
 
     A frame is 16-byte head plus ``package_len - 16`` more bytes.

@@ -24,8 +24,10 @@ from contextlib import closing
 
 import netifaces
 
+from typing import Tuple
+
 from trpc_sdk.common import TransportSocket
-from trpc_sdk.log import logger
+
 from ._constants import TcpState
 from ._constants import UNIX_TYPE
 from ._types import IpType
@@ -100,6 +102,7 @@ def is_ipv4(ip: IpType) -> bool:
     try:
         return ipaddress.ip_address(ip).version == 4
     except ValueError:
+        from trpc_sdk.log import logger
         logger.error(f"{ip} is not valid addr")
         return False
 
@@ -118,6 +121,7 @@ def is_ipv6(ip: IpType) -> bool:
     try:
         return ipaddress.ip_address(ip).version == 6
     except ValueError:
+        from trpc_sdk.log import logger
         logger.error(f"{ip} is not valid addr")
         return False
 
@@ -163,6 +167,7 @@ def is_tcp_port_available(ip: IpType, port: PortType) -> bool:
         True when the port is in range and not occupied.
     """
     if not is_port_valid(port):
+        from trpc_sdk.log import logger
         logger.error(f"tcp port valid check failed, port:{port} is invalid")
         return False
 
@@ -183,6 +188,7 @@ def is_udp_port_available(ip: IpType, port: PortType) -> bool:
         True when the port is in range and bind succeeds.
     """
     if not is_port_valid(port):
+        from trpc_sdk.log import logger
         logger.error(f"udp port valid check failed, port:{port} is invalid")
         return False
 
@@ -204,6 +210,7 @@ def _probe_port_available(ip: IpType, port: PortType, is_udp: bool) -> bool:
     Returns:
         True when the probe concludes the port is available.
     """
+    from trpc_sdk.log import logger
     protocol = "udp" if is_udp else "tcp"
     socket_tmp = None
     try:
@@ -239,6 +246,7 @@ def unix_path_valid(unix_path: str) -> bool:
     """
     is_unlink = unlink_unix_socket_file(unix_path)
     if not is_unlink:
+        from trpc_sdk.log import logger
         logger.error(f"unix path valid check failed, {unix_path} has existed")
         return False
     return True
@@ -305,6 +313,7 @@ def get_ip_with_nic(nic: str) -> str:
 
         return nic_ip
     except Exception as err:  # pylint: disable=broad-except
+        from trpc_sdk.log import logger
         logger.error(f"parse nic err: {err}")
         return ""
 
@@ -438,6 +447,7 @@ def close_socket(sock) -> None:
     Args:
         sock: Socket or transport-socket wrapper.
     """
+    from trpc_sdk.log import logger
     if hasattr(sock, 'close'):
         try:
             sock.close()
@@ -450,3 +460,80 @@ def close_socket(sock) -> None:
         return
 
     logger.error(f"sock is {sock} not close method")
+
+
+DEFAULT_BACKLOG = 1500
+
+
+def create_new_socket(address: Tuple[str, int],
+                      socket_type: str,
+                      reuse_port: bool = False,
+                      stream: bool = True,
+                      backlog: int = DEFAULT_BACKLOG) -> socket.socket:
+    """
+    Create a new socket for listening.
+    
+    Args:
+        address: Listen address.
+        socket_type: Socket family label such as ``net`` or ``unix``.
+        reuse_port: Whether to open reuse port.
+        stream: Whether to create a TCP socket.
+        backlog: The maximum number of connections that can be queued.
+    Returns:
+        A new socket. The caller owns close.
+    """
+    if is_unix_socket(socket_type):
+        return create_unix_socket(address, backlog)
+    return create_inet_socket(address, reuse_port, stream, backlog)
+
+
+def create_inet_socket(address: Tuple[str, int], reuse_port: bool = False, stream: bool = True, backlog: int = DEFAULT_BACKLOG) -> socket.socket:
+    """
+    Create a new INET socket for listening.
+    Args:
+        address: Listen address.
+        reuse_port: Whether to open reuse port.
+        stream: Whether to create a TCP socket.
+        backlog: The maximum number of connections that can be queued.
+    Returns:
+        A new socket. The caller owns close.
+    """
+    sock = None
+    stream_option = socket.SOCK_STREAM if stream else socket.SOCK_DGRAM
+    if is_ipv4(address[0]):
+        sock = socket.socket(socket.AF_INET, stream_option)
+    elif is_ipv6(address[0]):
+        sock = socket.socket(socket.AF_INET6, stream_option)
+    if stream:
+        sock.setblocking(False)
+        set_tcp_no_delay(sock)
+        set_no_close_wait(sock)
+        set_tcp_keep_alive(sock)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if reuse_port:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+    sock.bind(address)
+    if stream:
+        sock.listen(backlog)
+    sock.setblocking(False)
+    return sock
+
+
+def create_unix_socket(address: Tuple[str, int], backlog: int = DEFAULT_BACKLOG) -> socket.socket:
+    """
+    Create a UNIX socket for listening.
+    
+    Args:
+        address: Listen address.
+        backlog: The maximum number of connections that can be queued.
+    Returns:
+        A new socket. The caller owns close.
+    """
+    if os.path.exists(address[0]):
+        unlink_unix_socket_file(address[0])
+    stream_option = socket.SOCK_STREAM
+    sock = socket.socket(socket.AF_UNIX, stream_option)
+    sock.bind(address[0])
+    sock.listen(backlog)
+    sock.setblocking(False)
+    return sock

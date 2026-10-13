@@ -34,10 +34,6 @@ from typing import List
 from typing import Optional
 
 from trpc_sdk.abc import ProcessType
-from trpc_sdk.ipc import PipeConnection
-from trpc_sdk.ipc import PipeEnd
-from trpc_sdk.ipc import PipeKind
-from trpc_sdk.ipc import create_pipe
 from trpc_sdk.log import logger
 from trpc_sdk.plugin import get_registered_tasks
 from trpc_sdk.plugin import init_task_plugins
@@ -48,6 +44,10 @@ from trpc_sdk.task import task_init
 from trpc_sdk.transport import TaskWorkerConnection
 from trpc_sdk.utils import pause_heartbeat as pause_registry_heartbeat
 from trpc_sdk.utils import resume_heartbeat
+from trpc_sdk.utils import PipeConnection
+from trpc_sdk.utils import PipeEnd
+from trpc_sdk.utils import PipeKind
+from trpc_sdk.utils import create_pipe
 from ._constants import WORKER_PRODUCER_PREFIX
 from ._types import TaskInfo
 from ._worker import BaseWorker

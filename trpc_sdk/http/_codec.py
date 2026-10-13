@@ -29,9 +29,9 @@ from aiohttp.web_request import Request as HttpRequest
 from aiohttp.web_response import Response as HttpResponse
 
 from trpc_sdk._inner import trpc_pb2
-from trpc_sdk.abc import BaseClientProtocolChecker
+from trpc_sdk.abc import BaseClientProtocolParser
 from trpc_sdk.abc import BaseCodec
-from trpc_sdk.abc import BaseServerProtocolChecker
+from trpc_sdk.abc import BaseServerProtocolParser
 from trpc_sdk.abc import PluginInitPos
 from trpc_sdk.abc import PluginType
 from trpc_sdk.abc import TrpcContext
@@ -56,7 +56,7 @@ from ._types import get_trpc_error_code
 
 
 @register_plugin(PluginType.SERVER_CHECKER, HTTP, init_pos=PluginInitPos.WORKER)
-class ServerHttpChecker(BaseServerProtocolChecker):
+class ServerHttpChecker(BaseServerProtocolParser):
     """HTTP server frame checker.
 
     HTTP framing is handled by aiohttp, so this checker is a no-op
@@ -276,7 +276,7 @@ class ServerHttpCodec(BaseCodec):
 
 
 @register_plugin(PluginType.CLIENT_CHECKER, HTTP, init_pos=PluginInitPos.WORKER)
-class ClientHttpChecker(BaseClientProtocolChecker):
+class ClientHttpChecker(BaseClientProtocolParser):
     """HTTP client frame checker.
 
     HTTP framing is handled by aiohttp, so this checker is a no-op

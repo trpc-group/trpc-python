@@ -110,7 +110,7 @@ class TestAddressUtilities:
 
         mock_ctx = Mock()
         mock_msg = Mock()
-        mock_ctx.get_client_message.return_value = mock_msg
+        mock_ctx.get_message.return_value = mock_msg
 
         set_addr_to_ctx_from_transport(mock_ctx, mock_transport)
 
@@ -132,7 +132,7 @@ class TestAddressUtilities:
 
         mock_ctx = Mock()
         mock_msg = Mock()
-        mock_ctx.get_client_message.return_value = mock_msg
+        mock_ctx.get_message.return_value = mock_msg
 
         set_addr_to_ctx_from_transport(mock_ctx, mock_transport)
 
@@ -156,7 +156,7 @@ class TestAddressUtilities:
 
         mock_ctx = Mock()
         mock_msg = Mock()
-        mock_ctx.get_client_message.return_value = mock_msg
+        mock_ctx.get_message.return_value = mock_msg
 
         set_addr_to_ctx_from_transport(mock_ctx, mock_transport)
 
@@ -177,7 +177,7 @@ class TestAddressUtilities:
 
         mock_ctx = Mock()
         mock_msg = Mock()
-        mock_ctx.get_client_message.return_value = mock_msg
+        mock_ctx.get_message.return_value = mock_msg
 
         set_addr_to_ctx_from_transport(mock_ctx, mock_transport)
 
@@ -197,7 +197,7 @@ class TestAddressUtilities:
 
         mock_ctx = Mock()
         mock_msg = Mock()
-        mock_ctx.get_client_message.return_value = mock_msg
+        mock_ctx.get_message.return_value = mock_msg
 
         set_addr_to_ctx_from_transport(mock_ctx, mock_transport)
 
@@ -220,7 +220,7 @@ class TestAddressUtilities:
 
         mock_ctx = Mock()
         mock_msg = Mock()
-        mock_ctx.get_client_message.return_value = mock_msg
+        mock_ctx.get_message.return_value = mock_msg
 
         with pytest.raises(ValueError, match="Invalid local address"):
             set_addr_to_ctx_from_transport(mock_ctx, mock_transport)
@@ -235,7 +235,7 @@ class TestAddressUtilities:
 
         mock_ctx = Mock()
         mock_msg = Mock()
-        mock_ctx.get_client_message.return_value = mock_msg
+        mock_ctx.get_message.return_value = mock_msg
 
         with pytest.raises(ValueError, match="Invalid peer address"):
             set_addr_to_ctx_from_transport(mock_ctx, mock_transport)
@@ -250,7 +250,7 @@ class TestAddressUtilities:
 
         mock_ctx = Mock()
         mock_msg = Mock()
-        mock_ctx.get_client_message.return_value = mock_msg
+        mock_ctx.get_message.return_value = mock_msg
 
         set_addr_to_ctx_from_transport(mock_ctx, mock_transport)
 
@@ -273,7 +273,7 @@ class TestAddressUtilities:
 
         mock_ctx = Mock()
         mock_msg = Mock()
-        mock_ctx.get_client_message.return_value = mock_msg
+        mock_ctx.get_message.return_value = mock_msg
 
         set_addr_to_ctx_from_transport(mock_ctx, mock_transport)
 
@@ -296,7 +296,7 @@ class TestAddressUtilities:
 
         mock_ctx = Mock()
         mock_msg = Mock()
-        mock_ctx.get_client_message.return_value = mock_msg
+        mock_ctx.get_message.return_value = mock_msg
 
         with pytest.raises(ValueError, match="Invalid local address"):
             set_addr_to_ctx_from_transport(mock_ctx, mock_transport)
@@ -308,7 +308,7 @@ class TestAddressUtilities:
 
         mock_ctx = Mock()
         mock_msg = Mock()
-        mock_ctx.get_client_message.return_value = mock_msg
+        mock_ctx.get_message.return_value = mock_msg
 
         set_addr_to_ctx_from_transport(mock_ctx, mock_transport)
 

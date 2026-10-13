@@ -51,7 +51,6 @@ from trpc_sdk.utils import now_ms
 from trpc_sdk.utils import singleton
 from ._options import Options
 from ._options import get_options
-from ._options import normalize_options
 
 
 def get_client():

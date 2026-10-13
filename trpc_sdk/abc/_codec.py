@@ -8,7 +8,7 @@
 
 These interfaces are distinct from the Cython context-first protocol
 codec in :mod:`trpc_sdk.abc._cython` (``BaseCodec`` /
-``BaseClientProtocolChecker`` / ``BaseServerProtocolChecker``).
+``BaseClientProtocolParser`` / ``BaseServerProtocolParser``).
 
 Concrete compressors register with ``register_plugin(PluginType.COMPRESS,
 ...)``; serializers register with ``register_plugin(

@@ -60,7 +60,7 @@ class BaseCodec(_Codec, BasePlugin):
     def decode_data(self, context: TrpcContext, buffer: Optional[bytes]) -> Any: ...
 
 
-class BaseServerProtocolChecker:
+class BaseServerProtocolParser:
     """Reusable incremental transport frame parser."""
 
     @abstractmethod
@@ -79,7 +79,7 @@ class BaseServerProtocolChecker:
         ...
 
 
-class BaseClientProtocolChecker(BasePlugin):
+class BaseClientProtocolParser(BasePlugin):
     """Asynchronous client-side frame reader."""
 
     @abstractmethod

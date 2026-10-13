@@ -15,9 +15,9 @@ from ._compress import BaseCompress
 from ._config import BaseConfig
 from ._config import BaseConfigProvider
 from ._config import BaseConfigDecoder
-from ._cython import BaseClientProtocolChecker  # pyright: ignore[reportMissingModuleSource]
+from ._cython import BaseClientProtocolParser  # pyright: ignore[reportMissingModuleSource]
 from ._cython import BaseCodec  # pyright: ignore[reportMissingModuleSource]
-from ._cython import BaseServerProtocolChecker  # pyright: ignore[reportMissingModuleSource]
+from ._cython import BaseServerProtocolParser  # pyright: ignore[reportMissingModuleSource]
 from ._cython import BaseService  # pyright: ignore[reportMissingModuleSource]
 from ._cython import RpczData  # pyright: ignore[reportMissingModuleSource]
 from ._cython import TrpcContext  # pyright: ignore[reportMissingModuleSource]
@@ -86,7 +86,7 @@ __all__ = [
     "AddrType",
     "BaseCircuitBreaker",
     "BaseClient",
-    "BaseClientProtocolChecker",
+    "BaseClientProtocolParser",
     "BaseClientStream",
     "BaseClientStreamConnection",
     "BaseClientStreamTransport",
@@ -108,7 +108,7 @@ __all__ = [
     "BaseLogger",
     "BaseMetrics",
     "BaseServer",
-    "BaseServerProtocolChecker",
+    "BaseServerProtocolParser",
     "BaseServerStream",
     "BaseServerTransport",
     "BaseServerTransportOption",

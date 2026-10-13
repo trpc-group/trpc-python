@@ -59,7 +59,7 @@ from typing import List
 from typing import Optional
 from typing import Tuple
 
-from trpc_sdk.abc import BaseServerProtocolChecker
+from trpc_sdk.abc import BaseServerProtocolParser
 from trpc_sdk.abc import BaseServerTransportOption
 from trpc_sdk.abc import ProcessType
 from trpc_sdk.common import bind_lifetime_to_parent
@@ -67,7 +67,6 @@ from trpc_sdk.common import execute_after_in_child
 from trpc_sdk.common import execute_before_loop_run_in_child
 from trpc_sdk.common import set_current_process_var
 from trpc_sdk.config import TrpcConfig
-from trpc_sdk.ipc import PipeConnection
 from trpc_sdk.log import logger
 from trpc_sdk.plugin import init_worker_plugins
 from trpc_sdk.task import register_task_conn
@@ -76,6 +75,7 @@ from trpc_sdk.transport import WorkerTaskConnection
 from trpc_sdk.utils import TimerExecutor
 from trpc_sdk.utils import get_async_lib
 from trpc_sdk.utils import io_ready_reached
+from trpc_sdk.utils import PipeConnection
 from ._constants import IO_WAIT_POLL_INTERVAL
 from ._constants import PARENT_EXIT_GRACE_SECONDS
 from ._signals import run_worker_signal_handle
@@ -284,7 +284,7 @@ class BaseWorker:
         self.networks: List[str] = []
         # Frame checker/parser for each listen address. ``None`` where no
         # checker plugin is registered for the service protocol.
-        self.checkers: List[Optional[BaseServerProtocolChecker]] = []
+        self.checkers: List[Optional[BaseServerProtocolParser]] = []
         # Service adapter for each listen address; carries the protocol and
         # service name.
         self.services: List[Any] = []

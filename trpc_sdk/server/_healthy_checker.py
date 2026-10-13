@@ -34,12 +34,13 @@ from trpc_sdk.abc import ProcessType
 from trpc_sdk.common import get_or_create_event_loop
 from trpc_sdk.common import register_child_callback
 from trpc_sdk.config import TrpcConfig
-from trpc_sdk.ipc import PipeConnection
-from trpc_sdk.ipc import PipeEnd
-from trpc_sdk.ipc import PipeKind
-from trpc_sdk.ipc import create_pipe
 from trpc_sdk.log import logger
 from trpc_sdk.plugin import register_plugin
+from trpc_sdk.utils import PipeConnection
+from trpc_sdk.utils import PipeEnd
+from trpc_sdk.utils import PipeKind
+from trpc_sdk.utils import create_pipe
+
 from ._constants import MAGIC_VAL
 from ._constants import PKG_LEN
 from ._types import TaskInfo

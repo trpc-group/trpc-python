@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Tuple
+from trpc_sdk.abc import TrpcContext
 
 from ._types import AddrType
 
@@ -75,7 +76,7 @@ def get_addr_from_transport(transport: asyncio.Transport) -> Tuple[str, str]:
     return (convert_address_to_str(local_addr), convert_address_to_str(peer_addr))
 
 
-def set_addr_to_ctx_from_transport(ctx, transport: asyncio.Transport) -> None:
+def set_addr_to_ctx_from_transport(ctx: TrpcContext, transport: asyncio.Transport) -> None:
     """Copy local/peer addresses from ``transport`` onto ``ctx`` and its message.
 
     Unix sockets yield a path string; those are stored as ``(path, 0)``.

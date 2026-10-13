@@ -124,29 +124,6 @@ def test_worker_process_start_workers_closes_pipes_and_connects():
     assert instance.loop.calls[0][0] == "stream"
 
 
-@pytest.mark.parametrize("use_trpcio, expected", [(False, "datagram"), (True, "stream")])
-def test_cworker_process_transport_switch(monkeypatch, use_trpcio, expected):
-    instance = worker_mod.CWorkerProcess.__new__(worker_mod.CWorkerProcess)
-    instance.loop = _Loop()
-    instance.worker_pipe_list = []
-    instance.worker_pipe_conn = MagicMock()
-    instance.worker_pipe_conn.get_socket.return_value = "worker-socket"
-    instance.addresses_map = {}
-    instance.handlers = []
-    instance.timeouts = []
-    other = SimpleNamespace(pipe_conn=SimpleNamespace(socket_pair=("a", "b")))
-    instance.server_engine = SimpleNamespace(worker_process_list=[other])
-    monkeypatch.setattr(worker_mod, "PipeConnection", MagicMock())
-    monkeypatch.setattr(worker_mod, "USE_TRPCIO", use_trpcio)
-    if use_trpcio:
-        fake_module = SimpleNamespace(CWorkerConnectionTrpcio=object)
-        monkeypatch.setitem(sys.modules, "trpc_sdk.transport.server_worker_trpcio", fake_module)
-
-    instance.start_workers()
-
-    assert instance.loop.calls[0][0] == expected
-
-
 def test_get_https_certs_rejects_missing_files(monkeypatch):
     cfg = SimpleNamespace(tls_key="/missing/key", tls_cert="/missing/cert")
     monkeypatch.setattr(worker_mod.os.path, "exists", lambda _: False)

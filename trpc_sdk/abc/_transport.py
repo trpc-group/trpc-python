@@ -15,17 +15,17 @@ from __future__ import annotations
 from abc import abstractmethod
 from dataclasses import dataclass
 from socket import socket
+from typing import Any
 from typing import Callable
 from typing import Optional
 from typing import Tuple
 
-from ._cython import BaseClientProtocolChecker
+from ._cython import BaseClientProtocolParser
 from ._cython import BaseCodec
-from ._cython import BaseServerProtocolChecker
+from ._cython import BaseServerProtocolParser
 from ._cython import BaseService
 from ._cython import TrpcContext
 from ._plugin import BasePlugin
-from ._server import BaseTrpcServerEngine
 
 AddrType = Tuple[str, int]
 """Network endpoint as ``(host, port)``."""
@@ -56,10 +56,10 @@ class BaseServerTransportOption:
     """
 
     service: Optional[BaseService] = None
-    address: str = ""
+    address: AddrType = ("", 0)
     port: int = 8000
-    checker: Optional[BaseServerProtocolChecker] = None
-    handle: Optional[ServiceHandler] = None
+    parser: Optional[BaseServerProtocolParser] = None
+    rpc_handler: Optional[ServiceHandler] = None
     network: str = "tcp"
     service_name: str = ""
     socket_type: str = ""
@@ -69,6 +69,9 @@ class BaseServerTransportOption:
     tls_key: str = ""
     tls_cert: str = ""
     target: str = ""
+    backlog: int = 1024
+    timeout_ms: int = 1000
+    is_stream: bool = False
 
     def set_address(self, address_info: AddrType):
         """Set the bind host and port from an address tuple.
@@ -99,7 +102,7 @@ class BaseServerTransportOption:
         """Set the idle-connection timeout copied from ``service.timeout``."""
         self.idle_timeout = timeout
 
-    def set_checker(self, checker: Optional[BaseServerProtocolChecker]) -> None:
+    def set_checker(self, checker: Optional[BaseServerProtocolParser]) -> None:
         """Install the protocol frame checker for this listener."""
         self.checker = checker
 
@@ -127,24 +130,38 @@ class BaseServerTransportOption:
 class BaseServerTransport(BasePlugin):
     """Define server transport lifecycle operations."""
 
-    @abstractmethod
-    def listen_and_serve(
-        self,
-        opts: BaseServerTransportOption,
-        server_engine: BaseTrpcServerEngine,
-    ):
-        """Bind the configured endpoint and start serving traffic.
+    async def stop(self) -> None:
+        """Stop the transport."""
+        return None
+    
+    async def destroy(self) -> None:
+        """Destroy the transport."""
+        return None
 
+    @abstractmethod
+    def bind(
+        self,
+        opts: BaseServerTransportOption
+    ) -> None:
+        """Bind the configured endpoint.
+        
         Args:
             opts: Server transport options.
-            server_engine: Server engine that owns process lifecycle hooks.
+
+        Returns:
+            None
         """
         ...
 
     @abstractmethod
-    def close(self):
-        """Stop the transport and release owned resources."""
+    def listen(self) -> None:
+        """Listen for incoming connections.
+        Args:
+            opts: Server transport options.
+        """
         ...
+    
+
 
 
 @dataclass
@@ -171,7 +188,7 @@ class BaseClientTransportOption:
     socket_type: str = "net"
     network: str = "tcp"
     short_conn: bool = False
-    checker: Optional[BaseClientProtocolChecker] = None
+    checker: Optional[BaseClientProtocolParser] = None
     codec: Optional[BaseCodec] = None
     local_addr: Optional[AddrType] = None
     sock: Optional[socket] = None
