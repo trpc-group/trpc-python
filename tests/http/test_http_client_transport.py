@@ -1,4 +1,8 @@
-# -*- coding: utf-8 -*-
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
 """Test http client"""
 
 import json
@@ -13,7 +17,7 @@ from trpc_sdk.exceptions import ClientInvokeError
 from trpc_sdk.http import defines as http_defines
 from trpc_sdk.http.client_transport import HttpClientTransport
 from trpc_sdk.http.codec import ClientReqHeader
-from trpc_sdk.transport.options import RoundTripOptions
+from trpc_sdk.transport import RoundTripOptions
 
 
 def test_base64_encode():

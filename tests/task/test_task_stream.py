@@ -1,4 +1,8 @@
-# -*- coding: utf-8 -*-
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
 """Test task stream handler"""
 import asyncio
 import time
@@ -88,7 +92,7 @@ class _TestProtocol(asyncio.Protocol):
     def __init__(self, loop: asyncio.BaseEventLoop):
         self._transport = None
         self.__service_adapter = TaskStreamServiceAdapter(task_service=MockTaskStreamServiceHandler())
-        self._checker = TaskStreamServerParser()
+        self._parser = TaskStreamServerParser()
         self.__loop = loop
         self.__session_id = 0
 
@@ -114,8 +118,8 @@ class _TestProtocol(asyncio.Protocol):
         await self.__service_adapter.handle(ctx, req_body)
 
     def data_received(self, data):
-        self._checker.feeds_data(data)
-        packages = self._checker.read()
+        self._parser.feeds_data(data)
+        packages = self._parser.read()
         for package in packages:
             self.__loop.create_task(self._handle_package(package))
 

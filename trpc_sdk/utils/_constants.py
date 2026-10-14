@@ -32,6 +32,11 @@ from enum import unique
 # stores this string; it is not ``socket.AF_UNIX``.
 UNIX_TYPE = "unix"
 
+# backlog passed to listen() for TCP and UNIX stream sockets created by
+# :func:`trpc_sdk.utils._network.create_new_socket`. 1500 matches the
+# historical net_util default.
+DEFAULT_BACKLOG = 1500
+
 # Relative path of the lock file used by :mod:`trpc_sdk.utils._process_sync`.
 # Created under the process cwd; all tRPC processes that share that cwd
 # contend on the same inode.

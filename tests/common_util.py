@@ -1,4 +1,8 @@
-# -*- coding: utf-8 -*-
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
 """Unittest helper tool"""
 import asyncio
 import os
@@ -11,10 +15,10 @@ from threading import Thread
 from typing import Callable
 from typing import Tuple
 
-from trpc_sdk.utils.loop_lib import asynclib
-from trpc_sdk.utils.network import close_socket
-from trpc_sdk.utils.network import is_valid_socket
-from trpc_sdk.utils.network import unlink_unix_socket_file
+from trpc_sdk.utils import close_socket
+from trpc_sdk.utils import get_async_lib
+from trpc_sdk.utils import is_valid_socket
+from trpc_sdk.utils import unlink_unix_socket_file
 
 
 def unused_port() -> int:
@@ -83,7 +87,7 @@ class ThreadUnixServer:
 
     def run(self):
         """run"""
-        self.loop = asynclib.new_event_loop()
+        self.loop = get_async_lib().new_event_loop()
         asyncio.set_event_loop(self.loop)
         handle = partial(self.handle, loop=self.loop)
         coros = self.loop.create_unix_server(handle, path=self.addr[0])

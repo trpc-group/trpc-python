@@ -1,4 +1,8 @@
-# -*- coding: utf-8 -*-
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
 """Test transport util module"""
 
 import asyncio
@@ -10,8 +14,8 @@ from trpc_sdk.codec import TrpcServerParser
 from trpc_sdk.transport.server_conn_info import Parser
 
 
-class TestChecker(Parser):
-    """Test checker"""
+class TestParser(Parser):
+    """Test parser"""
 
     def __init__(self, f: Callable = None):
         self.f = f or TrpcServerParser

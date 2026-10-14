@@ -1,4 +1,9 @@
-# -*- coding: utf-8 -*-
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
+
 import json
 
 from examples.helloworld.stub.trpc_trpc_python_group_helloworld import helloworld_pb2

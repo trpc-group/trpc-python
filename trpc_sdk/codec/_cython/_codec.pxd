@@ -8,10 +8,11 @@
 
 # Unary tRPC encode / decode. Stream frames are _codec_stream.pxd.
 # _TrpcClientCodec.request_id is a per-instance wrap counter, not a
-# globally unique id. encode / decode override _Codec, so their
+# globally unique id. encode_data / decode_data override _Codec, so their
 # signatures must match it exactly.
 
 from trpc_sdk.abc._cython cimport _Codec
+from trpc_sdk.abc._cython cimport TrpcContext
 from trpc_sdk.abc._cython cimport TrpcMessage
 
 
@@ -27,12 +28,12 @@ cdef class _TrpcClientCodec(_Codec):
     cdef:
         cdef public long request_id  # Per-instance encode counter; wraps at UINT32_MAX.
 
-    cpdef object encode(self, TrpcMessage message, object body)
-    cpdef object decode(self, TrpcMessage message, object buffer)
+    cpdef object encode_data(self, TrpcContext context, object body)
+    cpdef object decode_data(self, TrpcContext context, object buffer)
     cpdef bytes _unpack(self, object rsp, TrpcMessage message, bytes buffer)
 
 
 cdef class _TrpcServerCodec(_Codec):
-    cpdef object encode(self, TrpcMessage message, object body)
-    cpdef object decode(self, TrpcMessage message, object buffer)
+    cpdef object encode_data(self, TrpcContext context, object body)
+    cpdef object decode_data(self, TrpcContext context, object buffer)
     cpdef bytes _unpack(self, object req, TrpcMessage message, bytes buffer)

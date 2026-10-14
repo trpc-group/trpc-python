@@ -8,7 +8,7 @@
 
 :class:`TrpcServerEngine` lives in the same process as the worker. It does
 not listen for clients, does not run service handlers, and does not fork
-anyone. ``Service.run`` appends listen endpoints onto ``process_info``;
+anyone. ``ServiceAdapter.run`` appends listen endpoints onto ``process_info``;
 :meth:`~trpc_sdk.server.Server.serve` then builds the worker for ``server.mode``
 and that worker binds the addresses itself.
 
@@ -16,7 +16,7 @@ The master / dispatcher / executor topology that used to live here is gone.
 What remains is the data the worker still needs:
 
 * ``opts`` and ``process_info`` — process-model options and the per-endpoint
-  tables filled during ``Service.run``.
+  tables filled during ``ServiceAdapter.run``.
 * ``registry_semaphore`` — one permit per service, so shutdown can wait for
   naming-service logout.
 * ``worker_process_list`` and :meth:`send_msg_to_worker` — the inter-worker
@@ -33,22 +33,21 @@ from __future__ import annotations
 
 import sys
 import threading
+from typing import TYPE_CHECKING
 from typing import Callable
 from typing import List
 from typing import Optional
 
+from trpc_sdk.abc import BaseServerTransport
 from trpc_sdk.abc import BaseServerTransportOption
 from trpc_sdk.abc import BaseTrpcServerEngine
 from trpc_sdk.abc import ProcessType
 from trpc_sdk.log import logger
-from trpc_sdk.utils import is_tcp_port_available
-from trpc_sdk.utils import is_udp_port_available
-from trpc_sdk.utils import is_unix_socket
-from trpc_sdk.utils import unix_path_valid
-from ._constants import Network
-from ._option import ServerOption
-from ._process_info import ProcessInfo
-from ._types import WorkerInfo
+from trpc_sdk.runtime import ProcessInfo
+from trpc_sdk.runtime import WorkerInfo
+
+if TYPE_CHECKING:
+    from trpc_sdk.server import ServerOption
 
 
 GLOBAL_SERVER_ENGINE: Optional[TrpcServerEngine] = None
@@ -76,7 +75,7 @@ class TrpcServerEngine(BaseTrpcServerEngine):
         self.worker_process_list: List[WorkerInfo] = []
 
         # Listen/handler metadata appended by ``add_listen_endpoint`` during
-        # ``Service.run``, before the worker binds anything.
+        # ``ServiceAdapter.run``, before the worker binds anything.
         self.process_info: ProcessInfo = ProcessInfo()
 
         # Each service ``close()`` releases once after deregister.
@@ -97,62 +96,40 @@ class TrpcServerEngine(BaseTrpcServerEngine):
 
     @property
     def on_worker_message(self) -> Optional[Callable]:
-        """Callback invoked when a worker receives an inter-worker message.
-
-        Copied from ``ServerOption`` so child processes can read it after
-        fork without holding the option object themselves.
-        """
+        """The removed ``ServerOption.on_worker_message``; nothing calls it any more."""
         if not self.opts:
             return None
         return self.opts.on_worker_message
 
-    def add_listen_endpoint(self, opts: BaseServerTransportOption, network: str) -> None:
-        """Append one listen endpoint the worker will bind itself.
+    def add_listen_endpoint(self, transport: BaseServerTransport) -> None:
+        """Check one listen endpoint, then append it to ``process_info``.
 
-        Called from ``transport.listen_and_serve`` during ``Service.run``.
-        Nothing is bound here; the nine ``process_info`` lists stay
-        index-aligned so the worker can copy them later. TCP/HTTP and UDP
-        binds are both accepted.
+        Called from ``ServiceAdapter.run`` right after ``transport.bind(opts)``, so
+        still before fork. Nothing is bound here; the ``process_info`` lists
+        stay index-aligned so the worker can copy them later. Which addresses
+        are valid is the transport's business: :meth:`~BaseServerTransport.check_endpoint`
+        logs the reason, and the process exits with status 1.
 
         Args:
-            opts: Transport options of this endpoint. Every field the
-                ``process_info`` tables need is read off this object, and the
-                object itself is stored as the endpoint's transport options.
-            network: Network protocol (tcp/http/udp). Passed separately
-                because it is not always ``opts.network``: an HTTP service is
-                configured as ``network: tcp`` plus ``protocol: http``, and
-                the worker picks its listener by this value, so the HTTP
-                transport has to register the endpoint as ``http``.
+            transport: A transport whose :meth:`~BaseServerTransport.bind`
+                already ran. Every field the ``process_info`` tables need is
+                read off ``transport.opts``.
         """
-        address = (opts.address, opts.port)
+        opts: BaseServerTransportOption = transport.opts
+        if not transport.check_endpoint():
+            logger.error("[server engine] cannot serve %s (network %s)", opts.address, opts.network)
+            sys.exit(1)
 
-        # check socket info valid
-        if is_unix_socket(opts.socket_type):
-            if not unix_path_valid(address[0]):
-                logger.error("[Master Engine] cannot unlink unix address %s", address[0])
-                sys.exit(1)
-        else:
-            if network.find(Network.TCP) != -1 or network.find(Network.HTTP) != -1:
-                if not is_tcp_port_available(address[0], address[1]):
-                    logger.error("[Master Engine] tcp address %s invalid", address)
-                    sys.exit(1)
-            elif network.find(Network.UDP) != -1:
-                if not is_udp_port_available(address[0], address[1]):
-                    logger.error("[Master Engine] udp address %s invalid", address)
-                    sys.exit(1)
-            else:
-                logger.error("[Master Engine] unsupported network %s", network)
-                sys.exit(1)
-
-        self.process_info.add_address(address)
+        self.process_info.add_address(opts.address)
         self.process_info.add_socket_type(opts.socket_type)
-        self.process_info.add_handler(opts.handle)
-        self.process_info.add_checker(opts.checker)
+        self.process_info.add_handler(opts.rpc_handler)
+        self.process_info.add_parser(opts.parser)
         self.process_info.add_timeout(opts.idle_timeout)
-        self.process_info.add_network(network)
+        self.process_info.add_network(opts.network)
         self.process_info.add_service(opts.service)
         self.process_info.add_transport_opt(opts)
         self.process_info.add_target(opts.target)
+        self.process_info.add_transport(transport)
 
     def send_msg_to_worker(self, from_id: int, to: int, data: str) -> Optional[bool]:
         """Send an inter-worker message, or broadcast when ``to`` is negative.
@@ -216,7 +193,7 @@ class TrpcServerEngine(BaseTrpcServerEngine):
         """Wait for service deregister.
 
         Acquires ``registry_semaphore`` once per configured service (10s
-        timeout each) so ``Service.close`` can finish registry logout.
+        timeout each) so ``ServiceAdapter.close`` can finish registry logout.
         Children are stopped by the worker, not here.
         """
         for _ in range(self.opts.service_num):

@@ -1,12 +1,17 @@
-# -*- coding: utf-8 -*-
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
+
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-import trpc_sdk.transport.udp_connection as udp_connection
-from trpc_sdk.transport import udp_connection as udp
-from trpc_sdk.utils.loop_lib import get_or_create_event_loop
+import trpc_sdk.transport._client._udp_connection as udp_connection
+from trpc_sdk.transport._client import _udp_connection as udp
+from trpc_sdk.utils import get_or_create_event_loop
 
 
 def test_new():

@@ -1,0 +1,538 @@
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
+
+"""Worker of ``merge`` mode: one process accepts, decodes and runs handlers.
+
+There is no dispatcher and no worker child process here. This worker *is* the
+server process: it binds the public addresses, accepts on its main thread, and
+serves each connection on one of ``io_thread_num`` event-loop threads. A
+request therefore never crosses a process boundary, which is what removes the
+IPC hop that ``separate`` mode pays.
+
+Every endpoint is served by its own transport; this worker only decides on
+which loops. It asks :func:`~trpc_sdk.runtime._listeners.classify_address`,
+the same function ``separate`` mode uses, for the address's
+:class:`~trpc_sdk.runtime._constants.AddressKind`, and calls ``listen`` with a
+:class:`~trpc_sdk.transport.ListenOption` built for that kind:
+
+* ``TCP`` and ``HTTP`` get the loop threads as ``serving_loops``: the
+  transport binds once, accepts on the main thread, and hands each connection
+  to a loop thread picked by :func:`~trpc_sdk.transport.get_next_worker`.
+* ``UDP`` has nothing to accept, so each loop thread binds its own
+  ``SO_REUSEPORT`` socket on the same address and the kernel spreads
+  datagrams over them. That spreading is a Linux behaviour; BSD-derived
+  kernels (macOS) deliver to the most recently bound socket instead, which
+  makes UDP effectively single threaded there. It still serves correctly,
+  just without the parallelism. ``register_dispatcher_worker_func`` does not
+  apply to UDP.
+* ``USER`` protocol starters and the timer executor run on serving thread 0,
+  so every piece of user code runs on a serving thread and none on the main
+  one. The user worker-exit callbacks are the exception: they run on the main
+  thread, after every serving loop has finished draining.
+
+Every serving thread is set up completely — task pipes, ``on_start``
+hooks — before any address is bound, so no request can arrive on
+a loop whose hooks have not run. Threads start in parallel and share one
+``ready_timeout`` deadline.
+
+``io_thread_num: 1`` skips all of that: no thread is created and every
+listener is attached straight to the main loop, exactly as the multi-listener
+executor did. This is both the cheapest configuration and the one that proves
+the threaded paths did not change behaviour.
+
+The GIL is the trade-off to understand before choosing this mode. Threads
+overlap on I/O waits and on C extensions that release the GIL (protobuf, numpy,
+inference runtimes), but Python bytecode stays serialized. A CPU-bound service
+wants ``separate`` mode, where handlers run in separate rpc task processes.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from functools import partial
+from typing import Any
+from typing import Dict
+from typing import List
+from typing import Optional
+from typing import Sequence
+
+from trpc_sdk.abc import BaseServerTransport
+from trpc_sdk.abc import ProcessType
+from trpc_sdk.http import HttpMessageHandle
+from trpc_sdk.log import logger
+from trpc_sdk.transport import ListenOption
+from trpc_sdk.transport import TrpcServerTransport
+from trpc_sdk.transport import release_loop_resources
+from trpc_sdk.utils import TimerExecutor
+from ._constants import AddressKind
+from ._constants import LOOP_THREAD_STOP_TIMEOUT
+from ._listeners import classify_address
+from ._listeners import create_http_msg_handle
+from ._listeners import http_runner_factory
+from ._listeners import pop_loop_resources
+from ._threadmodel import HandlerThreadInfo
+from ._threadmodel import LoopThread
+from ._threadmodel import run_start_hooks
+from ._threadmodel import run_stop_hooks
+from ._threadmodel import set_current_handler_thread
+from ._threadmodel import stop_loop_threads
+from ._worker import BaseWorker
+
+# Key of the main loop in the per-loop tables, as in
+# ``TrpcServerTransport.pop_loop_resources``.
+_MAIN_LOOP = None
+
+
+class _LoopView:
+    """What a user protocol starter sees as ``worker`` on serving thread 0.
+
+    Starters are written against ``starter(worker, index)`` and bind their
+    socket with ``worker.loop``. On a threaded worker that has to be thread
+    0's loop, not the main one, while every per-address table (``addresses``,
+    ``handlers``, ``timeouts``, ``tran_opts``, ...) still comes from the
+    worker. Writes go to the worker too, so whatever a starter hangs on
+    ``worker`` is still there afterwards.
+    """
+
+    def __init__(self, worker: BaseWorker, loop: asyncio.AbstractEventLoop) -> None:
+        object.__setattr__(self, "_worker", worker)
+        object.__setattr__(self, "loop", loop)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._worker, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(self._worker, name, value)
+
+
+class MergeWorker(BaseWorker):
+    """The server process in ``merge`` mode: it listens and it handles.
+
+    Not a ``Process`` subclass, unlike the executor it replaces: this object
+    describes the process it runs in, so there is nobody to fork it.
+
+    Attributes:
+        thread_num: Serving loops, i.e. loops that run user code. ``1`` with
+            the merge thread model means the main loop serves and no thread
+            is created.
+        loop_threads: The serving threads; empty when the main loop serves.
+        ready_timeout: Seconds all threads get, together, to start.
+    """
+
+    # Prefix of the serving threads' OS names.
+    _thread_name_prefix = "trpc-loop"
+    # ``SchedulerParams.target`` of the HTTP acceptors.
+    _http_schedule_target = ""
+    # ``SO_REUSEPORT`` of a datagram endpoint served on the main loop alone:
+    # one socket on one loop has nothing to share the port with.
+    _single_loop_udp_reuse_port = False
+
+    def __init__(self, engine, name: str = "merge_worker") -> None:
+        """Copy the endpoint tables out of the engine; nothing is bound yet.
+
+        Sockets, threads and the event loop are all created later, in
+        :meth:`~trpc_sdk.runtime._worker.BaseWorker.run`. Nothing here may outlive a
+        fork boundary either, since a merge worker forks its tasks after being
+        constructed and before its loop exists.
+
+        Args:
+            engine: Engine holding ``process_info`` (the per-endpoint tables
+                filled during ``ServiceAdapter.run``) and ``opts``.
+            name: Process name shown in logs and process listings.
+        """
+        super().__init__(name, ProcessType.WORKER)
+        self._bind_process_info(engine)
+
+        # Already resolved by ``server._option_resolver``; the clamp only
+        # guards options built by hand.
+        self.thread_num: int = self._resolve_thread_num(engine.opts)
+        self.handler_max_concurrency: int = engine.opts.handler_max_concurrency
+        self.handler_queue_size: int = engine.opts.handler_queue_size
+        self.tcp_reuse_port: bool = engine.opts.tcp_reuse_port
+        self.ready_timeout: float = max(0, engine.opts.ready_timeout) / 1000.0
+        self.loop_threads: List[LoopThread] = []
+
+        # Bridge between aiohttp requests and the tRPC handler, one per HTTP
+        # address index. Shared by every thread serving that address: it holds
+        # no loop state, only the address index and this worker.
+        self._http_msg_handles: Dict[int, HttpMessageHandle] = {}
+        # The main loop's identity when it is the serving loop; set once its
+        # start hooks ran, so only then do its stop hooks run.
+        self._main_thread_info: Optional[HandlerThreadInfo] = None
+
+        # Transports holding per-loop resources, released on each serving
+        # loop (a serving thread's index, or ``_MAIN_LOOP``) when it stops.
+        # UDP transports: their endpoints close before that loop's
+        # ``on_stop`` hooks.
+        self._udp_transports: List[TrpcServerTransport] = []
+        # HTTP transports: their aiohttp runners are cleaned up after the
+        # hooks, since cleaning a runner up closes its connections.
+        self._http_transports: List[TrpcServerTransport] = []
+        # User protocol transports, keyed by serving loop and destroyed there
+        # after the hooks.
+        self._user_transports: Dict[Optional[int], List[BaseServerTransport]] = {}
+
+        # Threaded path. Indexed by serving thread; an entry is only set once
+        # that thread's start hooks ran, so only those threads run stop hooks.
+        self._thread_infos: List[Optional[HandlerThreadInfo]] = [None] * self.thread_num
+        # Monotonic deadline shared by every thread's startup.
+        self._ready_deadline: float = 0.0
+
+    @staticmethod
+    def _resolve_thread_num(opts) -> int:
+        """Number of serving loops: ``io_thread_num`` in the merge thread model.
+
+        Args:
+            opts: The engine's :class:`~trpc_sdk.server.ServerOption`.
+        """
+        return max(1, opts.io_thread_num)
+
+    def _uses_loop_threads(self) -> bool:
+        """Whether user code runs on loop threads rather than the main loop."""
+        return self.thread_num > 1
+
+    def start_worker_process(self) -> None:
+        """Serve every configured endpoint; the serving loops already exist.
+
+        Called by :meth:`~trpc_sdk.runtime._worker.BaseWorker._prepare_to_serve`
+        once plugins, task connections and every serving thread are up.
+
+        Each address is served according to its kind, read by
+        :func:`~trpc_sdk.runtime._listeners.classify_address`. An address no
+        listener matches (an unsupported network) is a configuration error
+        with no sane fallback, so the process exits with status 1 rather than
+        starting up half-listening.
+        """
+        logger.info("[merge worker] %s start_worker_process(), serving loops: %s", type(self).__name__,
+                    self.thread_num)
+
+        for i, _ in enumerate(self.addresses):
+            try:
+                kind = classify_address(self, i)
+                if kind is AddressKind.USER:
+                    # On a threaded worker, serving thread 0 already started it.
+                    if not self.loop_threads:
+                        self._listen_user(i, ListenOption(loop=self.loop, worker=self, index=i), _MAIN_LOOP)
+                elif kind is AddressKind.TCP:
+                    self._start_stream(i)
+                elif kind is AddressKind.UDP:
+                    self._start_datagram(i)
+                elif kind is AddressKind.HTTP:
+                    self._http_msg_handles[i] = create_http_msg_handle(self, i)
+                    self._start_http(i)
+                else:
+                    raise ValueError(f"unsupported network {self.networks[i]!r}")
+            except ValueError as err:
+                logger.error("[merge worker] cannot serve %s: %s", self.addresses[i], err)
+                self._abort_startup()
+            except OSError as err:
+                # Typically EADDRINUSE: another instance holds the port and
+                # tcp_reuse_port is off. Also TimeoutError (an OSError) from a
+                # serving thread that did not set its listener up in time.
+                # Serving half the addresses would be worse than not starting.
+                logger.error("[merge worker] failed to bind %s: %s", self.addresses[i], repr(err))
+                self._abort_startup()
+
+    def _abort_startup(self) -> None:
+        """Undo a partial startup, then exit with status 1.
+
+        Stops the transports already listening, stops the threads already
+        started (running ``on_stop`` only where ``on_start`` completed), then
+        stops the children.
+
+        Raises:
+            SystemExit: Always, with status 1.
+        """
+        self._stop_listening()
+        self._stop_serving_threads()
+        self._exit_now(1)
+
+    def _task_producer_names(self) -> List[str]:
+        """Give every serving loop its own producer identity, and its own pipes.
+
+        An asyncio transport may only be written from the loop that created
+        it, so N serving loops need N socketpairs to each task rather than one
+        shared pipe. Sizing this from ``thread_num`` works before any thread
+        exists, which matters because the pipes are created before the fork
+        and the threads only after it.
+
+        This is the method that sizes the mesh, so it is the one to override:
+        ``_owned_producer_names`` defaults to it, and every identity here does
+        belong to this process. Overriding only the ownership side would leave
+        the mesh with a single pipe and every thread but the first with none.
+        """
+        # Local import: this package's init loads the peer worker, which
+        # imports this module. That only works after this class exists.
+        from ._process import worker_producer_name
+
+        return [worker_producer_name(index) for index in range(self.thread_num)]
+
+    def _connect_tasks(self) -> None:
+        """Set up every serving loop, task connections included.
+
+        Single loop: the base behaviour on the main loop, then the main loop
+        becomes the serving loop (identity and ``on_start`` hooks),
+        before any listener exists. Threaded: start every serving thread;
+        each connects its own task pipes from its own ``init``.
+        """
+        if not self._uses_loop_threads():
+            super()._connect_tasks()
+            self._init_main_serving_loop()
+            return
+        self._start_loop_threads()
+
+    def _init_main_serving_loop(self) -> None:
+        """Make the main loop the single serving loop.
+
+        Runs on the main thread before the loop turns, which is why the
+        start hooks are driven with ``run_until_complete``. A failing hook
+        aborts startup with status 1.
+        """
+        info = self._main_loop_thread_info()
+        set_current_handler_thread(info)
+        try:
+            self.loop.run_until_complete(run_start_hooks(info))
+        except Exception as err:  # pylint: disable=broad-except
+            logger.error("[merge worker] on_start thread hook failed: %s", repr(err), exc_info=True)
+            self._exit_now(1)
+        self._main_thread_info = info
+
+    def _main_loop_thread_info(self) -> HandlerThreadInfo:
+        """Identity of the main loop when it is the only serving loop.
+
+        What ``on_start`` / ``on_stop`` hooks see as ``index`` and ``count``.
+        A peer worker reports its process index among all peer workers.
+        """
+        return HandlerThreadInfo(index=0, count=1, loop=self.loop)
+
+    def _start_loop_threads(self) -> None:
+        """Start every serving thread in parallel and wait until all are ready.
+
+        Each thread runs :meth:`_init_service_thread` before its loop turns.
+        All of them share one deadline, ``ready_timeout`` from now; one that
+        fails or misses it aborts startup.
+        """
+        self._ready_deadline = time.monotonic() + self.ready_timeout
+        for index in range(self.thread_num):
+            thread = LoopThread(index, name_prefix=self._thread_name_prefix)
+            self.loop_threads.append(thread)
+            thread.start(partial(self._init_service_thread, index))
+        self._wait_threads_ready(self.loop_threads, "serving")
+
+    def _wait_threads_ready(self, threads: Sequence[LoopThread], kind: str) -> None:
+        """Wait for ``threads`` against the shared deadline; abort on failure.
+
+        Args:
+            threads: Threads already started.
+            kind: Which threads these are, for log messages.
+        """
+        began = time.monotonic()
+        for thread in threads:
+            try:
+                thread.wait_ready(self._ready_deadline - time.monotonic())
+            except TimeoutError:
+                logger.error("[merge worker] %s not ready within ready_timeout=%.0f ms", thread.name,
+                             self.ready_timeout * 1000)
+                self._abort_startup()
+            except BaseException as err:  # pylint: disable=broad-except
+                logger.error("[merge worker] %s failed to start: %s", thread.name, repr(err))
+                self._abort_startup()
+        logger.info("[merge worker] %s %s thread(s) ready in %.0f ms", len(threads), kind,
+                    (time.monotonic() - began) * 1000)
+
+    def _init_service_thread(self, index: int, loop: asyncio.AbstractEventLoop) -> None:
+        """Set one serving thread up; runs on that thread before its loop turns.
+
+        The order matters. Identity first, then task pipes,
+        so a hook may already produce to a task. ``on_start`` after that, and
+        only once it succeeded is the thread recorded as one to run
+        ``on_stop`` on. User protocols last, on thread 0 only; they see a
+        :class:`_LoopView` as their worker.
+
+        Args:
+            index: Position of the thread among the serving loops.
+            loop: The thread's loop, not running yet.
+
+        Raises:
+            Exception: Whatever a step raised; startup is aborted.
+        """
+        info = HandlerThreadInfo(index=index, count=self.thread_num, loop=loop)
+        set_current_handler_thread(info)
+        if self.task_ipc_mesh is not None:
+            from ._process import worker_producer_name  # local: see _task_producer_names
+            pipes = self.task_ipc_mesh.producer_pipes(worker_producer_name(index))
+            loop.run_until_complete(self._connect_tasks_on(loop, pipes))
+        loop.run_until_complete(run_start_hooks(info))
+        self._thread_infos[index] = info
+
+        if index == 0:
+            view = _LoopView(self, loop)
+            for i, _ in enumerate(self.addresses):
+                if classify_address(self, i) is AddressKind.USER:
+                    self._listen_user(i, ListenOption(loop=loop, worker=view, index=i), index)
+
+    def _listen_user(self, index: int, opt: ListenOption, key: Optional[int]) -> None:
+        """Start one user protocol and remember the loop to destroy its transport on.
+
+        Args:
+            index: Position of the address in ``addresses``.
+            opt: ``loop`` is the serving loop it takes requests in on.
+            key: That loop's key in the per-loop tables.
+        """
+        self._user_transports.setdefault(key, []).append(self._listen_on(index, opt))
+
+    def _start_stream(self, index: int) -> None:
+        """Serve tRPC over TCP on one address.
+
+        With a single loop the transport serves it with ``create_server`` on
+        the main loop. Peer mode takes this path too, with ``tcp_reuse_port``
+        forced on by the worker. With loop threads the transport binds once,
+        accepts on the main loop and hands each connection to a thread.
+
+        Args:
+            index: Position of the address in ``addresses``.
+        """
+        self._listen_on(index,
+                        ListenOption(loop=self.loop,
+                                      serving_loops=self.loop_threads,
+                                      reuse_port=self.tcp_reuse_port,
+                                      ready_timeout=self.ready_timeout))
+
+    def _start_datagram(self, index: int) -> None:
+        """Serve tRPC over UDP on one address, once per serving loop.
+
+        Datagrams cannot be handed over the way accepted sockets can, so each
+        loop binds its own ``SO_REUSEPORT`` socket on the same address and lets
+        the kernel do the spreading. ``reuse_port`` is required with threads
+        whatever ``tcp_reuse_port`` says: this process binds the address N
+        times. See the module docstring for what that means outside Linux.
+
+        Args:
+            index: Position of the address in ``addresses``.
+        """
+        reuse_port = True if self.loop_threads else self._single_loop_udp_reuse_port
+        # Kept before ``listen`` so endpoints bound before a failure are released too.
+        self._udp_transports.append(self.transports[index])
+        self._listen_on(index,
+                        ListenOption(loop=self.loop,
+                                      serving_loops=self.loop_threads,
+                                      reuse_port=reuse_port,
+                                      ready_timeout=self.ready_timeout,
+                                      worker=self,
+                                      index=index))
+
+    def _start_http(self, index: int) -> None:
+        """Serve one HTTP endpoint, one aiohttp application per serving loop.
+
+        The transport builds every runner on the loop that will serve it,
+        from the factory given here, and keeps them to be cleaned up on their
+        own loops.
+
+        Args:
+            index: Position of the address in ``addresses``. Its entry in
+                ``_http_msg_handles`` must already exist.
+        """
+        self._http_transports.append(self.transports[index])
+        self._listen_on(index,
+                        ListenOption(loop=self.loop,
+                                      serving_loops=self.loop_threads,
+                                      reuse_port=self.tcp_reuse_port,
+                                      http_runner_factory=http_runner_factory(
+                                          self, index, self._http_msg_handles[index]),
+                                      schedule_target=self._http_schedule_target,
+                                      ready_timeout=self.ready_timeout))
+
+    def _start_timers(self) -> None:
+        """Start the timer executor, on serving thread 0 when there are threads.
+
+        One executor per process, as on the single-loop path, so a timer
+        without a target name still runs once and not once per thread. Its
+        schedules (``call_later``, ``aiocron``, ``call_at``) must be created on
+        the loop that runs them, hence ``submit`` rather than ``run()`` here.
+        """
+        if not self.loop_threads:
+            super()._start_timers()
+            return
+        thread = self.loop_threads[0]
+        self.timer = TimerExecutor(loop=thread.loop, name=f"worker:{self.worker_id}")
+        try:
+            thread.submit(self.timer.run, timeout=self.ready_timeout)
+        except Exception as err:  # pylint: disable=broad-except
+            logger.error("[merge worker] failed to start timers on %s: %s", thread.name, repr(err))
+            self._abort_startup()
+
+    def _stop_accepting(self) -> None:
+        """Stop every transport from accepting; open connections keep being served.
+
+        UDP endpoints stay open: there is no connection to refuse, and
+        in-flight datagrams are answered on them. They are closed with their
+        loops.
+        """
+        self._stop_listening()
+
+    def _stop_serving_threads(self) -> None:
+        """Stop every serving thread in parallel under one shared deadline.
+
+        Each thread runs :meth:`_before_stop_service_thread` on its own loop
+        first. A thread that does not exit in time is logged and left behind.
+        """
+        if not self.loop_threads:
+            return
+        stop_loop_threads(self.loop_threads, self._before_stop_service_thread, LOOP_THREAD_STOP_TIMEOUT)
+        self.loop_threads.clear()
+
+    async def _before_stop_service_thread(self, index: int) -> None:
+        """Release one serving thread's resources; runs on that thread.
+
+        The timer first (thread 0), so no new timer callback starts while
+        the rest is torn down; then the UDP endpoints, the ``on_stop`` hooks,
+        the user protocol transports (which may want to finish what the hooks
+        flushed), and the aiohttp runners last, since cleaning a runner up
+        closes its connections. Handlers still in flight are cancelled
+        afterwards, when the loop is shut down.
+
+        Args:
+            index: Position of the thread among the serving loops.
+        """
+        if index == 0 and self.timer is not None:
+            self.timer.stop()
+        await release_loop_resources(pop_loop_resources(self._udp_transports, index))
+        info, self._thread_infos[index] = self._thread_infos[index], None
+        if info is not None:
+            await run_stop_hooks(info)
+        await self._destroy_transports(self._user_transports.pop(index, []))
+        await release_loop_resources(pop_loop_resources(self._http_transports, index))
+
+    async def _release_main_loop(self) -> None:
+        """Release what was served on the main loop; idempotent.
+
+        User protocol transports first, then aiohttp runners, then the UDP
+        endpoints.
+        """
+        await self._destroy_transports(self._user_transports.pop(_MAIN_LOOP, []))
+        await release_loop_resources(pop_loop_resources(self._http_transports, _MAIN_LOOP))
+        await release_loop_resources(pop_loop_resources(self._udp_transports, _MAIN_LOOP))
+
+    def _on_graceful_exit(self) -> None:
+        """Stop accepting, then release the main loop and shut the serving loops down.
+
+        Order matters: an acceptor closed after its targets would hand sockets
+        to loops that are no longer turning, and those connections would hang
+        until the process died rather than being refused.
+
+        When the main loop is the serving loop, its ``on_stop`` thread hooks
+        run next, then what it served is released. The loop has stopped by
+        now, so ``run_until_complete`` is allowed again. Every step takes what
+        it releases out of ``self`` first, so a second call does nothing.
+        """
+        self._stop_listening()
+        if self._main_thread_info is not None:
+            info, self._main_thread_info = self._main_thread_info, None
+            self.loop.run_until_complete(run_stop_hooks(info))
+        self.loop.run_until_complete(self._release_main_loop())
+
+        self._stop_serving_threads()

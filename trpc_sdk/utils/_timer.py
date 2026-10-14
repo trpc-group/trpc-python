@@ -19,6 +19,7 @@ from enum import unique
 from typing import Callable
 from typing import List
 from typing import Optional
+from typing import Tuple
 from typing import Type
 from typing import Union
 
@@ -244,6 +245,16 @@ class TimerExecutor:
         """Cancel every cron object and :class:`TimerTask` started by :meth:`run`."""
         for cor in self.__timers:
             cor.stop()
+
+
+def registered_timer_tasks() -> Tuple[TimerTaskInfo, ...]:
+    """Return every timer registered so far, as a read-only snapshot.
+
+    Lets the server inspect registrations before it forks (for instance to
+    warn that an unnamed timer will run once per rpc task) without reaching
+    into the module-level list.
+    """
+    return tuple(_TIMER_TASKS_INFO)
 
 
 def register_timer_task(name: str = "",

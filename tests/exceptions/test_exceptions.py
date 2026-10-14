@@ -1,7 +1,8 @@
-# -*- coding: utf-8 -*-
+# Tencent is pleased to support the open source community by making tRPC-Python available.
 #
-# Copyright @ 2025 Tencent.com
+# Copyright (C) 2026 Tencent. All rights reserved.
 #
+# tRPC-Python is licensed under Apache-2.0.
 """Test cases for TRPC framework exceptions"""
 
 import pytest
@@ -26,7 +27,6 @@ from trpc_sdk.exceptions import PluginInitError
 from trpc_sdk.exceptions import ServerAuthFailError
 from trpc_sdk.exceptions import ServerDecodeError
 from trpc_sdk.exceptions import ServerEncodeError
-from trpc_sdk.exceptions import ServerOverloadError
 from trpc_sdk.exceptions import ServerSystemError
 from trpc_sdk.exceptions import ServerTimeoutError
 from trpc_sdk.exceptions import ServerValidateFailError
@@ -76,7 +76,6 @@ def test_trpc_base_error_msg_conversion():
     (ServiceNotFoundError, ErrorCode.TRPC_SERVER_NOSERVICE_ERR),
     (FuncNotFoundError, ErrorCode.TRPC_SERVER_NOFUNC_ERR),
     (ServerTimeoutError, ErrorCode.TRPC_SERVER_TIMEOUT_ERR),
-    (ServerOverloadError, ErrorCode.TRPC_SERVER_OVERLOAD_ERR),
     (ServerSystemError, ErrorCode.TRPC_SERVER_SYSTEM_ERR),
     (ServerAuthFailError, ErrorCode.TRPC_SERVER_AUTH_FAIL),
     (ServerValidateFailError, ErrorCode.TRPC_SERVER_VALIDATE_FAIL),

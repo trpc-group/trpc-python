@@ -15,9 +15,13 @@ paths arrive as a string ``sockname``/``peername`` and are coerced to
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING
 from typing import Tuple
 
 from ._types import AddrType
+
+if TYPE_CHECKING:
+    from trpc_sdk.abc import TrpcContext
 
 
 def get_address_from_str(address: str) -> AddrType:
@@ -75,7 +79,7 @@ def get_addr_from_transport(transport: asyncio.Transport) -> Tuple[str, str]:
     return (convert_address_to_str(local_addr), convert_address_to_str(peer_addr))
 
 
-def set_addr_to_ctx_from_transport(ctx, transport: asyncio.Transport) -> None:
+def set_addr_to_ctx_from_transport(ctx: TrpcContext, transport: asyncio.Transport) -> None:
     """Copy local/peer addresses from ``transport`` onto ``ctx`` and its message.
 
     Unix sockets yield a path string; those are stored as ``(path, 0)``.
@@ -100,11 +104,26 @@ def set_addr_to_ctx_from_transport(ctx, transport: asyncio.Transport) -> None:
         raise ValueError(f"Invalid local address {local_addr}")
     if not isinstance(peer_addr, tuple) or len(peer_addr) != 2:
         raise ValueError(f"Invalid peer address {peer_addr}")
+    set_addr_to_ctx(ctx, local_addr, peer_addr)
+
+
+def set_addr_to_ctx(ctx: TrpcContext, local_addr: Tuple[str, int], remote_addr: Tuple[str, int]) -> None:
+    """Write already-normalized local/peer addresses onto ``ctx`` and its message.
+
+    The protocol message gets host strings via ``set_local_ip`` /
+    ``set_remote_addr``; the context also stores ``remote_port`` /
+    ``local_port``.
+
+    Args:
+        ctx: Server or client context with ``get_message``.
+        local_addr: Local ``(host, port)``.
+        remote_addr: Peer ``(host, port)``.
+    """
     msg = ctx.get_message()
     msg.set_local_ip(local_addr[0])
-    msg.set_remote_addr(peer_addr[0])
-    ctx.remote_ip = peer_addr[0]
-    ctx.remote_port = peer_addr[1]
+    msg.set_remote_addr(remote_addr[0])
+    ctx.remote_ip = remote_addr[0]
+    ctx.remote_port = remote_addr[1]
     ctx.local_ip = local_addr[0]
     ctx.local_port = local_addr[1]
 

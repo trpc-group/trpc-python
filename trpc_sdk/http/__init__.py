@@ -11,7 +11,7 @@ import ...``.
 
 The package is split by responsibility:
 
-- :mod:`~trpc_sdk.http._codec` — server/client HTTP codec and checkers
+- :mod:`~trpc_sdk.http._codec` — server/client HTTP codec and parsers
 - :mod:`~trpc_sdk.http._http_transport` — server listen registration
 - :mod:`~trpc_sdk.http._message_handle` — :class:`HttpMessageHandle`, the
   aiohttp-to-tRPC bridge
@@ -34,10 +34,10 @@ from __future__ import annotations
 from ._client import Client
 from ._client_transport import HttpClientTransport
 from ._client_transport import register_http_session_params
-from ._codec import ClientHttpChecker
 from ._codec import ClientHttpCodec
-from ._codec import ServerHttpChecker
+from ._codec import ClientHttpParser
 from ._codec import ServerHttpCodec
+from ._codec import ServerHttpParser
 from ._constants import DEFAULT_SESSION_NAME
 from ._constants import HTTP
 from ._constants import HTTP_ARG_JSON
@@ -102,9 +102,9 @@ from ._utils import reverse_dict
 __all__ = [
     # Codec
     "ServerHttpCodec",
-    "ServerHttpChecker",
+    "ServerHttpParser",
     "ClientHttpCodec",
-    "ClientHttpChecker",
+    "ClientHttpParser",
     # Server transport
     "HttpServerTransport",
     "HttpServerTransportFactory",

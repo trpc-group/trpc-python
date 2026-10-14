@@ -6,7 +6,7 @@
 
 # cython: language_level=3, boundscheck=False, wraparound=False
 
-# Cython declarations for Service (implemented in _service.pyx).
+# Cython declarations for ServiceAdapter (implemented in _service.pyx).
 # Other Cython modules ``cimport`` this type. Python callers import the compiled
 # ``trpc_sdk.server._cython._service`` module (re-exported from ``trpc_sdk.server``).
 # Decode/encode, timeout merge, queue-wait, and the filter chain live in the
@@ -17,15 +17,19 @@ from trpc_sdk.abc._cython cimport TrpcContext
 from trpc_sdk.filters._cython._filter cimport FilterChain
 
 
-cdef class Service(BaseService):
+cdef class ServiceAdapter(BaseService):
     # Per-service handler path after the transport has a complete request frame.
     # One instance per YAML ``server.service[]`` entry.
     cdef:
         cdef public object opt              # ServiceOption; filled by ``create_server``.
         cdef public dict unary_handlers     # RPC name -> ``Method``; empty until ``register``.
         cdef public dict stream_handlers    # RPC name -> ``StreamDesc``; empty until ``register``.
-        cdef public object queue_window     # ``QueueWindow``; built even for DEFAULT policy.
         cdef public object registrar        # ``ServiceRegistrar``, or None when ``opt.registry`` is unset.
+        cdef object _queue_cb_cfg           # YAML ``server.queue_cb``, or None for the defaults.
+        cdef object _queue_windows          # threading.local holding each thread's ``QueueWindow``.
+
+    # Sliding window of the calling thread; built on first use.
+    cdef object _queue_window(self)
 
     # Timeout / queue-wait budget (unary hot path).
     cdef float _merge_timeout_budget(self, TrpcContext ctx)

@@ -1,4 +1,8 @@
-# -*- coding: utf-8 -*-
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
 """Test module for TRPC server functionality
 
 This module contains tests for:
@@ -27,7 +31,7 @@ from trpc_sdk.server import (
     Context,
     Server,
     ServerOption,
-    Service,
+    ServiceAdapter,
     ServiceOption,
     server_engine,
 )
@@ -65,7 +69,7 @@ for service_conf in config.global_config_obj.server.service:
     for filer_name in service_conf.filter:
         service_option.add_filter(get_server_filter(filer_name))
 
-    service = Service(service_option=service_option)
+    service = ServiceAdapter(service_option=service_option)
     service.opt.set_handler(service.handle)
     service.opt.set_service_name(service_conf.name)
     _test_server.add_service(service_conf.name, service)
@@ -165,11 +169,11 @@ def test_get_service():
     ret = _test_server.get_service("trpc_sdk.test.helloworld.Greeter_no")
     assert ret is None
 
-    _test_server.add_service("test", Service(None))
+    _test_server.add_service("test", ServiceAdapter(None))
     assert _test_server.get_service("test").opt is None
 
 
-class FakeService(Service):
+class FakeService(ServiceAdapter):
     """Mock service class for testing basic service functionality"""
 
     def run(self):

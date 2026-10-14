@@ -1,6 +1,8 @@
-# -*- coding: utf-8 -*-
+# Tencent is pleased to support the open source community by making tRPC-Python available.
 #
-# Copyright @ 2025 Tencent.com
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
 """Test option of client"""
 import socket
 from types import SimpleNamespace
@@ -86,7 +88,7 @@ def test_options():
     o(opts)
     assert isinstance(opts.codec, ClientCodec)
     assert isinstance(opts.transport, ClientTransport)
-    assert isinstance(opts.call_options.checker, TrpcClientParser)
+    assert isinstance(opts.call_options.parser, TrpcClientParser)
 
     o = with_req_head(None)
     o(opts)
@@ -110,7 +112,7 @@ def test_options():
     assert opts.call_options.network == 'tcp'
     assert isinstance(opts.codec, ClientCodec)
     assert isinstance(opts.transport, ClientTransport)
-    assert isinstance(opts.call_options.checker, TrpcClientParser)
+    assert isinstance(opts.call_options.parser, TrpcClientParser)
 
     o = with_caller_setname('test_caller_setname')
     o(opts)

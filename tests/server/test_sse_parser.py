@@ -1,3 +1,8 @@
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
 """Focused tests for the incremental SSE parser."""
 from trpc_sdk.http.sse_client import _SSEParser
 

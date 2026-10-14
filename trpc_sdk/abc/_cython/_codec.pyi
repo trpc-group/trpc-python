@@ -11,56 +11,49 @@ from typing import Optional
 
 from trpc_sdk.abc import BasePlugin
 from ._context import TrpcContext
-from ._message import TrpcMessage
 
 
 class _Codec:
     """Private C-level codec root; framework Cython codecs inherit it.
 
-    Every hook raises ``NotImplementedError`` until a subclass overrides
-    it. Unary codecs implement ``encode`` / ``decode``; stream codecs
-    implement ``encode_stream`` / ``decode_stream``. Not exported from
+    Every hook takes the :class:`TrpcContext` and raises
+    ``NotImplementedError`` until a subclass overrides it. Unary codecs
+    implement ``encode_data`` / ``decode_data``; stream codecs implement
+    ``encode_stream`` / ``decode_stream``. Not exported from
     ``trpc_sdk.abc``.
     """
 
-    def encode(self, message: TrpcMessage, body: Optional[bytes]) -> Any: ...
+    def encode_data(self, context: TrpcContext, body: Optional[bytes]) -> Any: ...
 
-    def decode(self, message: TrpcMessage, buffer: Optional[bytes]) -> Any: ...
+    def decode_data(self, context: TrpcContext, buffer: Optional[bytes]) -> Any: ...
 
-    def encode_stream(self, message: TrpcMessage, body: Optional[bytes]) -> Any: ...
+    def encode_stream(self, context: TrpcContext, body: Optional[bytes]) -> Any: ...
 
-    def decode_stream(self, message: TrpcMessage, buffer: Optional[bytes]) -> Any: ...
+    def decode_stream(self, context: TrpcContext, buffer: Optional[bytes]) -> Any: ...
 
 
 class BaseCodec(_Codec, BasePlugin):
-    """Public codec plugin base, message-first hooks plus context-first entries.
+    """Public codec plugin base with four context-first hooks.
 
-    The message-first hooks, including the stream pair, come from
-    :class:`_Codec`. No method is abstract: ``encode_data`` /
-    ``decode_data`` have working defaults that forward to the
-    message-first pair, and a codec that implements only one half of
-    either pair stays constructible with the missing half raising
-    ``NotImplementedError`` when first called. ``decode`` /
-    ``decode_data`` may also be coroutine functions; the caller decides
-    whether to ``await`` them.
+    No method is abstract: a codec that implements only the unary pair
+    or only the stream pair stays constructible, with the missing half
+    raising ``NotImplementedError`` when first called. ``decode_data``
+    may be a coroutine function; the caller decides whether to ``await``
+    it.
     """
 
     def __init__(self) -> None: ...
-
-    def encode(self, message: TrpcMessage, body: Optional[bytes]) -> bytes: ...
-
-    def decode(self, message: TrpcMessage, buffer: Optional[bytes]) -> Any: ...
-
-    def encode_stream(self, message: TrpcMessage, body: Optional[bytes]) -> bytes: ...
-
-    def decode_stream(self, message: TrpcMessage, buffer: Optional[bytes]) -> Any: ...
 
     def encode_data(self, context: TrpcContext, body: Optional[bytes]) -> bytes: ...
 
     def decode_data(self, context: TrpcContext, buffer: Optional[bytes]) -> Any: ...
 
+    def encode_stream(self, context: TrpcContext, body: Optional[bytes]) -> bytes: ...
 
-class BaseServerProtocolChecker:
+    def decode_stream(self, context: TrpcContext, buffer: Optional[bytes]) -> Any: ...
+
+
+class BaseServerProtocolParser:
     """Reusable incremental transport frame parser."""
 
     @abstractmethod
@@ -79,7 +72,7 @@ class BaseServerProtocolChecker:
         ...
 
 
-class BaseClientProtocolChecker(BasePlugin):
+class BaseClientProtocolParser(BasePlugin):
     """Asynchronous client-side frame reader."""
 
     @abstractmethod

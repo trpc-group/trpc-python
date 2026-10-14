@@ -54,8 +54,10 @@ from trpc_sdk.exceptions import ServerEncodeError
 from trpc_sdk.exceptions import TrpcErrorType
 from trpc_sdk.exceptions import TrpcException
 from trpc_sdk.abc._cython cimport _Codec
+from trpc_sdk.abc._cython cimport TrpcContext
 from trpc_sdk.abc._cython cimport TrpcFrameHead
 from trpc_sdk.abc._cython cimport TrpcMessage
+from trpc_sdk.abc._cython cimport get_message
 from .._constants import DYEING_KEY as _PY_DYEING_KEY
 from .._constants import ENV_TRANSFER_KEY as _PY_ENV_TRANSFER_KEY
 from .._constants import FRAME_HEAD_LEN as _PY_FRAME_HEAD_LEN
@@ -70,17 +72,17 @@ cdef class _TrpcClientStreamCodec(_Codec):
     """Client-side stream codec: INIT / DATA / CLOSE / FEEDBACK.
 
     Stream-only: the entry points are ``encode_stream`` /
-    ``decode_stream``, and ``encode`` / ``decode`` keep the ``_Codec``
-    default. The Python :class:`~trpc_sdk.codec.TrpcClientCodec` plugin holds
-    one instance as ``self.stream_codec``.
+    ``decode_stream``, and ``encode_data`` / ``decode_data`` keep the
+    ``_Codec`` default. The Python :class:`~trpc_sdk.codec.TrpcClientCodec`
+    plugin holds one instance as ``self.stream_codec``.
     """
 
-    cpdef object encode_stream(self, TrpcMessage message, object body):
+    cpdef object encode_stream(self, TrpcContext context, object body):
         """Pack one client stream frame by ``frame_state``.
 
         Args:
-            message: RPC state; ``frame_head.frame_state`` selects INIT /
-                DATA / CLOSE / FEEDBACK.
+            context: Owns the message whose ``frame_head.frame_state``
+                selects INIT / DATA / CLOSE / FEEDBACK.
             body: Used for DATA; INIT / CLOSE / FEEDBACK read
                 ``message.stream_frame`` instead.
 
@@ -90,6 +92,7 @@ cdef class _TrpcClientStreamCodec(_Codec):
         Raises:
             ValueError: ``frame_state`` is not a known stream sub-type.
         """
+        cdef TrpcMessage message = get_message(context)
         frame_state = message.frame_head.frame_state
         if frame_state == trpc_pb2.TRPC_STREAM_FRAME_INIT:
             return self.encode_init_frame(message, body)
@@ -101,21 +104,22 @@ cdef class _TrpcClientStreamCodec(_Codec):
             return self.encode_feedback_frame(message, body)
         raise ValueError(f"client encode_stream unknown stream frame type {frame_state}")
 
-    cpdef object decode_stream(self, TrpcMessage message, object buffer):
+    cpdef object decode_stream(self, TrpcContext context, object buffer):
         """Unpack one client stream frame by ``frame_state``.
 
         Args:
-            message: RPC state; ``frame_head.frame_state`` must already
-                be set from ``buffer``.
+            context: Owns the message whose ``frame_head.frame_state``
+                must already be set from ``buffer``.
             buffer: Complete stream frame, head included.
 
         Returns:
             Stream payload after the 16-byte head, or empty bytes for
-            INIT / CLOSE / FEEDBACK after meta is stored on ``message``.
+            INIT / CLOSE / FEEDBACK after meta is stored on the message.
 
         Raises:
             ValueError: ``frame_state`` is not a known stream sub-type.
         """
+        cdef TrpcMessage message = get_message(context)
         frame_state = message.frame_head.frame_state
         if frame_state == trpc_pb2.TRPC_STREAM_FRAME_INIT:
             return self.decode_init_frame(message, buffer)
@@ -351,18 +355,18 @@ cdef class _TrpcServerStreamCodec(_Codec):
     """Server-side stream codec: INIT / DATA / CLOSE / FEEDBACK.
 
     Stream-only: the entry points are ``encode_stream`` /
-    ``decode_stream``, and ``encode`` / ``decode`` keep the ``_Codec``
-    default. The Python :class:`~trpc_sdk.codec.TrpcServerCodec` plugin holds
-    one instance as ``self.stream_codec`` and maintains the INIT meta
-    cache around these calls; nothing here touches that cache.
+    ``decode_stream``, and ``encode_data`` / ``decode_data`` keep the
+    ``_Codec`` default. The Python :class:`~trpc_sdk.codec.TrpcServerCodec`
+    plugin holds one instance as ``self.stream_codec`` and maintains the
+    INIT meta cache around these calls; nothing here touches that cache.
     """
 
-    cpdef object encode_stream(self, TrpcMessage message, object body):
+    cpdef object encode_stream(self, TrpcContext context, object body):
         """Pack one server stream frame by ``frame_state``.
 
         Args:
-            message: RPC state; ``frame_head.frame_state`` selects INIT /
-                DATA / CLOSE / FEEDBACK.
+            context: Owns the message whose ``frame_head.frame_state``
+                selects INIT / DATA / CLOSE / FEEDBACK.
             body: Used for DATA; INIT / CLOSE / FEEDBACK read
                 ``message.stream_frame`` instead.
 
@@ -372,6 +376,7 @@ cdef class _TrpcServerStreamCodec(_Codec):
         Raises:
             ValueError: ``frame_state`` is not a known stream sub-type.
         """
+        cdef TrpcMessage message = get_message(context)
         frame_state = message.frame_head.frame_state
         if frame_state == trpc_pb2.TRPC_STREAM_FRAME_INIT:
             return self.encode_init_frame(message, body)
@@ -383,12 +388,12 @@ cdef class _TrpcServerStreamCodec(_Codec):
             return self.encode_feedback_frame(message, body)
         raise ValueError(f"server encode_stream unknown stream frame type {frame_state}")
 
-    cpdef object decode_stream(self, TrpcMessage message, object buffer):
+    cpdef object decode_stream(self, TrpcContext context, object buffer):
         """Unpack one server stream frame by ``frame_state``.
 
         Args:
-            message: RPC state; ``frame_head.frame_state`` must already
-                be set from ``buffer``.
+            context: Owns the message whose ``frame_head.frame_state``
+                must already be set from ``buffer``.
             buffer: Complete stream frame, head included.
 
         Returns:
@@ -398,6 +403,7 @@ cdef class _TrpcServerStreamCodec(_Codec):
         Raises:
             ValueError: ``frame_state`` is not a known stream sub-type.
         """
+        cdef TrpcMessage message = get_message(context)
         frame_state = message.frame_head.frame_state
         if frame_state == trpc_pb2.TRPC_STREAM_FRAME_INIT:
             return self.decode_init_frame(message, buffer)

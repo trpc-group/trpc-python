@@ -13,6 +13,7 @@
 # override _Codec and dispatch on frame_state to the per-frame methods.
 
 from trpc_sdk.abc._cython cimport _Codec
+from trpc_sdk.abc._cython cimport TrpcContext
 from trpc_sdk.abc._cython cimport TrpcMessage
 
 
@@ -25,8 +26,8 @@ cdef extern from "arpa/inet.h":
 
 
 cdef class _TrpcClientStreamCodec(_Codec):
-    cpdef object encode_stream(self, TrpcMessage message, object body)
-    cpdef object decode_stream(self, TrpcMessage message, object buffer)
+    cpdef object encode_stream(self, TrpcContext context, object body)
+    cpdef object decode_stream(self, TrpcContext context, object buffer)
 
     # Encode: INIT / CLOSE / FEEDBACK serialize stream_frame; DATA uses body.
     cpdef bytes encode_init_frame(self, TrpcMessage message, bytes body)
@@ -42,8 +43,8 @@ cdef class _TrpcClientStreamCodec(_Codec):
 
 
 cdef class _TrpcServerStreamCodec(_Codec):
-    cpdef object encode_stream(self, TrpcMessage message, object body)
-    cpdef object decode_stream(self, TrpcMessage message, object buffer)
+    cpdef object encode_stream(self, TrpcContext context, object body)
+    cpdef object decode_stream(self, TrpcContext context, object buffer)
 
     # Encode: INIT / CLOSE / FEEDBACK serialize stream_frame; DATA uses body.
     cpdef bytes encode_init_frame(self, TrpcMessage message, bytes body)

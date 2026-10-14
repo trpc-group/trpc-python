@@ -15,14 +15,18 @@ from .._registry import ServiceRegistrar
 from .._types import QueueWindow
 
 
-class Service(BaseService):
+class ServiceAdapter(BaseService):
     """Per-service handler path after the transport has a complete request frame."""
 
     opt: ServiceOption
     unary_handlers: Dict[str, Any]  # rpc name -> trpc_sdk.abc.Method
     stream_handlers: Dict[str, Any]  # rpc name -> trpc_sdk.abc.StreamDesc
-    queue_window: QueueWindow
     registrar: Optional[ServiceRegistrar]
+
+    @property
+    def queue_window(self) -> QueueWindow:
+        """Sliding window of the calling thread; each serving thread has its own."""
+        ...
 
     def __init__(self, service_option: ServiceOption) -> None: ...
 
@@ -57,7 +61,11 @@ class Service(BaseService):
         ...
 
     def run(self) -> None:
-        """Blocking ``listen_and_serve`` on this service's transport."""
+        """Resolve and bind this service's transport, then register it on the engine (pre-fork).
+
+        A protocol with a starter registered through
+        ``register_protocol_handle`` gets a ``UserProtocolTransport``.
+        """
         ...
 
     def close(self) -> None:
@@ -65,11 +73,11 @@ class Service(BaseService):
         ...
 
 
-def create_service(service_name: str, service_option: ServiceOption) -> Service:
-    """Build one :class:`Service` for a listen endpoint.
+def create_service(service_name: str, service_option: ServiceOption) -> ServiceAdapter:
+    """Build one :class:`ServiceAdapter` for a listen endpoint.
 
     Fills in the default transport and transport option when the caller
-    omitted them, installs :meth:`Service.handle` unless a handler is
+    omitted them, installs :meth:`ServiceAdapter.handle` unless a handler is
     already set, and binds the service onto ``transport_option``.
     """
     ...

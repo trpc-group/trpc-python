@@ -1,4 +1,8 @@
-# -*- coding: utf-8 -*-
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
 """Test server executor module"""
 import asyncio
 from unittest.mock import MagicMock
@@ -6,7 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from trpc_sdk.server import server_engine
-from trpc_sdk.server.service import Service
+from trpc_sdk.server.service import ServiceAdapter
 from trpc_sdk.server.option import ServiceOption, ServerOption
 from trpc_sdk.transport import server_executor, BaseServerTransportOption
 from trpc_sdk.server.worker import Worker, ExecutorProcess
@@ -16,15 +20,15 @@ from trpc_sdk.transport.server_executor import ExecutorUDPConnection, TaskConnec
 from trpc_sdk.utils.loop_lib import get_or_create_event_loop
 
 from ..common_util import unused_port
-from ..transport_util import TestChecker, TestClientConn
+from ..transport_util import TestParser, TestClientConn
 
 
 def create_service(engine: server_engine.TrpcServerEngine):
     """Create mock service"""
     engine.process_info.add_socket_type("net")
     service_option = ServiceOption()
-    engine.process_info.add_checker(TestChecker())
-    service = Service(service_option=service_option)
+    engine.process_info.add_parser(TestParser())
+    service = ServiceAdapter(service_option=service_option)
     engine.process_info.add_handler(service.handle)
     engine.process_info.add_timeout(1000)
     engine.process_info.add_service(service)
@@ -37,7 +41,7 @@ def test_server_executor_tcp():
     engine.process_info.add_address(("127.0.0.1", unused_port()))
     create_service(engine)
     engine.process_info.add_network("tcp")
-    engine.process_info.add_checker(TestChecker())
+    engine.process_info.add_parser(TestParser())
     worker = Worker()
     app = ExecutorProcess(worker, engine)
     app.block = False
@@ -103,7 +107,7 @@ def test_server_executor_udp():
     service = create_service(engine)
     engine.process_info.add_address(("127.0.0.1", unused_port()))
     engine.process_info.add_network("udp")
-    engine.process_info.add_checker(TestChecker())
+    engine.process_info.add_parser(TestParser())
     engine.process_info.add_service(service)
     worker = Worker()
     app = ExecutorProcess(worker, engine)
@@ -119,7 +123,7 @@ def test_server_executor_udp():
     task_conn.connection_lost(None)
 
     try:
-        dispatcher_conn = server_executor.ExecutorUDPConnection(app, TestChecker(), service.handle, 1000)
+        dispatcher_conn = server_executor.ExecutorUDPConnection(app, TestParser(), service.handle, 1000)
         dispatcher_conn.connection_made(TestClientConn())
         dispatcher_conn.datagram_received(
             b'\t0\x00\x00\x00\x00\x00\x1f\x00\x02\x00\x00\x00\x00\x00\x00\x18\x01\n\x0bhi: hello: ', 'test_addr')
@@ -131,22 +135,22 @@ def test_server_executor_udp():
 
 @pytest.mark.asyncio
 async def test_executor_udp_send_failure_and_decode_error(monkeypatch):
-    checker = MagicMock()
-    checker.create.return_value = checker
-    checker.read.side_effect = ServerDecodeError("bad")
+    parser = MagicMock()
+    parser.create.return_value = parser
+    parser.read.side_effect = ServerDecodeError("bad")
 
     async def handle(ctx, req):
         return b"rsp"
 
-    conn = ExecutorUDPConnection(app=None, checker=checker, handle=handle, timeout=1000)
+    conn = ExecutorUDPConnection(app=None, parser=parser, handle=handle, timeout=1000)
     conn.connection_made(MagicMock())
     conn.datagram_received(b"x", ("127.0.0.1", 1))
 
     # process exception is caught around _handle_packages
-    checker2 = MagicMock()
-    checker2.create.return_value = checker2
-    checker2.read.side_effect = [[b"pkg"], []]
-    conn2 = ExecutorUDPConnection(app=None, checker=checker2, handle=handle, timeout=1)
+    parser2 = MagicMock()
+    parser2.create.return_value = parser2
+    parser2.read.side_effect = [[b"pkg"], []]
+    conn2 = ExecutorUDPConnection(app=None, parser=parser2, handle=handle, timeout=1)
     transport2 = MagicMock()
     transport2.get_extra_info.return_value = ("127.0.0.1", 0)
     conn2.connection_made(transport2)
@@ -160,7 +164,7 @@ async def test_executor_udp_send_failure_and_decode_error(monkeypatch):
     transport3 = MagicMock()
     transport3.sendto.side_effect = OSError("send fail")
     conn3 = ExecutorUDPConnection(
-        app=None, checker=MagicMock(create=lambda: MagicMock()), handle=handle, timeout=1
+        app=None, parser=MagicMock(create=lambda: MagicMock()), handle=handle, timeout=1
     )
     conn3.connection_made(transport3)
     await conn3._handle_request(b"req", transport3, ("127.0.0.1", 3), MagicMock())
@@ -172,14 +176,14 @@ def test_task_connection_decode_and_process_errors(monkeypatch):
     transport.is_closing.return_value = False
     tc.connection_made(transport)
 
-    checker = MagicMock()
-    checker.read.side_effect = ServerDecodeError("d")
-    tc.checker = checker
+    parser = MagicMock()
+    parser.read.side_effect = ServerDecodeError("d")
+    tc.parser = parser
     tc.data_received(b"x")
 
-    checker2 = MagicMock()
-    checker2.read.side_effect = [[b"pkg"], []]
-    tc.checker = checker2
+    parser2 = MagicMock()
+    parser2.read.side_effect = [[b"pkg"], []]
+    tc.parser = parser2
     monkeypatch.setattr(
         "trpc_sdk.transport.server_executor.inner_decode_task_rsp",
         lambda pkg: (_ for _ in ()).throw(RuntimeError("decode")),

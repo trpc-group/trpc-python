@@ -1,4 +1,8 @@
-# -*- coding: utf-8 -*-
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
 """Test http module"""
 import threading
 
@@ -13,7 +17,7 @@ from trpc_sdk.http import register_static
 from trpc_sdk.http import routes
 from trpc_sdk.http.http_transport import HttpMessageHandle
 from trpc_sdk.server import ServerOption
-from trpc_sdk.server import Service as ServiceAdapter
+from trpc_sdk.server import ServiceAdapter
 from trpc_sdk.server import ServiceOption  # pylint: disable=no-name-in-module
 from trpc_sdk.server.server_engine import TrpcServerEngine
 from trpc_sdk.server.server_process_info import BaseServerTransportOption
@@ -23,8 +27,8 @@ from trpc_sdk.server.worker import get_https_certs
 from trpc_sdk.transport import server_executor
 
 
-class _TestChecker(Parser):
-    """Test checker"""
+class _TestParser(Parser):
+    """Test parser"""
 
     def create(self):
         """Create server parser"""
@@ -41,7 +45,7 @@ def _create_executor_process() -> ExecutorProcess:
     engine.process_info.add_transport_opt(opts)
     engine.process_info.add_network("http")
     engine.process_info.add_handler(service_obj.handle)
-    engine.process_info.add_checker(_TestChecker())
+    engine.process_info.add_parser(_TestParser())
     engine.process_info.add_timeout(1000)
     engine.process_info.add_service(service_obj)
     app = ExecutorProcess(Worker(), engine)

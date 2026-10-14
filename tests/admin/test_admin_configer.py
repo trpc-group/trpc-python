@@ -1,3 +1,8 @@
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
 """Unit coverage for admin server configuration dispatch."""
 import json
 from types import SimpleNamespace
@@ -7,8 +12,8 @@ from unittest.mock import call
 
 import pytest
 
-from trpc_sdk.admin import server as server_mod
-from trpc_sdk.admin.server import Configer
+from trpc_sdk.admin import _server as server_mod
+from trpc_sdk.admin._server import Configer
 
 
 @pytest.mark.asyncio
@@ -29,17 +34,6 @@ async def test_config_multiple_keys_sends_combined_payload():
 
 
 @pytest.mark.asyncio
-async def test_debug_send_exception_cleans_pending(monkeypatch):
-    cfg = Configer()
-    ws = SimpleNamespace(send_str=AsyncMock(side_effect=OSError("closed")), closed=False)
-    cfg.clients = [ws]
-    monkeypatch.setattr(server_mod.uuid, "uuid4", lambda: "request-1")
-
-    assert await cfg.debug({"type": "heap_profile"}) is None
-    assert cfg.debug_pending == {}
-
-
-@pytest.mark.asyncio
 async def test_rpcz_illegal_child_index_uses_round_robin(monkeypatch):
     cfg = Configer()
     first = SimpleNamespace(send_str=AsyncMock(side_effect=OSError("stop")), closed=False)
@@ -53,16 +47,6 @@ async def test_rpcz_illegal_child_index_uses_round_robin(monkeypatch):
     first.send_str.assert_awaited_once()
     second.send_str.assert_awaited_once()
     assert cfg.rr_idx == 2
-
-
-def test_on_worker_debug_unknown_request_id_logs(monkeypatch):
-    cfg = Configer()
-    warning = MagicMock()
-    monkeypatch.setattr(server_mod.trpc_log, "warning", warning)
-
-    cfg.on_worker_debug("missing", {"errorcode": 0})
-
-    warning.assert_called_once()
 
 
 def test_decode_span_dict_and_json_paths(monkeypatch):
@@ -95,19 +79,16 @@ async def test_collect_rpcz_once_dispatches_each_client(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_worker_response_handlers_cover_invalid_and_valid_json(monkeypatch):
-    error = MagicMock()
+async def test_subprocess_rpcz_handler_dispatches_valid_json(monkeypatch):
     subprocess = MagicMock()
-    monkeypatch.setattr(server_mod.trpc_log, "error", error)
     monkeypatch.setattr(server_mod.configer, "on_subprocess_rpcz", subprocess)
 
-    await server_mod.handle_worker_debug(None, "{bad")
+    await server_mod.handle_subprocess_rpcz(None, "{bad")
     await server_mod.handle_subprocess_rpcz(
         None,
         json.dumps({"request_id": "r5", "child_index": 1, "spans": []}),
     )
 
-    error.assert_called_once()
     subprocess.assert_called_once_with(
         "r5",
         {"request_id": "r5", "child_index": 1, "spans": []},

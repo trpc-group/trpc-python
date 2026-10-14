@@ -15,6 +15,7 @@ from asyncio import Future
 from trpc_sdk.abc import TrpcContext
 from trpc_sdk.exceptions import TaskHandleError
 
+from ._types import TaskRegistry
 from ._utils import get_task_conn
 from ._utils import send_to_task as send_task_to_conn
 
@@ -32,8 +33,17 @@ def send_to_task(ctx: TrpcContext, task_name: str, req: object) -> Future:
 
     Raises:
         TaskHandleError: No task is registered under this name.
+        RuntimeError: Called on a thread that owns no task pipe, such as an
+            I/O loop of ``io_handle_type: separate``. Task pipes belong to
+            the loop that opened them, so only serving loops can produce.
     """
-    conn = get_task_conn(task_name)
+    try:
+        conn = get_task_conn(task_name)
+    except KeyError as err:
+        if len(TaskRegistry.conns) == 0:
+            raise RuntimeError("send_to_task must be called from a serving loop (a handle thread under "
+                               "io_handle_type 'separate'); this thread has no task connection") from err
+        raise
     if conn is None:
         raise TaskHandleError("fatal error: task conn cannot find!")
     return send_task_to_conn(ctx, conn, req)

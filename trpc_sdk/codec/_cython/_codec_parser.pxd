@@ -13,14 +13,14 @@
 from libc.stdint cimport uint16_t
 from libc.stdint cimport uint32_t
 
-from trpc_sdk.abc._cython cimport BaseServerProtocolChecker
+from trpc_sdk.abc._cython cimport BaseServerProtocolParser
 
 cdef extern from "arpa/inet.h":
     uint16_t ntohs(uint16_t netshort)
     uint32_t ntohl(uint32_t netlong)
 
 
-cdef class TrpcServerProtocolChecker(BaseServerProtocolChecker):
+cdef class TrpcServerProtocolParser(BaseServerProtocolParser):
     cdef:
         cdef char* buf      # Growable stream buffer; a half-frame survives across feed_data.
         cdef int length     # Bytes currently valid in buf.

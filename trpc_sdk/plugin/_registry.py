@@ -133,7 +133,7 @@ def get_plugin_class(plugin_type: PluginType, plugin_name: str) -> Optional[Call
 def get_registered_tasks() -> List[TaskInfo]:
     """Return ``task_info`` for every registered TASK plugin.
 
-    :mod:`trpc_sdk.server._task` imports this name at module load even
+    :mod:`trpc_sdk.runtime._process._task_process` imports this name at module load even
     when nothing has registered a task.
 
     Returns:

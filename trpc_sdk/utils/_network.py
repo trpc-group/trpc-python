@@ -10,7 +10,13 @@ Port probes here are *availability* checks, not format-only validators:
 :func:`is_tcp_port_available` fails if something already accepts TCP on
 that address, and :func:`is_udp_port_available` fails if bind is refused.
 :func:`create_probe_socket` builds a short-lived socket for those probes
-only; listen sockets are created by :mod:`trpc_sdk.transport`.
+only; listen sockets are created by :func:`create_new_socket`.
+
+The listen-socket constructors (:func:`create_new_socket`,
+:func:`create_inet_socket`, :func:`create_unix_socket`) run in the child
+after fork. The returned socket is already bound (and, for stream sockets,
+listening) and marked non-blocking so asyncio can wrap it with
+``create_server`` / ``create_datagram_endpoint``.
 """
 
 from __future__ import annotations
@@ -21,11 +27,13 @@ import socket
 import struct
 import sys
 from contextlib import closing
+from typing import Tuple
 
 import netifaces
 
 from trpc_sdk.common import TransportSocket
 from trpc_sdk.log import logger
+from ._constants import DEFAULT_BACKLOG
 from ._constants import TcpState
 from ._constants import UNIX_TYPE
 from ._types import IpType
@@ -34,7 +42,7 @@ from ._types import PortType
 
 # Maps ``ipaddress.IPv*Address.version`` (4 / 6) onto ``socket.AF_*``.
 # Used only by :func:`create_probe_socket` for short-lived port probes;
-# listen sockets are created by :mod:`trpc_sdk.transport`.
+# listen sockets are created by :func:`create_new_socket`.
 _IP_TYPE_MAP = {4: socket.AF_INET, 6: socket.AF_INET6}
 
 
@@ -249,7 +257,7 @@ def create_probe_socket(ip: IpType, is_udp: bool) -> socket.socket:
 
     Family is taken from ``ip`` (IPv4 vs IPv6). This is not the listen
     socket used by the dispatcher; see
-    :func:`trpc_sdk.transport.create_server_socket` for that.
+    :func:`create_new_socket` for that.
 
     Args:
         ip: Address whose version selects ``AF_INET`` / ``AF_INET6``.
@@ -260,6 +268,91 @@ def create_probe_socket(ip: IpType, is_udp: bool) -> socket.socket:
     """
     addr = ipaddress.ip_address(ip)
     return socket.socket(_IP_TYPE_MAP[addr.version], socket.SOCK_DGRAM if is_udp else socket.SOCK_STREAM)
+
+
+def create_new_socket(address: Tuple[str, int],
+                      socket_type: str,
+                      reuse_port: bool = False,
+                      stream: bool = True,
+                      backlog: int = DEFAULT_BACKLOG) -> socket.socket:
+    """Create and bind the listen socket for one service address.
+
+    Args:
+        address: ``(host, port)`` for inet, or ``(unix_path, unused_port)``
+            for a UNIX socket. Only ``address[0]`` is used for UNIX.
+        socket_type: Socket family name; UNIX sockets are detected by
+            :func:`is_unix_socket`.
+        reuse_port: When True, set ``SO_REUSEPORT`` so every executor in
+            multi-listener mode can bind the same inet address.
+        stream: True for TCP / UNIX stream; False for UDP datagram.
+        backlog: ``listen()`` backlog for stream sockets.
+
+    Returns:
+        A non-blocking, already-bound socket. Stream sockets are listening.
+    """
+    if is_unix_socket(socket_type):
+        return create_unix_socket(address, backlog)
+    return create_inet_socket(address, reuse_port, stream, backlog)
+
+
+def create_inet_socket(address: Tuple[str, int],
+                       reuse_port: bool = False,
+                       stream: bool = True,
+                       backlog: int = DEFAULT_BACKLOG) -> socket.socket:
+    """Create, bind, and optionally listen on an IPv4 or IPv6 socket.
+
+    Args:
+        address: ``(host, port)`` to bind. The host decides AF_INET vs AF_INET6.
+        reuse_port: When True, set ``SO_REUSEPORT``.
+        stream: True for ``SOCK_STREAM`` (TCP); False for ``SOCK_DGRAM`` (UDP).
+        backlog: ``listen()`` backlog; ignored for UDP.
+
+    Returns:
+        A non-blocking bound socket. TCP sockets also have NODELAY, keepalive,
+        and lingering disabled, and are already listening.
+    """
+    sock = None
+    stream_option = socket.SOCK_STREAM if stream else socket.SOCK_DGRAM
+    if is_ipv4(address[0]):
+        sock = socket.socket(socket.AF_INET, stream_option)
+    elif is_ipv6(address[0]):
+        sock = socket.socket(socket.AF_INET6, stream_option)
+    if stream:
+        sock.setblocking(False)
+        set_tcp_no_delay(sock)
+        set_no_close_wait(sock)
+        set_tcp_keep_alive(sock)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if reuse_port:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+    sock.bind(address)
+    if stream:
+        sock.listen(backlog)
+    sock.setblocking(False)
+    return sock
+
+
+def create_unix_socket(address: Tuple[str, int], backlog: int = DEFAULT_BACKLOG) -> socket.socket:
+    """Create and listen on a UNIX-domain stream socket.
+
+    Unlinks ``address[0]`` first when that path already exists, so a stale
+    socket file from a previous process does not make bind fail.
+
+    Args:
+        address: ``(unix_path, unused_port)``; only the path is bound.
+        backlog: ``listen()`` backlog.
+
+    Returns:
+        A non-blocking listening UNIX stream socket.
+    """
+    if os.path.exists(address[0]):
+        unlink_unix_socket_file(address[0])
+    stream_option = socket.SOCK_STREAM
+    sock = socket.socket(socket.AF_UNIX, stream_option)
+    sock.bind(address[0])
+    sock.listen(backlog)
+    sock.setblocking(False)
+    return sock
 
 
 def unlink_unix_socket_file(unix_path: str) -> bool:

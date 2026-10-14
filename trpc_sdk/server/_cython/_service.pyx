@@ -14,9 +14,10 @@ breaking, the filter chain, and encoding the response. Errors are written
 into the response frame rather than raised to the transport.
 
 Naming-service registration lives in :mod:`trpc_sdk.server._registry`;
-a :class:`Service` only holds the ``registrar`` it is given there.
+a :class:`ServiceAdapter` only holds the ``registrar`` it is given there.
 """
 
+import threading
 import traceback
 from typing import Callable
 
@@ -41,6 +42,7 @@ from trpc_sdk.serialization import serialize
 from trpc_sdk.telemetry import report_attr
 from trpc_sdk.transport import DefaultServerTransport
 from trpc_sdk.transport import DefaultServerTransportOption
+from trpc_sdk.transport import resolve_server_transport
 from trpc_sdk.utils import now_ms
 from trpc_sdk.utils cimport current_time_ms
 from .._option import ServiceOption
@@ -51,7 +53,7 @@ from .._types import QueueWindow
 cdef int _POLICY_SLIDING_WINDOW = int(QueueWaitPolicy.SLIDING_WINDOW)
 
 
-cdef class Service(BaseService):
+cdef class ServiceAdapter(BaseService):
     """Per-service handler path after the transport has a complete request frame.
 
     One instance per YAML ``server.service[]`` entry. ``opt`` is the
@@ -71,19 +73,30 @@ cdef class Service(BaseService):
         # ``ServiceRegistrar`` set by ``start_service_registry`` only when
         # ``opt.registry`` is configured; stopped by :meth:`close`.
         self.registrar = None
-        # Sliding-window samples for ``QueueWaitPolicy.SLIDING_WINDOW``.
-        # Built even for DEFAULT so ``_check_queue_wait`` need not branch
-        # on whether the window exists. YAML ``server.queue_cb`` overrides
-        # the default interval / ratio / threshold when present.
-        queue_cb_cfg = TrpcConfig.server_config().queue_cb
-        if queue_cb_cfg is not None:
-            self.queue_window = QueueWindow(
-                interval=queue_cb_cfg.interval,
-                ratio=queue_cb_cfg.ratio,
-                threshold=queue_cb_cfg.threshold,
-            )
-        else:
-            self.queue_window = QueueWindow()
+        # YAML ``server.queue_cb``; overrides the default interval / ratio /
+        # threshold of every ``QueueWindow`` this service builds.
+        self._queue_cb_cfg = TrpcConfig.server_config().queue_cb
+        # One ``QueueWindow`` per serving thread: several serving loops update
+        # the bucket counters concurrently, and a shared window would lose
+        # increments. Built lazily, on the first request a thread handles.
+        self._queue_windows = threading.local()
+
+    @property
+    def queue_window(self):
+        """Sliding-window samples of the calling thread, for ``SLIDING_WINDOW``."""
+        return self._queue_window()
+
+    cdef object _queue_window(self):
+        """Return this thread's ``QueueWindow``, building it on first use."""
+        window = getattr(self._queue_windows, "window", None)
+        if window is None:
+            cfg = self._queue_cb_cfg
+            if cfg is not None:
+                window = QueueWindow(interval=cfg.interval, ratio=cfg.ratio, threshold=cfg.threshold)
+            else:
+                window = QueueWindow()
+            self._queue_windows.window = window
+        return window
 
     cdef float _merge_timeout_budget(self, TrpcContext ctx):
         """Merge this service's timeout with the upstream remaining budget.
@@ -151,10 +164,10 @@ cdef class Service(BaseService):
             return True
         if self.opt.queue_wait_policy == _POLICY_SLIDING_WINDOW:
             if limit_ms <= waited_ms:
-                if not self.queue_window.report_queue_time(now_ms_ts, False):
+                if not self._queue_window().report_queue_time(now_ms_ts, False):
                     return False
             else:
-                self.queue_window.report_queue_time(now_ms_ts, True)
+                self._queue_window().report_queue_time(now_ms_ts, True)
         else:
             if limit_ms <= waited_ms:
                 return False
@@ -455,8 +468,18 @@ cdef class Service(BaseService):
                 self.stream_handlers[stream_handler.name] = stream_handler
 
     cpdef void run(self):
-        """Blocking ``listen_and_serve`` on this service's transport."""
-        self.opt.transport.listen_and_serve(self.opt.transport_option, self.opt.app.server_engine)
+        """Resolve and bind this service's transport, then register it on the engine.
+
+        Runs before fork, from ``Server.serve``. The transport is resolved
+        here rather than in ``create_server`` because a protocol starter may
+        be registered after ``create_server`` and before ``serve``. ``bind``
+        only records the options; the engine then checks the endpoint and
+        appends it to ``process_info`` so the worker can listen on it after
+        fork.
+        """
+        self.opt.transport = resolve_server_transport(self.opt.protocol, self.opt.transport)
+        self.opt.transport.bind(self.opt.transport_option)
+        self.opt.app.server_engine.add_listen_endpoint(self.opt.transport)
 
     cpdef object close(self):
         """Stop naming-service registration if this service has a registrar.
@@ -473,11 +496,11 @@ cdef class Service(BaseService):
         return None
 
 
-def create_service(service_name: str, service_option: ServiceOption) -> Service:
-    """Build one :class:`Service` for a listen endpoint.
+def create_service(service_name: str, service_option: ServiceOption) -> ServiceAdapter:
+    """Build one :class:`ServiceAdapter` for a listen endpoint.
 
     Fills in the default transport and transport option when the caller
-    omitted them, installs :meth:`Service.handle` unless a handler is
+    omitted them, installs :meth:`ServiceAdapter.handle` unless a handler is
     already set, and binds the service onto ``transport_option`` so the
     listen path can reach the handler.
 
@@ -487,7 +510,7 @@ def create_service(service_name: str, service_option: ServiceOption) -> Service:
             is constructed when this is ``None``.
 
     Returns:
-        A ``Service`` ready to be passed to :meth:`Server.add_service`.
+        A ``ServiceAdapter`` ready to be passed to :meth:`Server.add_service`.
     """
     if service_option is None:
         service_option = ServiceOption()
@@ -498,7 +521,7 @@ def create_service(service_name: str, service_option: ServiceOption) -> Service:
     if service_option.transport_option is None:
         service_option.transport_option = DefaultServerTransportOption()
 
-    service = Service(service_option=service_option)
+    service = ServiceAdapter(service_option=service_option)
 
     if not service.opt.handler_set:
         service.opt.set_handler(service.handle)

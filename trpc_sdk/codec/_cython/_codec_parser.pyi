@@ -6,7 +6,7 @@
 
 """Type hints for the length-only tRPC frame splitter.
 
-``TrpcServerProtocolChecker`` checks magic ``2352`` and ``package_len``
+``TrpcServerProtocolParser`` checks magic ``2352`` and ``package_len``
 only; protocol decode happens later.
 """
 
@@ -14,10 +14,10 @@ from __future__ import annotations
 
 from typing import List
 
-from trpc_sdk.abc import BaseServerProtocolChecker
+from trpc_sdk.abc import BaseServerProtocolParser
 
 
-class TrpcServerProtocolChecker(BaseServerProtocolChecker):
+class TrpcServerProtocolParser(BaseServerProtocolParser):
     """Split a TCP stream into complete tRPC frames.
 
     A frame is 16-byte head plus ``package_len - 16`` more bytes.

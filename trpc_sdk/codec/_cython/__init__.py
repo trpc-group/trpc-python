@@ -15,10 +15,10 @@ from ._codec import _TrpcClientCodec  # pyright: ignore[reportMissingModuleSourc
 from ._codec import _TrpcServerCodec  # pyright: ignore[reportMissingModuleSource]
 from ._codec_stream import _TrpcClientStreamCodec  # pyright: ignore[reportMissingModuleSource]
 from ._codec_stream import _TrpcServerStreamCodec  # pyright: ignore[reportMissingModuleSource]
-from ._codec_parser import TrpcServerProtocolChecker  # pyright: ignore[reportMissingModuleSource]
+from ._codec_parser import TrpcServerProtocolParser  # pyright: ignore[reportMissingModuleSource]
 
 __all__ = [
-    "TrpcServerProtocolChecker",
+    "TrpcServerProtocolParser",
     "_TrpcClientCodec",
     "_TrpcClientStreamCodec",
     "_TrpcServerCodec",

@@ -8,7 +8,7 @@
 
 """Cython base for request handling and service registration.
 
-``cdef class Service`` must inherit an extension type. This module is that
+``cdef class ServiceAdapter`` must inherit an extension type. This module is that
 base; the public Python contract is re-exported from ``trpc_sdk.abc._server``.
 """
 

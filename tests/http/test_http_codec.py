@@ -1,423 +1,146 @@
-# -*- coding: utf-8 -*-
-"""Test http codec module"""
-import base64
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
+"""Tests for the context-first HTTP codec plugins."""
+
 import http
 import json
 
 import pytest
+from aiohttp import hdrs
+from aiohttp import test_utils as aiohttp_test_utils
+from aiohttp.web_response import Response
+from multidict import CIMultiDict
+from multidict import CIMultiDictProxy
 
-from trpc_sdk.trpcpb import ResponseProtocol
-from trpc_sdk.abc.context import Context  # pylint: disable=no-name-in-module
-from trpc_sdk.codec import SerializationType
-from trpc_sdk.codec.compress import CompressType
-from trpc_sdk.codec.message import new_message  # pylint: disable=no-name-in-module
+from trpc_sdk.abc import TrpcContext
+from trpc_sdk.abc import get_message
 from trpc_sdk.exceptions import ClientInvokeError
-from trpc_sdk.exceptions import ErrorCode
-from trpc_sdk.exceptions import ErrorType
-from trpc_sdk.exceptions import FuncNotFoundError
-from trpc_sdk.exceptions import NewBusinessError
-from trpc_sdk.exceptions import TRPCBaseError
-from trpc_sdk.http import defines as http_defines
-from trpc_sdk.http.codec import ClientHttpCodec
-from trpc_sdk.http.codec import ClientReqHeader
-from trpc_sdk.http.codec import ClientRspHeader
-from trpc_sdk.http.codec import ServerHttpCodec
+from trpc_sdk.exceptions import TrpcErrorType
+from trpc_sdk.exceptions import TrpcException
+from trpc_sdk.http import HTTP_TRPC_HEADER
+from trpc_sdk.http import ClientHttpCodec
+from trpc_sdk.http import HttpClientReqHeader
+from trpc_sdk.http import HttpClientRspHeader
+from trpc_sdk.http import ServerHttpCodec
+from trpc_sdk.http import set_http_ok_codes
+from trpc_sdk.serialization import SerializationType
 
 
-def test_trpc_header():
-    """Test trpc_header"""
-    assert "trpc-version" == http_defines.HTTP_TRPC_HEADER.trpc_version
-    assert "trpc-call-type" == http_defines.HTTP_TRPC_HEADER.trpc_call_type
-    assert "trpc-message-type" == http_defines.HTTP_TRPC_HEADER.trpc_message_type
-    assert "trpc-request-id" == http_defines.HTTP_TRPC_HEADER.trpc_request_id
-    assert "trpc-timeout" == http_defines.HTTP_TRPC_HEADER.trpc_timeout
-    assert "trpc-caller" == http_defines.HTTP_TRPC_HEADER.trpc_caller
-    assert "trpc-callee" == http_defines.HTTP_TRPC_HEADER.trpc_callee
-    assert "trpc-trans-info" == http_defines.HTTP_TRPC_HEADER.trpc_trans_info
-    assert "trpc-env" == http_defines.HTTP_TRPC_HEADER.trpc_env
-    assert "trpc-dyeing-key" == http_defines.HTTP_TRPC_HEADER.trpc_dyeing_key
-    assert "trpc-error-msg" == http_defines.HTTP_TRPC_HEADER.trpc_error_message
-    assert "trpc-ret" == http_defines.HTTP_TRPC_HEADER.trpc_framework_error_code
-    assert "trpc-func-ret" == http_defines.HTTP_TRPC_HEADER.trpc_user_func_error_code
-    assert "Connection" == http_defines.HTTP_TRPC_HEADER.connection
+def _server_ctx(method: str, path: str, headers=None, payload: bytes = b"") -> TrpcContext:
+    ctx = TrpcContext()
+    msg = get_message(ctx)
+    request = aiohttp_test_utils.make_mocked_request(method, path, headers=headers or {}, payload=None)
+    if payload:
+        async def _read():
+            return payload
+        request.read = _read
+    msg.set_server_raw_req(request)
+    msg.set_server_raw_rsp(Response())
+    return ctx
 
 
-def test_get_trpc_error_code():
-    """Test find_serialization_type"""
-    val = http_defines.get_trpc_error_code(ErrorType.Framework)
-    assert val is http_defines.HTTP_TRPC_HEADER.trpc_framework_error_code
-    val = http_defines.get_trpc_error_code(ErrorType.Business)
-    assert val is http_defines.HTTP_TRPC_HEADER.trpc_user_func_error_code
-    val = http_defines.get_trpc_error_code(100)
-    assert val is None
-    val = http_defines.get_trpc_error_code(-2, "test")
-    assert val == "test"
-
-
-def test_find_serialization_type():
-    """Test find_serialization_type"""
-    serialization_type = http_defines.find_serialization_type("application/json")
-    assert SerializationType.JSON is serialization_type
-    serialization_type = http_defines.find_serialization_type("application/protobuf")
-    assert SerializationType.PB is serialization_type
-    serialization_type = http_defines.find_serialization_type("application/x-protobuf")
-    assert SerializationType.PB is serialization_type
-    serialization_type = http_defines.find_serialization_type("application/pb")
-    assert SerializationType.PB is serialization_type
-    serialization_type = http_defines.find_serialization_type("application/proto")
-    assert SerializationType.PB is serialization_type
-    serialization_type = http_defines.find_serialization_type("application/jce")
-    assert SerializationType.JCE is serialization_type
-    serialization_type = http_defines.find_serialization_type("application/flatbuffer")
-    assert SerializationType.FlatBuffer is serialization_type
-    serialization_type = http_defines.find_serialization_type("application/octet-stream")
-    assert SerializationType.Noop is serialization_type
-    serialization_type = http_defines.find_serialization_type("application/x-www-form-urlencoded")
-    assert SerializationType.Form is serialization_type
-    # unknown
-    serialization_type = http_defines.find_serialization_type("application/xxxx", SerializationType.JSON)
-    assert SerializationType.JSON is serialization_type
-
-
-def test_find_content_type():
-    """Test find_content_type"""
-    content_type = http_defines.find_content_type(SerializationType.JSON)
-    assert "application/json" == content_type
-    content_type = http_defines.find_content_type(SerializationType.PB)
-    assert content_type
-    content_type = http_defines.find_content_type(SerializationType.JCE)
-    assert "application/jce" == content_type
-    content_type = http_defines.find_content_type(SerializationType.FlatBuffer)
-    assert "application/flatbuffer" == content_type
-    content_type = http_defines.find_content_type(SerializationType.Noop)
-    assert "application/octet-stream" == content_type
-    content_type = http_defines.find_content_type(SerializationType.Form)
-    assert "application/x-www-form-urlencoded" == content_type
-    content_type = http_defines.find_content_type(-1)
-    assert not content_type
-    content_type = http_defines.find_content_type(10000, "test_content_type")
-    assert "test_content_type" == content_type
-
-
-def test_find_compress_type():
-    """Test find_compress_type"""
-    compress_type = http_defines.find_compress_type("gzip")
-    assert CompressType.Gzip == compress_type
-    compress_type = http_defines.find_compress_type("gzip1")
-    assert not compress_type
-    compress_type = http_defines.find_compress_type("gzip1", 1000)
-    assert compress_type == 1000
-
-    compress_type = http_defines.find_content_encoding(CompressType.Gzip)
-    assert "gzip" == compress_type
-    compress_type = http_defines.find_content_encoding(1000)
-    assert not compress_type
-    compress_type = http_defines.find_content_encoding(1000, "test_compress_type")
-    assert compress_type == "test_compress_type"
-
-
-def test_find_http_status():
-    """Test find_http_status"""
-    http_status = http_defines.find_http_status(ErrorCode.TRPC_INVOKE_SUCCESS)
-    assert http.HTTPStatus.OK == http_status
-    http_status = http_defines.find_http_status(ErrorCode.TRPC_SERVER_DECODE_ERR)
-    assert http.HTTPStatus.BAD_REQUEST == http_status
-    http_status = http_defines.find_http_status(ErrorCode.TRPC_SERVER_ENCODE_ERR)
-    assert http.HTTPStatus.INTERNAL_SERVER_ERROR == http_status
-    http_status = http_defines.find_http_status(ErrorCode.TRPC_SERVER_NOFUNC_ERR)
-    assert http.HTTPStatus.NOT_FOUND == http_status
-    http_status = http_defines.find_http_status(ErrorCode.TRPC_SERVER_NOSERVICE_ERR)
-    assert http.HTTPStatus.NOT_FOUND == http_status
-    http_status = http_defines.find_http_status(ErrorCode.TRPC_SERVER_TIMEOUT_ERR)
-    assert http.HTTPStatus.GATEWAY_TIMEOUT == http_status
-    http_status = http_defines.find_http_status(ErrorCode.TRPC_SERVER_OVERLOAD_ERR)
-    assert http.HTTPStatus.TOO_MANY_REQUESTS == http_status
-    http_status = http_defines.find_http_status(ErrorCode.TRPC_SERVER_SYSTEM_ERR)
-    assert http.HTTPStatus.INTERNAL_SERVER_ERROR == http_status
-    http_status = http_defines.find_http_status(ErrorCode.TRPC_SERVER_AUTH_FAIL)
-    assert http.HTTPStatus.NON_AUTHORITATIVE_INFORMATION == http_status
-    http_status = http_defines.find_http_status(ErrorCode.TRPC_SERVER_VALIDATE_FAIL)
-    assert http.HTTPStatus.BAD_REQUEST == http_status
-    http_status = http_defines.find_http_status(ErrorCode.TRPC_INVOKE_UNKNOWN_ERR)
-    assert http.HTTPStatus.INTERNAL_SERVER_ERROR == http_status
-
-
-class _MockHttpRequest:
-    """Test Request"""
-
-    def __init__(self, content_type: str, method: str):
-        self.headers = {"Content-Type": content_type}
-        self.method = method
-        self.path = "/test"
-        self.query_string = 'a=1&b=2'
-
-    async def read(self):
-        """Read data"""
-        return b'123'
-
-
-class _MockHttpResponse:
-    """Test Response"""
-
-    def __init__(self, content_type: str = None):
-        self.headers = {}
-        self.status = 0
-        self.reason = "OK"
-        if content_type:
-            self.headers["Content-Type"] = content_type
-
-    def set_status(self, status, reason="OK"):
-        """set status"""
-        self.status = status
-        self.reason = reason
-
-
-def test_server_codec_encode():
-    """Test server codec encode"""
-    ctx = Context()
-    ctx, msg = new_message(ctx)
-
-    # test content type
-    ctx.meta_data[http_defines.HTTP_REQ_KEY] = _MockHttpRequest("", "GET")
-    ctx.meta_data[http_defines.HTTP_RSP_KEY] = _MockHttpResponse()
-    ServerHttpCodec.encode(msg, b'')
-    assert ctx.meta_data[http_defines.HTTP_RSP_KEY].headers["Content-Type"] == "application/json"
-    ctx.meta_data[http_defines.HTTP_REQ_KEY] = _MockHttpRequest("test", "GET")
-    ctx.meta_data[http_defines.HTTP_RSP_KEY] = _MockHttpResponse()
-    ServerHttpCodec.encode(msg, b'')
-    assert ctx.meta_data[http_defines.HTTP_RSP_KEY].headers["Content-Type"] == "application/json"
-    ctx.meta_data[http_defines.HTTP_REQ_KEY] = _MockHttpRequest("test", "POST")
-    ctx.meta_data[http_defines.HTTP_RSP_KEY] = _MockHttpResponse()
-    ServerHttpCodec.encode(msg, b'')
-    assert ctx.meta_data[http_defines.HTTP_RSP_KEY].headers["Content-Type"] == "test"
-
-    # test rsp err
-    msg.server_rsp_err = FuncNotFoundError("test")
-    ctx.meta_data[http_defines.HTTP_REQ_KEY] = _MockHttpRequest("", "GET")
-    ctx.meta_data[http_defines.HTTP_RSP_KEY] = _MockHttpResponse("application/json")
-    ServerHttpCodec.encode(msg, b'')
-    assert ctx.meta_data[http_defines.HTTP_RSP_KEY].headers["trpc-error-msg"] == "test"
-    assert ctx.meta_data[http_defines.HTTP_RSP_KEY].headers["trpc-ret"] == str(msg.server_rsp_err.code)
-    assert ctx.meta_data[http_defines.HTTP_RSP_KEY].status == 404
-    msg.server_rsp_err = NewBusinessError(1000, "test")
-    ctx.meta_data[http_defines.HTTP_REQ_KEY] = _MockHttpRequest("", "GET")
-    ctx.meta_data[http_defines.HTTP_RSP_KEY] = _MockHttpResponse()
-    ServerHttpCodec.encode(msg, b'')
-    assert ctx.meta_data[http_defines.HTTP_RSP_KEY].headers["trpc-func-ret"] == str(msg.server_rsp_err.code)
-    # 非框架定义的错误码，返回200，由用户自己处理
-    assert ctx.meta_data[http_defines.HTTP_RSP_KEY].status == 200
-
-    # http 标准错误码，直接返回
-    msg.server_rsp_err = NewBusinessError(501, "test")
-    ctx.meta_data[http_defines.HTTP_REQ_KEY] = _MockHttpRequest("", "GET")
-    ctx.meta_data[http_defines.HTTP_RSP_KEY] = _MockHttpResponse()
-    ServerHttpCodec.encode(msg, b'')
-    assert ctx.meta_data[http_defines.HTTP_RSP_KEY].status == 501
-    assert ctx.meta_data[http_defines.HTTP_RSP_KEY].headers["trpc-func-ret"] == str(msg.server_rsp_err.code)
-    assert ctx.meta_data[http_defines.HTTP_RSP_KEY].headers["trpc-func-ret"] == "501"
-
-    msg.server_rsp_err = NewBusinessError(1000, "test")
-    ctx.meta_data[http_defines.HTTP_REQ_KEY] = _MockHttpRequest("", "GET")
-    ctx.meta_data[http_defines.HTTP_RSP_KEY] = _MockHttpResponse()
-    ctx.meta_data[http_defines.HTTP_RSP_KEY].set_status(400)
-    ServerHttpCodec.encode(msg, b'')
-    assert ctx.meta_data[http_defines.HTTP_RSP_KEY].status == 400
-    assert ctx.meta_data[http_defines.HTTP_RSP_KEY].headers["trpc-func-ret"] == str(msg.server_rsp_err.code)
-    assert ctx.meta_data[http_defines.HTTP_RSP_KEY].headers["trpc-func-ret"] == "1000"
-
-    # test rsp pb header
-    trpc_rsp = ResponseProtocol()
-    trpc_rsp.call_type = 2
-    trpc_rsp.request_id = 5
-    trpc_rsp.message_type = 8
-    trpc_rsp.trans_info["aa"] = b"cc"
-    msg.server_rsp_head = trpc_rsp
-    meta_data = {"s1": "k1"}
-    msg.server_meta_data = meta_data
-    ctx.meta_data.clear()
-    ctx.meta_data[http_defines.HTTP_REQ_KEY] = _MockHttpRequest("", "GET")
-    ctx.meta_data[http_defines.HTTP_RSP_KEY] = _MockHttpResponse("application/json")
-    ServerHttpCodec.encode(msg, b'')
-    headers = ctx.meta_data[http_defines.HTTP_RSP_KEY].headers
-    assert headers[http_defines.HTTP_TRPC_HEADER.trpc_call_type] == "2"
-    assert headers[http_defines.HTTP_TRPC_HEADER.trpc_request_id] == "5"
-    assert headers[http_defines.HTTP_TRPC_HEADER.trpc_message_type] == "8"
-    assert headers[http_defines.HTTP_TRPC_HEADER.trpc_version] == "0"
-    trans_info = headers[http_defines.HTTP_TRPC_HEADER.trpc_trans_info]
-    trans_info = json.loads(trans_info)
-    assert trans_info["aa"] == "cc"
-    assert trans_info["s1"] == "k1"
-
-    # test trpc_trans_info
-    meta_data = {"s1": "k1", "t": (1, 2)}
-    msg.server_meta_data = meta_data
-    msg.server_rsp_head = None
-    trpc_rsp = ResponseProtocol()
-    trpc_rsp.trans_info["aa"] = b"cc"
-    msg.server_rsp_head = trpc_rsp
-    ctx.meta_data.clear()
-    ctx.meta_data[http_defines.HTTP_REQ_KEY] = _MockHttpRequest("", "GET")
-    ctx.meta_data[http_defines.HTTP_RSP_KEY] = _MockHttpResponse("application/json")
-    ctx.meta_data[http_defines.TRANS_INFO_BASE64_KEY] = True
-    ServerHttpCodec.encode(msg, b'')
-    headers = ctx.meta_data[http_defines.HTTP_RSP_KEY].headers
-    trans_info = headers[http_defines.HTTP_TRPC_HEADER.trpc_trans_info]
-    trans_info = json.loads(trans_info)
-    print(trans_info)
+def _client_ctx_with_rsp(status: int, headers=None, body: bytes = b"") -> TrpcContext:
+    ctx = TrpcContext()
+    rsp = HttpClientRspHeader(status, CIMultiDictProxy(CIMultiDict(headers or {})), body)
+    get_message(ctx).set_client_rsp_head(rsp)
+    return ctx
 
 
 @pytest.mark.asyncio
-async def test_server_codec_decode():
-    """Test server codec decode"""
-    ctx = Context()
-    ctx, msg = new_message(ctx)
-
-    http_req = _MockHttpRequest("", "GET")
-    http_req.headers["trpc-version"] = "1"
-    http_req.headers["trpc-call-type"] = "0"
-    http_req.headers["trpc-message-type"] = "0"
-    http_req.headers["trpc-request-id"] = "1"
-    http_req.headers["trpc-timeout"] = "1000"
-    http_req.headers["trpc-caller"] = "trpc_sdk.app.client.service"
-    http_req.headers["trpc-callee"] = "trpc_sdk.app.server.service"
-    http_req.headers["trpc-trans-info"] = '{"a": 1, "b": "cc"}'
-    ctx.meta_data[http_defines.HTTP_REQ_KEY] = http_req
-    ret = await ServerHttpCodec.decode(msg, b'')
-    assert ret == b'a=1&b=2'
-    trpc_req = msg.server_req_head
-    assert trpc_req.version == 1
-    assert trpc_req.call_type == 0
-    assert trpc_req.message_type == 0
-    assert trpc_req.request_id == 1
-    assert trpc_req.timeout == 1000
-    assert trpc_req.caller == b"trpc_sdk.app.client.service"
-    assert trpc_req.callee == b"trpc_sdk.app.server.service"
-    d1 = {}
-    for key in trpc_req.trans_info:
-        d1[key] = trpc_req.trans_info[key]
-    assert d1["a"] == b'1'
-    assert d1["b"] == b'cc'
-    ctx.meta_data[http_defines.HTTP_REQ_KEY] = _MockHttpRequest("", "POST")
-    ret = await ServerHttpCodec.decode(msg, b'')
-    assert ret == b'123'
-    ctx.meta_data[http_defines.TRANS_INFO_BASE64_KEY] = True
-    trans_info = {"a": "aa", "b": "cc"}
-    for k, v in trans_info.items():
-        trans_info[k] = base64.b64encode(v.encode()).decode()
-    http_req.headers["trpc-trans-info"] = json.dumps(trans_info)
-    http_req.headers[http_defines.HTTP_TRPC_HEADER.trpc_caller_method] = "SayHello"
-    ctx.meta_data[http_defines.HTTP_REQ_KEY] = http_req
-    ret = await ServerHttpCodec.decode(msg, b'')
+async def test_server_decode_get_uses_query_string():
+    ctx = _server_ctx("GET", "/trpc.app.server.Greeter/SayHello?a=1&b=2",
+                      headers={HTTP_TRPC_HEADER.trpc_request_id: "7"})
+    body = await ServerHttpCodec().decode_data(ctx, b"")
+    msg = get_message(ctx)
+    assert body == b"a=1&b=2"
+    assert msg.serialization_type == SerializationType.Form
+    assert msg.server_rpc_name == "/trpc.app.server.Greeter/SayHello"
+    assert msg.callee_service_name == "trpc.app.server.Greeter"
+    assert msg.server_req_head.request_id == 7
 
 
 @pytest.mark.asyncio
-async def test_client_codec():
-    """Test client codec"""
-    ctx = Context()
-    ctx, msg = new_message(ctx)
-
-    try:
-        ClientHttpCodec.decode(msg, b'')
-        assert False
-    except Exception:  # pylint: disable=broad-exception-caught
-        assert True
-
-    # 测试 decode
-    rsp_head = ClientRspHeader(0, {}, b'')
-    rsp_head.status_code = http.HTTPStatus.OK
-    msg.client_rsp_head = rsp_head
-    rsp_head.headers["Content-Encoding"] = "gzip"
-    ClientHttpCodec.decode(msg, b'')
-    assert msg.compress_type == 1
-
-    rsp_head.headers["trpc-ret"] = "121"
-    ClientHttpCodec.decode(msg, b'')
-    assert msg.client_rsp_err.type == 3
-    assert msg.client_rsp_err.code == 121
-
-    rsp_head.headers["trpc-ret"] = "0"
-    rsp_head.headers["trpc-func-ret"] = "141"
-    ClientHttpCodec.decode(msg, b'')
-    assert msg.client_rsp_err.type == 2
-    assert msg.client_rsp_err.code == 141
-
-    rsp_head.headers["trpc-func-ret"] = "0"
-    rsp_head.status_code = http.HTTPStatus.BAD_REQUEST
-    ClientHttpCodec.decode(msg, b'')
-    assert msg.client_rsp_err.type == 1
-    assert msg.client_rsp_err.code == 999
-
-    # test encode
-    msg.client_req_head = None
-    ret = ClientHttpCodec.encode(msg, b'test')
-    assert ret == b'test'
-
-    msg.client_req_head = ClientReqHeader()
-    msg.caller_service = ""
-    ClientHttpCodec.encode(msg, b'')
-
-    msg.caller_service = "not none"
-    msg.caller_server = ""
-    msg.caller_service_name = "trpc_sdk.app.server.service"
-    ClientHttpCodec.encode(msg, b'')
-
-    msg.caller_server = "not none"
-    msg.callee_server = ""
-    msg.callee_service_name = "trpc_sdk.app.server.service"
-    msg.client_rpc_name = "/trpc_sdk.app.server.service/method"
-    ClientHttpCodec.encode(msg, b'')
+async def test_server_decode_post_reads_body_and_trans_info():
+    ctx = _server_ctx(
+        "POST", "/svc/Method",
+        headers={
+            hdrs.CONTENT_TYPE: "application/json",
+            HTTP_TRPC_HEADER.trpc_trans_info: json.dumps({"a": "b"}),
+        },
+        payload=b'{"msg": "hi"}',
+    )
+    body = await ServerHttpCodec().decode_data(ctx, b"")
+    msg = get_message(ctx)
+    assert body == b'{"msg": "hi"}'
+    assert msg.serialization_type == SerializationType.JSON
+    assert msg.server_meta_data["a"] == "b"
 
 
-def test_codec_encode():
-    """Test codec encode"""
-    ctx = Context()
+def test_server_encode_sets_content_type_and_error_headers():
+    ctx = _server_ctx("POST", "/svc/Method", headers={hdrs.CONTENT_TYPE: "application/x-protobuf"})
+    msg = get_message(ctx)
+    msg.set_server_rsp_err(TrpcException(TrpcErrorType.BUSINESS, 1001, "biz failed"))
 
-    ctx, msg = new_message(ctx)
-    ClientHttpCodec.encode(msg, b'')
-    assert msg.client_req_head.method == "GET"
-    assert msg.caller_app == "http"
-    assert msg.caller_server == "pytest"
-    assert msg.caller_service == "service"
-    assert msg.caller_service_name == "trpc_sdk.http.pytest.service"
-    assert msg.callee_app == ""
-    assert msg.callee_server == ""
-    assert msg.callee_service == ""
-    assert msg.callee_method == ""
+    assert ServerHttpCodec().encode_data(ctx, b"payload") == b"payload"
 
-    ClientHttpCodec.encode(msg, b'\n\x05hello')
-    assert msg.client_req_head.method == "GET"
-
-    ctx, msg = new_message(ctx)
-    ClientHttpCodec.encode(msg, b'\n\x05hello')
-    assert msg.client_req_head.method == "POST"
+    rsp = msg.server_raw_rsp
+    assert rsp.headers[hdrs.CONTENT_TYPE] == "application/x-protobuf"
+    assert rsp.headers[HTTP_TRPC_HEADER.trpc_error_message] == "biz failed"
+    assert rsp.headers[HTTP_TRPC_HEADER.trpc_user_func_error_code] == "1001"
+    assert rsp.status == http.HTTPStatus.OK
 
 
-def test_codec_decode():
-    """Test codec decode"""
-    ctx = Context()
-    ctx, msg = new_message(ctx)
+def test_client_encode_fills_method_and_caller():
+    ctx = TrpcContext()
+    assert ClientHttpCodec().encode_data(ctx, b"") == b""
+    msg = get_message(ctx)
+    assert msg.client_req_head.method == hdrs.METH_GET
+    assert msg.caller_service
 
+    ctx = TrpcContext()
+    ClientHttpCodec().encode_data(ctx, b"body")
+    assert get_message(ctx).client_req_head.method == hdrs.METH_POST
+
+
+def test_client_encode_keeps_existing_head():
+    ctx = TrpcContext()
+    msg = get_message(ctx)
+    msg.set_client_req_head(HttpClientReqHeader(hdrs.METH_PUT))
+    ClientHttpCodec().encode_data(ctx, b"body")
+    assert msg.client_req_head.method == hdrs.METH_PUT
+
+
+def test_client_decode_success_returns_body():
+    ctx = _client_ctx_with_rsp(200, body=b"ok")
+    assert ClientHttpCodec().decode_data(ctx, b"") == b"ok"
+    assert get_message(ctx).client_rsp_err is None
+
+
+def test_client_decode_maps_error_headers():
+    ctx = _client_ctx_with_rsp(200, headers={
+        HTTP_TRPC_HEADER.trpc_user_func_error_code: "42",
+        HTTP_TRPC_HEADER.trpc_error_message: "bad",
+    })
+    ClientHttpCodec().decode_data(ctx, b"")
+    err = get_message(ctx).client_rsp_err
+    assert err.type == TrpcErrorType.BUSINESS
+    assert err.code == 42
+
+
+def test_client_decode_status_codes():
+    ctx = _client_ctx_with_rsp(404)
+    ClientHttpCodec().decode_data(ctx, b"")
+    assert isinstance(get_message(ctx).client_rsp_err, ClientInvokeError)
+
+    ctx = _client_ctx_with_rsp(404)
+    set_http_ok_codes(ctx, {404})
+    ClientHttpCodec().decode_data(ctx, b"")
+    assert get_message(ctx).client_rsp_err is None
+
+
+def test_client_decode_requires_rsp_head():
     with pytest.raises(ClientInvokeError):
-        ClientHttpCodec.decode(msg, b'')
-
-    rsp_head = ClientRspHeader(http.HTTPStatus.OK, {"trpc-ret": "1"}, b'')
-    msg.set_client_rsp_head(rsp_head)
-    ClientHttpCodec.decode(msg, b'')
-    assert isinstance(msg.client_rsp_err, TRPCBaseError)
-    assert msg.client_rsp_err.type == 3
-
-    rsp_head = ClientRspHeader(http.HTTPStatus.OK, {"trpc-ret": "0", "trpc-func-ret": "1"}, b'')
-    msg.set_client_rsp_head(rsp_head)
-    ClientHttpCodec.decode(msg, b'')
-    assert isinstance(msg.client_rsp_err, TRPCBaseError)
-    assert msg.client_rsp_err.type == 2
-
-    rsp_head = ClientRspHeader(http.HTTPStatus.FORBIDDEN, {"trpc-ret": "0", "trpc-func-ret": "0"}, b'')
-    msg.set_client_rsp_head(rsp_head)
-    ClientHttpCodec.decode(msg, b'')
-    assert isinstance(msg.client_rsp_err, ClientInvokeError)
-
-    rsp_head = ClientRspHeader(http.HTTPStatus.OK, {"trpc-ret": "0", "trpc-func-ret": "0"}, b'hello')
-    msg.set_client_rsp_head(rsp_head)
-    body = ClientHttpCodec.decode(msg, b'')
-    assert body == b'hello'
+        ClientHttpCodec().decode_data(TrpcContext(), b"")

@@ -41,6 +41,7 @@ from ._loguru import LoguruLogger
 from ._loguru import capture_all_outputs
 from ._loguru import create_bootstrap_logger
 from ._loguru import create_loguru_logger
+from ._loguru import flush_logs
 from ._loguru import install_third_party_capture
 from ._loguru import loguru_available
 from . import _logger as logger
@@ -66,6 +67,7 @@ __all__ = [
     "debug_context",
     "ensure_filepath_and_lineno",
     "error",
+    "flush_logs",
     "error_context",
     "fatal",
     "fatal_context",

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from trpc_sdk.abc import TrpcContext
 from trpc_sdk.abc import TrpcFrameHead
 from trpc_sdk.abc import TrpcMessage
 from trpc_sdk.abc._cython._codec import _Codec
@@ -24,15 +25,16 @@ from trpc_sdk.abc._cython._codec import _Codec
 class _TrpcClientStreamCodec(_Codec):
     """Client-side stream codec: INIT / DATA / CLOSE / FEEDBACK.
 
-    Stream-only; ``encode`` / ``decode`` keep the ``_Codec`` default.
+    Stream-only; ``encode_data`` / ``decode_data`` keep the ``_Codec``
+    default.
     """
 
-    def encode_stream(self, message: TrpcMessage, body: Optional[bytes]) -> bytes:
+    def encode_stream(self, context: TrpcContext, body: Optional[bytes]) -> bytes:
         """Pack one client stream frame by ``frame_state``.
 
         Args:
-            message: RPC state; ``frame_head.frame_state`` selects INIT /
-                DATA / CLOSE / FEEDBACK.
+            context: Owns the message whose ``frame_head.frame_state``
+                selects INIT / DATA / CLOSE / FEEDBACK.
             body: Used for DATA; INIT / CLOSE / FEEDBACK read
                 ``message.stream_frame`` instead.
 
@@ -41,12 +43,12 @@ class _TrpcClientStreamCodec(_Codec):
         """
         ...
 
-    def decode_stream(self, message: TrpcMessage, buffer: bytes) -> bytes:
+    def decode_stream(self, context: TrpcContext, buffer: bytes) -> bytes:
         """Unpack one client stream frame by ``frame_state``.
 
         Args:
-            message: RPC state; ``frame_head.frame_state`` must already
-                be set from ``buffer``.
+            context: Owns the message whose ``frame_head.frame_state``
+                must already be set from ``buffer``.
             buffer: Complete stream frame, head included.
 
         Raises:
@@ -144,15 +146,16 @@ class _TrpcClientStreamCodec(_Codec):
 class _TrpcServerStreamCodec(_Codec):
     """Server-side stream codec: INIT / DATA / CLOSE / FEEDBACK.
 
-    Stream-only; ``encode`` / ``decode`` keep the ``_Codec`` default.
+    Stream-only; ``encode_data`` / ``decode_data`` keep the ``_Codec``
+    default.
     """
 
-    def encode_stream(self, message: TrpcMessage, body: Optional[bytes]) -> bytes:
+    def encode_stream(self, context: TrpcContext, body: Optional[bytes]) -> bytes:
         """Pack one server stream frame by ``frame_state``.
 
         Args:
-            message: RPC state; ``frame_head.frame_state`` selects INIT /
-                DATA / CLOSE / FEEDBACK.
+            context: Owns the message whose ``frame_head.frame_state``
+                selects INIT / DATA / CLOSE / FEEDBACK.
             body: Used for DATA; INIT / CLOSE / FEEDBACK read
                 ``message.stream_frame`` instead.
 
@@ -161,12 +164,12 @@ class _TrpcServerStreamCodec(_Codec):
         """
         ...
 
-    def decode_stream(self, message: TrpcMessage, buffer: bytes) -> bytes:
+    def decode_stream(self, context: TrpcContext, buffer: bytes) -> bytes:
         """Unpack one server stream frame by ``frame_state``.
 
         Args:
-            message: RPC state; ``frame_head.frame_state`` must already
-                be set from ``buffer``.
+            context: Owns the message whose ``frame_head.frame_state``
+                must already be set from ``buffer``.
             buffer: Complete stream frame, head included.
 
         Raises:

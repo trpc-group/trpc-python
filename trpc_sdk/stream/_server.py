@@ -10,20 +10,29 @@
 frame and writes the transport directly. ``recv_msg`` never reads the
 socket; it pops a queue filled by :class:`StreamDispatcher` when a DATA
 or CLOSE frame for this ``(session_id, stream_id)`` arrives through
-``Service.handle``.
+``ServiceAdapter.handle``.
 
 :class:`StreamDispatcher` is the per-service map of live streams and the
-INIT / DATA / CLOSE / FEEDBACK switch.
+INIT / DATA / CLOSE / FEEDBACK switch. The map is one per thread (per
+serving loop): a stream's frames and its handler all run on one loop, which
+the TCP protocol guarantees by pinning each stream to a loop.
+
+A stream is dropped from the maps once both sides have closed it: by the
+handler's ``finally`` when the client's CLOSE came first, by
+:meth:`StreamDispatcher.handle_close` when the handler finished first. When
+the connection goes away, :meth:`StreamDispatcher.abort_session` ends every
+stream it carried on the calling loop.
 """
 
 from __future__ import annotations
 
-from collections import defaultdict
+import threading
 from typing import Awaitable
 from typing import Callable
 from typing import Dict
 from typing import Optional
 
+from trpc_sdk.abc import STREAM_WRITER_CTX_KEY
 from trpc_sdk.abc import BaseServerStream
 from trpc_sdk.abc import TrpcContext
 from trpc_sdk.abc import TrpcMessage
@@ -38,6 +47,7 @@ from trpc_sdk.exceptions import TrpcErrorCode
 from trpc_sdk.log import logger
 from trpc_sdk.serialization import deserialize
 from trpc_sdk.serialization import serialize
+from trpc_sdk.telemetry import report_attr
 from trpc_sdk.utils import Queue
 from trpc_sdk._inner import trpc_pb2
 from ._flow_control import ReceiveControl
@@ -51,6 +61,8 @@ class ServerStream(BaseServerStream):
     ``s_control`` is send-side credit taken from the client's INIT window.
     ``r_control`` is receive-side accounting of our own window; it fires
     :meth:`feedback` (a FEEDBACK frame) after a quarter of the buffer.
+    ``client_close`` is set when the client closed (or the connection went
+    away), ``handler_done`` once the business handler returned.
     """
 
     def __init__(self, ctx: TrpcContext, stream_id: int, opts) -> None:
@@ -61,6 +73,7 @@ class ServerStream(BaseServerStream):
         self.stream_id = stream_id
         self.recv_queue = Queue()
         self.client_close = False
+        self.handler_done = False
         self.s_control: Optional[SendControl] = None
         self.r_control: Optional[ReceiveControl] = None
 
@@ -247,12 +260,25 @@ class StreamDispatcher:
 
     ``stream_to_ss[session_id][stream_id]`` is the :class:`ServerStream`
     created at INIT. Subsequent DATA / CLOSE / FEEDBACK frames look the
-    same pair up.
+    same pair up. Each thread sees its own map.
     """
 
     def __init__(self) -> None:
-        self.stream_to_ss: Dict[int, Dict[int, ServerStream]] = defaultdict(dict)
+        self._local = threading.local()
         self.opts = None
+
+    @property
+    def stream_to_ss(self) -> Dict[int, Dict[int, ServerStream]]:
+        """``session_id -> stream_id -> ServerStream`` of the calling thread; created on first use."""
+        streams = getattr(self._local, "stream_to_ss", None)
+        if streams is None:
+            streams = {}
+            self._local.stream_to_ss = streams
+        return streams
+
+    @stream_to_ss.setter
+    def stream_to_ss(self, value: Dict[int, Dict[int, ServerStream]]) -> None:
+        self._local.stream_to_ss = value
 
     def init(self, opts) -> None:
         """Attach ``opts.transport`` as the stream write path.
@@ -298,9 +324,10 @@ class StreamDispatcher:
         """
         msg: TrpcMessage = get_message(ctx)
         session_id, stream_id = msg.session_id, msg.stream_id
-        if stream_id in self.stream_to_ss[session_id]:
+        session = self.stream_to_ss.setdefault(session_id, {})
+        if stream_id in session:
             raise ServerSystemError(self._error_msg("[server stream] duplicate", session_id, stream_id))
-        self.stream_to_ss[session_id][stream_id] = server_stream
+        session[stream_id] = server_stream
 
     def delete_server_stream(self, ctx: TrpcContext) -> None:
         """Drop the stream for ``ctx``; log if it was already gone.
@@ -310,12 +337,54 @@ class StreamDispatcher:
         """
         msg: TrpcMessage = get_message(ctx)
         session_id, stream_id = msg.session_id, msg.stream_id
-        if stream_id not in self.stream_to_ss[session_id]:
+        streams = self.stream_to_ss
+        session = streams.get(session_id)
+        if session is None or stream_id not in session:
             logger.error(self._error_msg("[server stream] delete stream error, not found", session_id, stream_id))
         else:
-            self.stream_to_ss[session_id].pop(stream_id)
-        if len(self.stream_to_ss[session_id]) == 0:
-            del self.stream_to_ss[session_id]
+            session.pop(stream_id)
+        if session is not None and not session:
+            del streams[session_id]
+
+    def _drop_stream(self, ctx: TrpcContext) -> None:
+        """Forget a stream both sides have closed: dispatcher map, write handle, INIT meta.
+
+        Args:
+            ctx: INIT context of the stream.
+        """
+        self.delete_server_stream(ctx)
+        self.opts.stream_transport.delete_stream_conn(ctx)
+        self.opts.codec.delete_init_meta(get_message(ctx))
+
+    def abort_session(self, session_id: int) -> None:
+        """End every stream of one closed connection that lives on this loop.
+
+        Posted by the TCP protocol, after it marked the connection's writer
+        closed, to each loop the connection's streams run on; must run on
+        that loop. A stream whose handler is still running gets an error
+        from ``recv_msg``, and a ``send_msg`` waiting for window is woken
+        with an error; the handler's ``finally`` then drops the stream, and
+        whatever it still writes is discarded by the closed writer. A stream
+        whose handler already returned, but whose client never sent CLOSE,
+        is dropped here. One failing stream does not keep the others alive.
+
+        Args:
+            session_id: Connection id of the closed connection.
+        """
+        streams = self.stream_to_ss.get(session_id)
+        for server_stream in list(streams.values()) if streams else ():
+            try:
+                if server_stream.handler_done:
+                    self._drop_stream(server_stream.ctx)
+                    continue
+                server_stream.client_close = True
+                server_stream.push_to_recv_queue((None, ServerSystemError("connection closed")))
+                if server_stream.s_control is not None:
+                    server_stream.s_control.close_control()
+            except Exception as err:  # pylint: disable=broad-except
+                logger.error(self._error_msg(f"[server stream] abort failed: {err!r}", session_id,
+                                             server_stream.stream_id), exc_info=True)
+        self.opts.codec.drop_session(session_id)
 
     def get_server_stream(self, ctx: TrpcContext) -> ServerStream:
         """Look up the stream for ``ctx``.
@@ -331,11 +400,14 @@ class StreamDispatcher:
         """
         msg: TrpcMessage = get_message(ctx)
         session_id, stream_id = msg.session_id, msg.stream_id
-        if stream_id not in self.stream_to_ss[session_id]:
+        server_stream = self.stream_to_ss.get(session_id, {}).get(stream_id)
+        if server_stream is None:
+            # Expected for frames still in flight when the connection was aborted.
+            report_attr("trpc_stream_frame_not_found", 1)
             info = f"[server stream] get stream error, frame_state: {msg.frame_head.frame_state}"
             raise ServerSystemError(self._error_msg(info, session_id, stream_id))
 
-        return self.stream_to_ss[session_id][stream_id]
+        return server_stream
 
     def handle_error(self, ctx: TrpcContext, req_buf: bytes) -> None:
         """Hook for a connection-level error with no frame head.
@@ -355,8 +427,9 @@ class StreamDispatcher:
 
         The stream is *not* deleted in ``finally`` as soon as the handler
         returns: a CLOSE (or DATA) still in flight would miss the map.
-        Cleanup waits until ``client_close`` so trailing frames can still
-        look the stream up.
+        ``finally`` drops it only when ``client_close`` is already set;
+        otherwise it marks ``handler_done`` and :meth:`handle_close` (or
+        :meth:`abort_session`) drops it later.
 
         Args:
             ctx: INIT context that opened this stream.
@@ -378,11 +451,11 @@ class StreamDispatcher:
             logger.error(f"stream_handle failed: {ex}")
             server_stream.close_send(trpc_pb2.TRPC_STREAM_RESET, 0, str(ex))
         finally:
+            server_stream.handler_done = True
             if server_stream.s_control:
                 server_stream.s_control.close_control()
             if server_stream.client_close:
-                self.delete_server_stream(ctx)
-                self.opts.stream_transport.delete_stream_conn(ctx)
+                self._drop_stream(ctx)
 
     async def handle_init(self, ctx: TrpcContext, stream_handle: ServerStreamHandle) -> bytes:
         """Accept INIT: create the stream, reply with our window, start the handler.
@@ -393,12 +466,24 @@ class StreamDispatcher:
         :meth:`ServerStream.set_send_control`, which will clear it again
         if the client sent window ``0``.
 
+        An INIT whose connection is already closed creates nothing: its
+        :meth:`abort_session` may have run before this frame was handled,
+        and would never come again for a stream created now. The protocol
+        marks the writer closed before posting the abort, so checking it
+        right before storing the stream, with no ``await`` in between,
+        covers both orders.
+
         Args:
             ctx: INIT context.
             stream_handle: Business coroutine scheduled on the event loop.
         """
         msg: TrpcMessage = get_message(ctx)
         stream_id = msg.stream_id
+        writer = ctx.get_meta_data(STREAM_WRITER_CTX_KEY)
+        if writer is not None and writer.closed:
+            report_attr("trpc_stream_init_after_close", 1)
+            self.opts.codec.delete_init_meta(msg)
+            return None
         server_stream = ServerStream(ctx, stream_id, self.opts)
         self.store_server_stream(ctx, server_stream)
         self.opts.stream_transport.store_stream_conn(ctx)
@@ -440,11 +525,17 @@ class StreamDispatcher:
     def handle_close(self, ctx: TrpcContext) -> None:
         """Mark ``client_close`` and wake ``recv_msg`` with EOF or the error.
 
+        When the handler has already returned, the stream is closed on both
+        sides and is dropped here.
+
         Args:
             ctx: CLOSE context.
         """
         server_stream: ServerStream = self.get_server_stream(ctx)
         server_stream.client_close = True
+        if server_stream.handler_done:
+            self._drop_stream(server_stream.ctx)
+            return
         msg: TrpcMessage = get_message(ctx)
         if msg.server_rsp_err.code != TrpcErrorCode.TRPC_INVOKE_SUCCESS:
             server_stream.push_to_recv_queue((None, msg.server_rsp_err))
@@ -477,7 +568,7 @@ class StreamDispatcher:
     ) -> bytes:
         """Switch on ``frame_state`` and handle INIT / DATA / CLOSE / FEEDBACK.
 
-        Non-INIT frames clear ``aio_transport`` on ``ctx`` so a cloned
+        Non-INIT frames clear ``stream_writer`` on ``ctx`` so a cloned
         context cannot keep a stale write handle.
 
         Args:
@@ -492,7 +583,7 @@ class StreamDispatcher:
         frame_state = msg.frame_head.frame_state
         if frame_state == trpc_pb2.TRPC_STREAM_FRAME_INIT:
             return await self.handle_init(ctx, stream_handle)
-        ctx.with_meta_data("aio_transport", None)
+        ctx.with_meta_data(STREAM_WRITER_CTX_KEY, None)
         if frame_state == trpc_pb2.TRPC_STREAM_FRAME_DATA:
             return self.handle_data(ctx, body)
         if frame_state == trpc_pb2.TRPC_STREAM_FRAME_CLOSE:
@@ -502,7 +593,7 @@ class StreamDispatcher:
         raise ValueError(f"unknown stream frame type {frame_state}")
 
     def stream_handle_func(self, ctx: TrpcContext, stream_handle: ServerStreamHandle, req_buf: bytes):
-        """Entry from ``Service.handle``: require a frame head, then dispatch.
+        """Entry from ``ServiceAdapter.handle``: require a frame head, then dispatch.
 
         A missing frame head plus ``server_rsp_err`` is a connection-level
         failure and goes to :meth:`handle_error` instead of raising.

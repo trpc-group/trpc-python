@@ -28,7 +28,7 @@ from trpc_sdk.abc import BaseFilter
 from trpc_sdk.abc import Node
 from trpc_sdk.abc import SelectorOption
 from trpc_sdk.abc import TrpcMessage
-from trpc_sdk.codec import get_client_checker
+from trpc_sdk.codec import get_client_parser
 from trpc_sdk.codec import get_client_codec
 from trpc_sdk.compressor import CompressType
 from trpc_sdk.config import SocketType
@@ -451,7 +451,7 @@ class Options:
             if not codec:
                 return
             opts.codec = get_client_codec(protocol)
-            opts.call_options.set_checker(get_client_checker(protocol))
+            opts.call_options.set_parser(get_client_parser(protocol))
             trans = get_client_transport(protocol)
             if trans:
                 opts.transport = trans
