@@ -6,7 +6,7 @@
 
 # cython: language_level=3, boundscheck=False, wraparound=False
 
-# Cython base for Service. Python ABC cannot be the first base of a cdef class,
+# Cython base for ServiceAdapter. Python ABC cannot be the first base of a cdef class,
 # so this extension type is the C-level contract. handle stays a Python async
 # method and is not declared here. register takes object because ServiceDesc
 # is a Python dataclass, not a Cython type identifier.

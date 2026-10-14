@@ -318,9 +318,9 @@ cdef void send_rsp_to_worker(TaskResponse* rsp):
 
     cdef char* to_ptr = inner_encode_task_rsp_c(rsp.head)
     # Imported here to avoid a cycle: task protocols import receive_pkg_from_worker.
-    # Must be the package-level export, which is the same dict object the
-    # Python-side TaskWorkerConnection fills in; two dicts would KeyError here.
-    from trpc_sdk.transport import TASK_CONN
+    # Must be the dict defined next to TaskWorkerConnection, which fills it in;
+    # two dicts would KeyError here.
+    from trpc_sdk.task._connection import TASK_CONN
     TASK_CONN[rsp.task_conn_index].write(bytes(to_ptr[:rsp.head.package_len]))
 
     free_task_response(rsp)

@@ -38,8 +38,10 @@ from trpc_sdk.exceptions import ServerDecodeError
 from trpc_sdk.exceptions import TrpcErrorType
 from trpc_sdk.exceptions import TrpcException
 from trpc_sdk.abc._cython cimport _Codec
+from trpc_sdk.abc._cython cimport TrpcContext
 from trpc_sdk.abc._cython cimport TrpcFrameHead
 from trpc_sdk.abc._cython cimport TrpcMessage
+from trpc_sdk.abc._cython cimport get_message
 from trpc_sdk.abc._cython cimport parse_frame_head
 from .._constants import DYEING_KEY as _PY_DYEING_KEY
 from .._constants import ENV_TRANSFER_KEY as _PY_ENV_TRANSFER_KEY
@@ -63,11 +65,11 @@ cdef class _TrpcClientCodec(_Codec):
     so ``encode_stream`` / ``decode_stream`` keep the ``_Codec`` default.
 
     ``request_id`` is a per-instance counter incremented on each
-    ``encode``. It wraps at ``UINT32_MAX_VALUE`` and is not unique
+    ``encode_data``. It wraps at ``UINT32_MAX_VALUE`` and is not unique
     across processes or codec instances.
     """
 
-    cpdef object encode(self, TrpcMessage message, object body):
+    cpdef object encode_data(self, TrpcContext context, object body):
         """Pack a client request body into a unary tRPC frame.
 
         If ``message.client_req_head`` is already a
@@ -84,8 +86,8 @@ cdef class _TrpcClientCodec(_Codec):
         service / method fields sync.
 
         Args:
-            message: Outbound RPC state; fields are copied into the
-                request head.
+            context: Owns the outbound message whose fields are copied
+                into the request head.
             body: Already serialized (and optionally compressed) body.
 
         Returns:
@@ -95,6 +97,7 @@ cdef class _TrpcClientCodec(_Codec):
             ClientEncodeError: ``client_req_head`` is set but is not a
                 ``trpc_pb2.RequestProtocol``.
         """
+        cdef TrpcMessage message = get_message(context)
         # Build the downstream request head.
         if message.client_req_head:
             # Head is set: check that the user-created request head is usable.
@@ -166,7 +169,7 @@ cdef class _TrpcClientCodec(_Codec):
         return _common_pack(req_head, message.frame_head, body, message.request_attachment)
 
 
-    cpdef object decode(self, TrpcMessage message, object buffer):
+    cpdef object decode_data(self, TrpcContext context, object buffer):
         """Unpack a unary response frame into the message and body.
 
         Reuses ``message.client_rsp_head`` when the caller already
@@ -174,7 +177,7 @@ cdef class _TrpcClientCodec(_Codec):
         created and stored.
 
         Args:
-            message: Client RPC state to fill from the response.
+            context: Owns the client message filled from the response.
             buffer: Complete unary frame, including the 16-byte head.
 
         Returns:
@@ -186,6 +189,7 @@ cdef class _TrpcClientCodec(_Codec):
                 ``trpc_pb2.ResponseProtocol``. ``_unpack`` may raise further
                 length errors.
         """
+        cdef TrpcMessage message = get_message(context)
         if len(buffer) < FRAME_HEAD_LEN:
             raise ClientDecodeError("client decode rsp buf len invalid")
 
@@ -264,22 +268,23 @@ cdef class _TrpcServerCodec(_Codec):
     ``self.codec``; stream frames and the INIT meta cache live elsewhere.
     """
 
-    cpdef object encode(self, TrpcMessage message, object body):
+    cpdef object encode_data(self, TrpcContext context, object body):
         """Pack a server response body into a unary tRPC frame.
 
         ``server_rsp_err`` is mapped onto the protocol head:
         ``TrpcErrorType.BUSINESS`` writes ``func_ret``; any other type
         writes ``ret``. ``version`` / ``call_type`` / ``request_id``
-        were copied from the request during ``decode`` and stay on
+        were copied from the request during ``decode_data`` and stay on
         ``server_rsp_head``.
 
         Args:
-            message: Inbound RPC state plus the handler error.
+            context: Owns the inbound message plus the handler error.
             body: Already serialized (and optionally compressed) body.
 
         Returns:
             Complete unary frame including the 16-byte head.
         """
+        cdef TrpcMessage message = get_message(context)
         rsp = message.server_rsp_head
         if not isinstance(message.server_rsp_head, trpc_pb2.ResponseProtocol):
             rsp = trpc_pb2.ResponseProtocol()
@@ -301,7 +306,7 @@ cdef class _TrpcServerCodec(_Codec):
         return _common_pack(rsp_head, message.frame_head, body, message.response_attachment)
 
 
-    cpdef object decode(self, TrpcMessage message, object buffer):
+    cpdef object decode_data(self, TrpcContext context, object buffer):
         """Unpack a unary request frame and seed the response head.
 
         After ``_unpack``, a ``trpc_pb2.ResponseProtocol`` is built by copying
@@ -316,7 +321,7 @@ cdef class _TrpcServerCodec(_Codec):
         ``trpc-env``.
 
         Args:
-            message: Fresh server RPC state to fill.
+            context: Owns the fresh server message to fill.
             buffer: Complete unary frame, including the 16-byte head.
 
         Returns:
@@ -326,6 +331,7 @@ cdef class _TrpcServerCodec(_Codec):
             ServerDecodeError: Frame shorter than 16 bytes.
                 ``_unpack`` may raise further length errors.
         """
+        cdef TrpcMessage message = get_message(context)
         req = trpc_pb2.RequestProtocol()
 
         if len(buffer) < FRAME_HEAD_LEN:

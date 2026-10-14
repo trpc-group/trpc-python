@@ -4,7 +4,7 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
-"""Background naming-service registration for one :class:`~trpc_sdk.server._cython._service.Service`.
+"""Background naming-service registration for one :class:`~trpc_sdk.server._cython._service.ServiceAdapter`.
 
 :func:`start_service_registry` gives every service with a configured
 registry a :class:`ServiceRegistrar`, which runs register / heartbeat /
@@ -88,7 +88,7 @@ class RegistryThread(threading.Thread):
         """Ask the retry loop to stop and cancel the in-flight register task.
 
         Must use ``call_soon_threadsafe`` because the caller (typically
-        :meth:`trpc_sdk.server._cython._service.Service.close`) is on another thread.
+        :meth:`trpc_sdk.server._cython._service.ServiceAdapter.close`) is on another thread.
         """
         self._running = False
         if self._task is not None:

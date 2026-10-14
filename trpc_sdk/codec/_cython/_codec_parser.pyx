@@ -9,7 +9,7 @@
 
 """Length-only tRPC frame splitter for a TCP byte stream.
 
-``TrpcServerProtocolChecker`` checks magic ``2352`` and ``package_len``.
+``TrpcServerProtocolParser`` checks magic ``2352`` and ``package_len``.
 It does not parse ``RequestProtocol``. The dispatcher uses it to cut
 complete frames from a socket; protocol decode happens later in
 :mod:`trpc_sdk.codec._cython._codec`.
@@ -42,7 +42,7 @@ cdef uint16_t TRPC_MAGIC_VALUE = 2352
 cdef uint32_t FRAME_HEAD_LEN = 16
 
 
-cdef class TrpcServerProtocolChecker(BaseServerProtocolChecker):
+cdef class TrpcServerProtocolParser(BaseServerProtocolParser):
     """Split a TCP stream into complete tRPC frames.
 
     A frame is 16-byte head plus ``package_len - 16`` more bytes.

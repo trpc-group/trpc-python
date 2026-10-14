@@ -1,7 +1,11 @@
-# -*- coding: utf-8 -*-
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
 """Test server_process_info module"""
 
-from tests.transport_util import TestChecker
+from tests.transport_util import TestParser
 from trpc_sdk.abc.codec import Parser
 from trpc_sdk.abc.server import BaseService
 from trpc_sdk.server.server_process_info import ProcessInfo
@@ -22,7 +26,7 @@ def test_server_process_info():
     assert process_info.pipe_conn is None
     assert process_info.dispatcher_pipe_conn_list is None
     assert process_info.networks is None
-    assert process_info.checkers is None
+    assert process_info.parsers is None
     assert process_info.handlers is None
     assert process_info.timeouts is None
     assert process_info.services is None
@@ -51,10 +55,10 @@ def test_server_process_info():
     assert len(process_info.networks) == 2
     assert new_process_info.targets is None
 
-    process_info.add_checker(TestChecker())
-    process_info.add_checker(TestChecker())
-    assert len(process_info.checkers) == 2
-    assert new_process_info.checkers is None
+    process_info.add_parser(TestParser())
+    process_info.add_parser(TestParser())
+    assert len(process_info.parsers) == 2
+    assert new_process_info.parsers is None
 
     def handler():
         print("handler")

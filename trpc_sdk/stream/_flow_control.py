@@ -37,9 +37,7 @@ class SendControl:
     def close_control(self) -> None:
         """Mark the stream closed and wake any waiter in :meth:`acquire_window`."""
         self.is_closed = True
-        if self.window_waiter:
-            self.window_waiter.done()
-            self.window_waiter.set_result(0)
+        self._wake_waiter()
 
     async def acquire_window(self, size: int) -> None:
         """Consume ``size`` bytes of send credit, waiting if needed.
@@ -70,9 +68,18 @@ class SendControl:
         """
         previous_window = self.available_window
         self.available_window += increment
-        if previous_window <= 0 and self.available_window > 0 and self.window_waiter:
-            self.window_waiter.done()
-            self.window_waiter.set_result(0)
+        if previous_window <= 0 and self.available_window > 0:
+            self._wake_waiter()
+
+    def _wake_waiter(self) -> None:
+        """Resolve ``window_waiter`` unless it already is.
+
+        A FEEDBACK and a close can both arrive before the waiter resumes;
+        the second must not ``set_result`` again.
+        """
+        waiter = self.window_waiter
+        if waiter is not None and not waiter.done():
+            waiter.set_result(0)
 
 
 class ReceiveControl:

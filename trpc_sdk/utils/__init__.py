@@ -12,11 +12,13 @@ import ...``.
 The package is split by responsibility:
 
 - :mod:`~trpc_sdk.utils._constants` — :class:`TcpState`, :data:`UNIX_TYPE`,
-  :class:`RegisterStatus` and :data:`TRPC_SHARE_MEM_LOCK`
+  :data:`DEFAULT_BACKLOG`, :class:`RegisterStatus` and
+  :data:`TRPC_SHARE_MEM_LOCK`
 - :mod:`~trpc_sdk.utils._dict_to_pb` — fill a protobuf message from a dict
 - :mod:`~trpc_sdk.utils._types` — address/IP/port aliases
 - :mod:`~trpc_sdk.utils._address` — parse/format listen and peer addresses
-- :mod:`~trpc_sdk.utils._network` — IP conversion and port-availability probes
+- :mod:`~trpc_sdk.utils._network` — IP conversion, port-availability probes,
+  and post-fork listen-socket constructors (:func:`create_new_socket`)
 - :mod:`~trpc_sdk.utils._loop_lib` — event-loop policy via :func:`get_async_lib`
 - :mod:`~trpc_sdk.utils._timer` — :class:`TimerType`, :class:`TimerTaskInfo`,
   timer tasks and executors
@@ -30,6 +32,9 @@ The package is split by responsibility:
   (:func:`register_enable` / :func:`register_spinlock`) and the registry
   heartbeat pause counter (:func:`pause_heartbeat` /
   :func:`resume_heartbeat` / :func:`should_heartbeat`)
+- :mod:`~trpc_sdk.utils.ipc` — pre-fork socketpair pipes
+  (:class:`PipeConnection`, :class:`PipeEnd`, :class:`PipeKind`,
+  :func:`create_pipe`)
 
 Importing this package constructs the ``multiprocessing.Value`` / ``Lock``
 objects in :mod:`~trpc_sdk.utils._process_sync`, so it must happen before
@@ -55,7 +60,9 @@ from ._address import get_addr_from_transport
 from ._address import get_address_from_str
 from ._address import make_addr_info_to_bytes
 from ._address import parse_addr_info_from_bytes
+from ._address import set_addr_to_ctx
 from ._address import set_addr_to_ctx_from_transport
+from ._constants import DEFAULT_BACKLOG
 from ._constants import TRPC_SHARE_MEM_LOCK
 from ._constants import RegisterStatus
 from ._constants import TcpState
@@ -68,7 +75,10 @@ from ._loop_lib import get_or_create_event_loop
 from ._loop_lib import is_uvloop_enabled
 from ._network import bytes_to_ip
 from ._network import close_socket
+from ._network import create_inet_socket
+from ._network import create_new_socket
 from ._network import create_probe_socket
+from ._network import create_unix_socket
 from ._network import find_free_port
 from ._network import get_ip_with_nic
 from ._network import get_tcp_state
@@ -114,8 +124,13 @@ from ._timer import TimerTask
 from ._timer import TimerTaskInfo
 from ._timer import TimerType
 from ._timer import register_timer_task
+from ._timer import registered_timer_tasks
 from ._types import IpType
 from ._types import PortType
+from .ipc import PipeConnection
+from .ipc import PipeEnd
+from .ipc import PipeKind
+from .ipc import create_pipe
 
 __all__ = [
     "IpType",
@@ -129,6 +144,7 @@ __all__ = [
     "get_address_from_str",
     "make_addr_info_to_bytes",
     "parse_addr_info_from_bytes",
+    "set_addr_to_ctx",
     "set_addr_to_ctx_from_transport",
     "int2ip",
     "ip2int",
@@ -142,6 +158,10 @@ __all__ = [
     "is_udp_port_available",
     "unix_path_valid",
     "create_probe_socket",
+    "create_new_socket",
+    "create_inet_socket",
+    "create_unix_socket",
+    "DEFAULT_BACKLOG",
     "unlink_unix_socket_file",
     "get_ip_with_nic",
     "join_host_port",
@@ -166,6 +186,7 @@ __all__ = [
     "TimerTask",
     "TimerExecutor",
     "register_timer_task",
+    "registered_timer_tasks",
     "set_current_process_var",
     "get_current_process_var",
     "get_process_type",
@@ -191,4 +212,8 @@ __all__ = [
     "pause_heartbeat",
     "resume_heartbeat",
     "should_heartbeat",
+    "PipeConnection",
+    "PipeEnd",
+    "PipeKind",
+    "create_pipe",
 ]

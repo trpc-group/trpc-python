@@ -12,6 +12,7 @@ instance each as ``self.codec`` and dispatch unary frames here. Stream frames us
 
 from __future__ import annotations
 
+from trpc_sdk.abc import TrpcContext
 from trpc_sdk.abc import TrpcFrameHead
 from trpc_sdk.abc import TrpcMessage
 from trpc_sdk.abc._cython._codec import _Codec
@@ -21,21 +22,21 @@ class _TrpcClientCodec(_Codec):
     """Client-side unary codec: request encode and response decode.
 
     ``request_id`` is a per-instance counter incremented on each
-    ``encode``. It wraps at ``UINT32_MAX_VALUE`` and is not unique
+    ``encode_data``. It wraps at ``UINT32_MAX_VALUE`` and is not unique
     across processes or codec instances.
     """
 
     request_id: int
 
-    def encode(self, message: TrpcMessage, body: bytes) -> bytes:
+    def encode_data(self, context: TrpcContext, body: bytes) -> bytes:
         """Pack a client request body into a unary tRPC frame.
 
         If ``message.client_req_head`` is empty, a deepcopy of
         ``server_req_head`` is used when it is a ``RequestProtocol``.
 
         Args:
-            message: Outbound RPC state; fields are copied into the
-                request head.
+            context: Owns the outbound message whose fields are copied
+                into the request head.
             body: Already serialized (and optionally compressed) body.
 
         Returns:
@@ -47,11 +48,11 @@ class _TrpcClientCodec(_Codec):
         """
         ...
 
-    def decode(self, message: TrpcMessage, buffer: bytes) -> bytes:
+    def decode_data(self, context: TrpcContext, buffer: bytes) -> bytes:
         """Unpack a unary response frame into the message and body.
 
         Args:
-            message: Client RPC state to fill from the response.
+            context: Owns the client message filled from the response.
             buffer: Complete unary frame, including the 16-byte head.
 
         Returns:
@@ -80,27 +81,27 @@ class _TrpcClientCodec(_Codec):
 class _TrpcServerCodec(_Codec):
     """Server-side unary codec: request decode and response encode."""
 
-    def encode(self, message: TrpcMessage, body: bytes) -> bytes:
+    def encode_data(self, context: TrpcContext, body: bytes) -> bytes:
         """Pack a server response body into a unary tRPC frame.
 
         ``TrpcErrorType.BUSINESS`` writes ``func_ret``; any other type
         writes ``ret``.
 
         Args:
-            message: Inbound RPC state plus the handler error.
+            context: Owns the inbound message plus the handler error.
             body: Already serialized (and optionally compressed) body.
         """
         ...
 
-    def decode(self, message: TrpcMessage, buffer: bytes) -> bytes:
+    def decode_data(self, context: TrpcContext, buffer: bytes) -> bytes:
         """Unpack a unary request frame and seed the response head.
 
         Copies ``version`` / ``call_type`` / ``request_id`` /
-        ``message_type`` / content types from the request so encode
-        can reply with matching fields.
+        ``message_type`` / content types from the request so
+        ``encode_data`` can reply with matching fields.
 
         Args:
-            message: Fresh server RPC state to fill.
+            context: Owns the fresh server message to fill.
             buffer: Complete unary frame, including the 16-byte head.
 
         Returns:

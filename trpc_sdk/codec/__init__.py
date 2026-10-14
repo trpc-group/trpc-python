@@ -15,8 +15,8 @@ The package is split by responsibility:
   hold a unary and a stream Cython codec and dispatch between them; the server INIT meta cache lives here
 - :mod:`~trpc_sdk.codec._cython._codec` / :mod:`~trpc_sdk.codec._cython._codec_stream` — private Cython unary /
   stream codecs, both derived from the C-level ``_Codec`` root in :mod:`trpc_sdk.abc`
-- :mod:`~trpc_sdk.codec._cython._codec_parser` — TCP sticky-packet splitter (``TrpcServerProtocolChecker``)
-- :mod:`~trpc_sdk.codec._factory` — plugin lookups and protocol checkers
+- :mod:`~trpc_sdk.codec._cython._codec_parser` — TCP sticky-packet splitter (``TrpcServerProtocolParser``)
+- :mod:`~trpc_sdk.codec._factory` — plugin lookups and protocol parsers
 
 The message type and its clone helpers now live in :mod:`trpc_sdk.abc`. The
 ``Message`` / ``CFrameHead`` / ``FrameHead`` names below are aliases kept so
@@ -38,12 +38,12 @@ from trpc_sdk.abc import parse_frame_head
 from ._codec import TrpcClientCodec
 from ._codec import TrpcServerCodec
 from ._constants import FRAME_HEAD_LEN
-from ._cython import TrpcServerProtocolChecker
+from ._cython import TrpcServerProtocolParser
 from ._factory import TrpcClientParser
-from ._factory import get_client_checker
 from ._factory import get_client_codec
-from ._factory import get_server_checker
+from ._factory import get_client_parser
 from ._factory import get_server_codec
+from ._factory import get_server_parser
 from ._utils import get_request_attachment
 from ._utils import get_response_attachment
 from ._utils import set_request_attachment
@@ -59,11 +59,11 @@ __all__ = [
     "TrpcClientCodec",
     "TrpcServerCodec",
     "TrpcClientParser",
-    "TrpcServerProtocolChecker",
-    "get_client_checker",
+    "TrpcServerProtocolParser",
     "get_client_codec",
-    "get_server_checker",
+    "get_client_parser",
     "get_server_codec",
+    "get_server_parser",
     "set_request_attachment",
     "get_request_attachment",
     "set_response_attachment",

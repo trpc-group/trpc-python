@@ -8,74 +8,47 @@
 
 from __future__ import annotations
 
-from enum import Enum
-from enum import unique
+from trpc_sdk.runtime import MODE_MERGE
 
-
-@unique
-class Network(str, Enum):
-    """ServiceOption listen-address network names from YAML.
-
-    Matched with ``str.find`` against ``service.network``, which may be a
-    composite such as ``tcp,http``. TCP and HTTP both use stream sockets;
-    UDP uses datagram sockets.
-    """
-
-    TCP = "tcp"
-    UDP = "udp"
-    HTTP = "http"
-
-
-@unique
-class AddressKind(Enum):
-    """Which listener serves one listen address.
-
-    Decided by :func:`~trpc_sdk.server._listeners.classify_address`, in the
-    order the members are listed: a registered user protocol first, then the
-    network type. Both modes use the same decision; they differ only in
-    *which process* binds each kind.
-    """
-
-    # A starter registered with ``register_protocol_handle`` binds it.
-    USER = "user"
-    # tRPC frames over a stream socket; cut into frames by a checker.
-    TCP = "tcp"
-    # tRPC over datagrams; each serving loop binds with SO_REUSEPORT.
-    UDP = "udp"
-    # aiohttp application.
-    HTTP = "http"
-    # No listener matches; a configuration error.
-    UNKNOWN = "unknown"
-
-
-# Process models for ServerOption.mode (YAML server.mode).
-# merge: the worker accepts and runs handlers in one process, spreading
-# connections over `worker_thread_num` event-loop threads.
-MODE_MERGE = "merge"
-# separate: the worker only does I/O and forwards frames to `rpc_task_num`
-# rpc task processes, which is where business code runs.
-MODE_SEPARATE = "separate"
-
-# Environment variables for feature switches.
-
-# Environment variable name. An exact "1" enables the native path; anything
-# else (including "true") is off.
-ENV_C_TASK = "TRPC_C_TASK"
-ENV_ENABLED = "1"
 
 # ServerOption defaults (YAML ``server:``, one per Server process).
 
 # Process model. merge keeps a request in one process; separate forks rpc
-# tasks to run handlers, which is what a CPU-bound service needs.
+# tasks to run handlers, which is what a CPU-bound service needs; peer runs
+# N equal worker processes.
 DEFAULT_MODE = MODE_MERGE
-# Worker (or executor) process count. YAML default is CPU core count.
-DEFAULT_WORKER_NUM = 1
-# Event-loop threads inside a merge-mode worker. YAML default is CPU core
-# count; 1 keeps everything on the main thread and skips the fd hand-off.
-DEFAULT_WORKER_THREAD_NUM = 1
-# Rpc task processes forked by a separate-mode worker. YAML default is CPU
-# core count.
-DEFAULT_RPC_TASK_NUM = 1
+# Processes of separate mode (rpc tasks) and peer mode (workers, worker-0
+# included); merge does not read it. ``0`` means
+# ``trpc_sdk.config.default_worker_num()``, read where it is used, never at import.
+DEFAULT_WORKER_NUM = 0
+# Thread model of a merge-mode worker: "merge", "separate", or "" to infer it
+# from ``handle_thread_num``.
+DEFAULT_IO_HANDLE_TYPE = ""
+# Serving threads of a worker. In merge they do both I/O and handlers; 1
+# keeps everything on the main thread.
+DEFAULT_IO_THREAD_NUM = 1
+# Handle threads of the separate thread model; 0 means not configured.
+DEFAULT_HANDLE_THREAD_NUM = 0
+# Unary requests in flight per serving loop; 0 means unlimited.
+DEFAULT_HANDLER_MAX_CONCURRENCY = 0
+# Per-loop FIFO capacity once the in-flight limit is reached.
+DEFAULT_HANDLER_QUEUE_SIZE = 1024
+# Set SO_REUSEPORT on the TCP listen sockets of merge and separate mode (and on
+# merge-mode HTTP). Off by default so a second instance on the same port fails
+# to bind instead of silently sharing.
+DEFAULT_TCP_REUSE_PORT = False
+# Milliseconds every serving / I/O thread, or every separate- or peer-mode
+# child, gets to finish its startup (task pipes, ``on_start`` hooks) before
+# the process gives up. YAML ``0`` means this default.
+DEFAULT_READY_TIMEOUT_MS = 300000
+
+# Thresholds above which a configured count is reported as probably
+# misconfigured; the value is still used.
+
+# ``server.io_thread_num`` / ``handle_thread_num`` per CPU core.
+THREADS_PER_CPU_WARN = 4
+# ``server.worker_num`` per CPU (separate and peer mode).
+WORKERS_PER_CPU_WARN = 2
 # Number of ServiceOption entries; filled as len(server.service).
 DEFAULT_SERVICE_NUM = 1
 # Task-process batch wait, in milliseconds.
@@ -133,46 +106,3 @@ DEFAULT_REGISTRY_OPTION = 0
 DEFAULT_MAX_WINDOW_SIZE = 0
 # If True, run stream filters on this service.
 DEFAULT_ENABLE_STREAM_FILTER = False
-
-# Heartbeat IPC between master and child processes.
-# Packed as big-endian: magic (2 bytes) + pid (4) + unix timestamp (4).
-
-# Frame header identifier; distinguishes heartbeat packets from JSON payloads.
-MAGIC_VAL = 0x1234
-# Packed heartbeat frame length in bytes.
-PKG_LEN = 10
-
-# Listen / accept loop.
-
-# Seconds the accept loop stays paused after the process ran out of file
-# descriptors or kernel memory. Accepting again immediately would just spin on
-# the same error, since the listen socket stays readable the whole time.
-ACCEPT_RETRY_DELAY = 1.0
-
-# Sockets accepted per readable event before yielding back to the loop. Bounds
-# how long one burst of connections can starve the rest of the main loop.
-# Matched to LISTEN_BACKLOG so one readable event can drain the kernel queue.
-ACCEPT_BURST = 1024
-
-# Pending-connection queue depth of the public listen sockets. Acceptor
-# endpoints get their backlog from ``create_server_socket``; asyncio front
-# ends pass this to ``create_server``.
-LISTEN_BACKLOG = 1024
-
-# Producer name of the worker process itself when it serves on a single loop.
-# Merge mode with several loop threads numbers them ``worker:0``, ``worker:1``,
-# and so on, because each loop needs its own socketpair to a task: an asyncio
-# transport may only be written from the loop that created it.
-WORKER_PRODUCER_PREFIX = "worker"
-# Producer name prefix of the rpc task processes a separate-mode worker forks.
-RPC_TASK_PRODUCER_PREFIX = "rpc_task"
-
-# Process lifecycle.
-
-# Seconds between polls of the task-ready counter while the worker waits for
-# ``io_wait_count`` notifications, before it binds any address.
-IO_WAIT_POLL_INTERVAL = 1.0
-# Seconds a child gets to shut down after noticing its parent died, before it
-# is killed with ``os._exit``. Long enough for a normal SIGTERM path, short
-# enough that a task stuck in inference does not hold a GPU for long.
-PARENT_EXIT_GRACE_SECONDS = 5.0

@@ -7,8 +7,8 @@
 """Per-listen-port adapter between aiohttp and tRPC.
 
 :class:`HttpMessageHandle` is bound to one HTTP listen index on whichever
-worker serves HTTP: the :class:`~trpc_sdk.server.MergeWorker` in ``merge``
-mode, each :class:`~trpc_sdk.server.RpcTaskProcess` in ``separate`` mode
+worker serves HTTP: the :class:`~trpc_sdk.runtime.MergeWorker` in ``merge``
+mode, each :class:`~trpc_sdk.runtime.RpcTaskProcess` in ``separate`` mode
 (the I/O process there never sees HTTP traffic). Catch-all paths go through
 :meth:`HttpMessageHandle.handle_http_request`; ``@route`` paths go
 through :meth:`HttpMessageHandle.handle_user_http_request`. Both share
@@ -59,17 +59,17 @@ class HttpMessageHandle:
     """Per-listen-port adapter between aiohttp and tRPC.
 
     One instance is bound to one listen index on the worker serving it, a
-    :class:`~trpc_sdk.server.MergeWorker` or a
-    :class:`~trpc_sdk.server.RpcTaskProcess`. Catch-all paths go through
+    :class:`~trpc_sdk.runtime.MergeWorker` or a
+    :class:`~trpc_sdk.runtime.RpcTaskProcess`. Catch-all paths go through
     :meth:`handle_http_request`; ``@route`` paths go through
     :meth:`handle_user_http_request`. Both share
     :meth:`_init_request_context`.
     """
 
     def __init__(self, index: int, process_info, is_base64: bool = False) -> None:
-        # process_info is the trpc_sdk.server.BaseWorker serving this address
+        # process_info is the trpc_sdk.runtime.BaseWorker serving this address
         # (only its per-address tables are read); left untyped to avoid a
-        # runtime import cycle with trpc_sdk.server.
+        # runtime import cycle with trpc_sdk.runtime.
         self._index = index
         self._is_base64 = is_base64
         self._process_info = process_info

@@ -1,69 +1,97 @@
-# -*- coding: utf-8 -*-
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
 """Test cases for HTTP server transport module"""
 
+import asyncio
 import base64
 import json
+import socket
 
 from typing import Callable
-from typing import Tuple
 from unittest import mock
 
 import pytest
 
 from aiohttp import test_utils as aiohttp_test_utils
+from aiohttp import web
 from aiohttp.web_request import Request
 from aiohttp.web_response import Response
 
-from trpc_sdk.abc.context import Context  # pylint: disable=no-name-in-module
-from trpc_sdk.abc.transport import BaseServerTransportOption
-from trpc_sdk.codec import get_message
-from trpc_sdk.http import defines as http_defines
+from trpc_sdk import http as http_defines
+from trpc_sdk.abc import BaseServerTransportOption
+from trpc_sdk.transport import ListenOption
+from trpc_sdk.transport import release_loop_resources
+from trpc_sdk.abc import TrpcContext as Context
+from trpc_sdk.abc import get_message
+from trpc_sdk.http import HttpMessageHandle
+from trpc_sdk.http import HttpRoute as HttpHandle
+from trpc_sdk.http import HttpServerTransportFactory
 from trpc_sdk.http import get_http_request
 from trpc_sdk.http import get_http_response
-from trpc_sdk.http.http_transport import HttpMessageHandle
-from trpc_sdk.http.http_transport import HttpServerTransportFactory
-from trpc_sdk.http.http_transport import register_user_http_decode_func
-from trpc_sdk.http.routes import HttpHandle
-
-
-# pylint: disable=unnecessary-pass
-# pylint: disable=unused-argument
-class _MockServerEngine:
-    """Mock server engine for testing purposes"""
-
-    def set_executor_process(self,
-                             address: Tuple[str, int],
-                             socket_type: str,
-                             handler,
-                             checker,
-                             timeout: int,
-                             network: str,
-                             service,
-                             tran_opt,
-                             target=''):
-        """Mock method for setting executor process"""
-        pass
-
-    def close(self):
-        """Mock method for closing the server"""
-        pass
+from trpc_sdk.http import register_user_http_decode_func
 
 
 def test_http_server_transport():
-    """Test basic HTTP server transport functionality"""
-    factory = HttpServerTransportFactory()
-    transport = factory.create()
-    server_engine = _MockServerEngine()
+    """bind marks the endpoint as HTTP; listen needs the runtime's runner factory."""
+    transport = HttpServerTransportFactory().create()
     opts = BaseServerTransportOption()
-    transport.listen_and_serve(opts, server_engine)
-    transport.set_executor_process()
-    transport.close()
+    assert opts.network == "tcp"
+
+    transport.bind(opts)
+
+    assert transport.opts is opts
+    assert opts.network == http_defines.HTTP
+    with pytest.raises(ValueError, match="http_runner_factory"):
+        transport.listen(ListenOption(loop=None))
+    with pytest.raises(ValueError, match="http_runner_factory"):
+        transport.listen()
+
+
+def test_http_listen_serves_the_runner_on_one_loop():
+    """With no serving loops the runner is served on opt.loop and kept to clean up."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    opts = BaseServerTransportOption()
+    opts.set_address(("127.0.0.1", port))
+    transport = HttpServerTransportFactory().create()
+    transport.bind(opts)
+
+    async def _runner():
+        app = web.Application()
+        app.router.add_get("/", lambda request: web.Response(text="ok"))
+        runner = web.AppRunner(app)
+        await runner.setup()
+        return runner
+
+    async def _get():
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        writer.write(b"GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+        data = await reader.read()
+        writer.close()
+        return data
+
+    loop = asyncio.new_event_loop()
+    try:
+        transport.listen(ListenOption(loop=loop, http_runner_factory=_runner))
+        assert loop.run_until_complete(_get()).endswith(b"ok")
+
+        transport.stop()
+        runners = transport.pop_loop_resources(None)
+        assert len(runners) == 1
+        loop.run_until_complete(release_loop_resources(runners))
+        assert transport.pop_loop_resources(None) == []
+    finally:
+        loop.close()
 
 
 class _UserHttpHandler:
     """Mock HTTP handler for testing user-defined handlers"""
 
-    async def http_handle(self, ctx, usr_handle: Callable):
+    async def handle_http(self, ctx, usr_handle: Callable):
         """Test function for handling HTTP requests
         
         Args:

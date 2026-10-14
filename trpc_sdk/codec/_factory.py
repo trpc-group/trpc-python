@@ -4,17 +4,17 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
-"""Plugin factories, protocol checkers, and codec lookups for tRPC.
+"""Plugin factories, protocol parsers, and codec lookups for tRPC.
 
 Importing this module registers the ``"trpc"`` entries for
-``PluginType.SERVER_CHECKER`` and ``PluginType.CLIENT_CHECKER``. The
+``PluginType.SERVER_PARSER`` and ``PluginType.CLIENT_PARSER``. The
 codec plugins themselves are registered by :mod:`trpc_sdk.codec._codec`;
 ``get_client_codec`` / ``get_server_codec`` only read the plugin table,
 so they work regardless of which module is imported first.
 
-A checker cuts complete frames out of a byte stream by magic plus
+A parser cuts complete frames out of a byte stream by magic plus
 ``package_len``; it never parses ``RequestProtocol``. The server side
-buffers a TCP stream (:class:`~trpc_sdk.codec._cython._codec_parser.TrpcServerProtocolChecker`),
+buffers a TCP stream (:class:`~trpc_sdk.codec._cython._codec_parser.TrpcServerProtocolParser`),
 while the client side reads exactly one frame off a pooled connection.
 """
 
@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 from typing import Optional
 
 from trpc_sdk._inner import trpc_pb2
-from trpc_sdk.abc import BaseClientProtocolChecker
+from trpc_sdk.abc import BaseClientProtocolParser
 from trpc_sdk.abc import BasePluginFactory
 from trpc_sdk.abc import PluginInitPos
 from trpc_sdk.abc import PluginType
@@ -35,46 +35,46 @@ from trpc_sdk.plugin import get_plugin
 from trpc_sdk.plugin import register_plugin
 from trpc_sdk.telemetry import report_attr
 from ._constants import FRAME_HEAD_LEN
-from ._cython import TrpcServerProtocolChecker
+from ._cython import TrpcServerProtocolParser
 
 if TYPE_CHECKING:
     from trpc_sdk.transport import PooledConnection
 
 
-class TrpcServerCheckerFactory(BasePluginFactory):
-    """Build a per-connection tRPC server checker.
+class TrpcServerParserFactory(BasePluginFactory):
+    """Build a per-connection tRPC server parser.
 
-    The checker keeps buffered bytes across reads, so the dispatcher
+    The parser keeps buffered bytes across reads, so the dispatcher
     needs one instance per connection rather than a shared singleton.
     """
 
-    def create(self) -> TrpcServerProtocolChecker:
-        """Return a new :class:`TrpcServerProtocolChecker`."""
-        return TrpcServerProtocolChecker()
+    def create(self) -> TrpcServerProtocolParser:
+        """Return a new :class:`TrpcServerProtocolParser`."""
+        return TrpcServerProtocolParser()
 
 
-@register_plugin(PluginType.SERVER_CHECKER, "trpc", init_pos=PluginInitPos.WORKER)
-def setup_server_checker() -> TrpcServerCheckerFactory:
-    """Build the plugin instance stored under ``SERVER_CHECKER`` / ``"trpc"``.
+@register_plugin(PluginType.SERVER_PARSER, "trpc", init_pos=PluginInitPos.WORKER)
+def setup_server_parser() -> TrpcServerParserFactory:
+    """Build the plugin instance stored under ``SERVER_PARSER`` / ``"trpc"``.
 
     The plugin manager calls the registered object once and caches the
     result, so registering this function (rather than the class) is what
-    puts a :class:`TrpcServerCheckerFactory` in the table.
+    puts a :class:`TrpcServerParserFactory` in the table.
     """
-    return TrpcServerCheckerFactory()
+    return TrpcServerParserFactory()
 
 
-def get_server_checker(name: str) -> Optional[TrpcServerCheckerFactory]:
-    """Return the server checker factory registered as ``name``.
+def get_server_parser(name: str) -> Optional[TrpcServerParserFactory]:
+    """Return the server parser factory registered as ``name``.
 
     Args:
         name: Plugin name, usually the YAML ``service.protocol`` value.
     """
-    return get_plugin(PluginType.SERVER_CHECKER, name)
+    return get_plugin(PluginType.SERVER_PARSER, name)
 
 
-@register_plugin(PluginType.CLIENT_CHECKER, "trpc", init_pos=PluginInitPos.WORKER)
-class TrpcClientParser(BaseClientProtocolChecker):
+@register_plugin(PluginType.CLIENT_PARSER, "trpc", init_pos=PluginInitPos.WORKER)
+class TrpcClientParser(BaseClientProtocolParser):
     """Read one complete tRPC frame off a pooled client connection."""
 
     async def read_frame(self, conn: PooledConnection) -> bytes:
@@ -105,13 +105,13 @@ class TrpcClientParser(BaseClientProtocolChecker):
         return frame_head_buff + left_pkg
 
 
-def get_client_checker(name: str) -> Optional[BaseClientProtocolChecker]:
-    """Return the client checker registered as ``name``.
+def get_client_parser(name: str) -> Optional[BaseClientProtocolParser]:
+    """Return the client parser registered as ``name``.
 
     Args:
         name: Plugin name, usually the client ``protocol`` value.
     """
-    return get_plugin(PluginType.CLIENT_CHECKER, name)
+    return get_plugin(PluginType.CLIENT_PARSER, name)
 
 
 def get_client_codec(name: str):

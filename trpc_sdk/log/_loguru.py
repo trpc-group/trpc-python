@@ -407,6 +407,15 @@ def reset_state() -> None:
     _LoguruSinkManager.reset_state()
 
 
+def flush_logs() -> None:
+    """Write out every record still queued for an ``enqueue=True`` sink.
+
+    For a forked child about to exit: ``multiprocessing`` ends it with
+    ``os._exit``, which skips the ``atexit`` hook that would otherwise do this.
+    """
+    _LoguruSinkManager.complete()
+
+
 class LoguruLogger(BaseLogger):
     """A ``BaseLogger`` implementation backed by loguru.
 

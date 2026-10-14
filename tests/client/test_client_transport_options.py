@@ -1,10 +1,14 @@
-# -*- coding: utf-8 -*-
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
 """Test client transport options module"""
 
 from trpc_sdk.codec import ClientCodec
 from trpc_sdk.codec import Message
-from trpc_sdk.transport.options import RequestType
-from trpc_sdk.transport.options import RoundTripOptions
+from trpc_sdk.transport import RequestType
+from trpc_sdk.transport import RoundTripOptions
 
 
 def test_client_transport_options():
@@ -17,7 +21,7 @@ def test_client_transport_options():
     assert client_opts.req_type == RequestType.SendAndRecv
     assert client_opts.short_conn is False
     assert client_opts.password is None
-    assert client_opts.checker is not None
+    assert client_opts.parser is not None
     assert client_opts.codec is None
     assert client_opts.pool is None
     assert client_opts.enable_multiplexed is False
@@ -46,8 +50,8 @@ def test_client_transport_options():
     client_opts.set_password('123')
     assert client_opts.password == '123'
 
-    client_opts.set_checker(None)
-    assert client_opts.checker is None
+    client_opts.set_parser(None)
+    assert client_opts.parser is None
 
     client_opts.set_pool(None)
     assert client_opts.pool is None

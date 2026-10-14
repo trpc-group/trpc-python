@@ -1,3 +1,8 @@
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
 """Error-path tests for the core client invocation code."""
 import asyncio
 import threading
@@ -12,7 +17,7 @@ from trpc_sdk.exceptions import ClientConnectionError
 from trpc_sdk.exceptions import ClientEncodeError
 from trpc_sdk.exceptions import ClientRouteError
 from trpc_sdk.exceptions import ClientTimeoutError
-from trpc_sdk.transport.options import RequestType
+from trpc_sdk.transport import RequestType
 
 
 class _Context:
@@ -21,7 +26,7 @@ class _Context:
         self.deadline = 0
         self.timeout = 0
 
-    def get_client_message(self):
+    def get_message(self):
         return self.message
 
 

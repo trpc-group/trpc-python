@@ -47,13 +47,13 @@ class PluginType(IntEnum):
 
     SERVER_CODEC = 2
 
-    SERVER_CHECKER = 3
+    SERVER_PARSER = 3
 
     CLIENT_TRANSPORT = 4
 
     CLIENT_CODEC = 5
 
-    CLIENT_CHECKER = 6
+    CLIENT_PARSER = 6
 
     CONFIG = 7
 
@@ -162,7 +162,7 @@ class BasePluginFactory(BasePlugin):
     """Plugin that hands out per-use instances instead of being one.
 
     Some plugin slots cannot be filled by a shared singleton: a server
-    transport is bound to one listening socket, and a protocol checker
+    transport is bound to one listening socket, and a protocol parser
     buffers bytes across reads so it belongs to a single connection. The
     factory itself is what the plugin manager stores and initializes;
     callers ask it for a fresh object through :meth:`create`.

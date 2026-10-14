@@ -169,7 +169,13 @@ class MemoryInspection:
     filename_prefix: str = DEFAULT_MEMORY_INSPECTION_FILENAME_PREFIX  # debug dump filename prefix
 
 
-def _default_worker_num() -> int:
+def default_worker_num() -> int:
+    """Return the process count ``server.worker_num: 0`` resolves to.
+
+    The CPU count the process may use (cgroup quota included), or
+    :data:`DEFAULT_WORKER_NUM_FALLBACK` when it is unknown. Read at call
+    time, never frozen at import.
+    """
     return get_max_procs() or DEFAULT_WORKER_NUM_FALLBACK
 
 
@@ -195,9 +201,19 @@ class ServerConfig:
     network: str = ''
     protocol: str = ''
     mode: str = ''  # server running mode
-    worker_num: int = field(default_factory=_default_worker_num)  # default: CPU core count
-    worker_thread_num: int = 0  # merge-mode event-loop threads; 0 means use the server default
-    rpc_task_num: int = 0  # separate-mode rpc task processes; 0 means use the server default
+    # separate-mode rpc tasks / peer-mode workers (worker-0 included); 0 means the CPU count; merge ignores it
+    worker_num: int = 0
+    # Merge-mode thread model, named after trpc-cpp's global_conf.h. Zero or
+    # empty means "not configured"; ``server._option_resolver`` resolves them in create_server.
+    # handle_thread_num > 0 selects the separate thread model (I/O threads hand requests to
+    # handle threads); io_handle_type is an optional explicit form that must agree with it.
+    io_handle_type: str = ''  # merge | separate; '' means inferred from handle_thread_num
+    io_thread_num: int = 0  # threads doing I/O (and handlers when handle_thread_num is 0); 0 means 1
+    handle_thread_num: int = 0  # threads running handlers; 0 means the I/O threads run them
+    handler_max_concurrency: int = 0  # handle threads only: unary requests in flight per handle thread; 0 = unlimited
+    handler_queue_size: int = 1024  # handle threads only: shared overflow queue; used when handler_max_concurrency > 0
+    tcp_reuse_port: bool = False  # SO_REUSEPORT on TCP listen sockets, shared by merge and separate
+    ready_timeout: int = 0  # ms each thread / rpc task gets to start (on_start hooks included); 0 means 300000
     max_rbuf_size: int = field(default_factory=_default_max_read_buf_size)  # default: 8 MiB
     registry_delay: int = 0  # registry delay (ms)
     registry_option: int = 0  # registry control: 0=off, 1=on
@@ -216,7 +232,6 @@ class ServerConfig:
     memory_inspection: Optional[MemoryInspection] = None  # memory inspection config
     heartbeat_interval: int = 0  # process heartbeat interval (s)
     close_wait_time: int = 0  # graceful shutdown wait time (ms)
-    enable_stream_executor_mode: bool = False  # enable stream in executor/multi-listener mode
 
     def __post_init__(self) -> None:
         if self.service is None:

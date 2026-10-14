@@ -29,9 +29,9 @@ from aiohttp.web_request import Request as HttpRequest
 from aiohttp.web_response import Response as HttpResponse
 
 from trpc_sdk._inner import trpc_pb2
-from trpc_sdk.abc import BaseClientProtocolChecker
+from trpc_sdk.abc import BaseClientProtocolParser
 from trpc_sdk.abc import BaseCodec
-from trpc_sdk.abc import BaseServerProtocolChecker
+from trpc_sdk.abc import BaseServerProtocolParser
 from trpc_sdk.abc import PluginInitPos
 from trpc_sdk.abc import PluginType
 from trpc_sdk.abc import TrpcContext
@@ -55,12 +55,12 @@ from ._types import find_serialization_type
 from ._types import get_trpc_error_code
 
 
-@register_plugin(PluginType.SERVER_CHECKER, HTTP, init_pos=PluginInitPos.WORKER)
-class ServerHttpChecker(BaseServerProtocolChecker):
-    """HTTP server frame checker.
+@register_plugin(PluginType.SERVER_PARSER, HTTP, init_pos=PluginInitPos.WORKER)
+class ServerHttpParser(BaseServerProtocolParser):
+    """HTTP server frame parser.
 
-    HTTP framing is handled by aiohttp, so this checker is a no-op
-    plugin registration that occupies the ``http`` checker slot.
+    HTTP framing is handled by aiohttp, so this parser is a no-op
+    plugin registration that occupies the ``http`` parser slot.
     """
 
 
@@ -68,9 +68,8 @@ class ServerHttpChecker(BaseServerProtocolChecker):
 class ServerHttpCodec(BaseCodec):
     """Server codec: pack RPC results into an aiohttp response.
 
-    Overrides the context-first ``encode_data`` / ``decode_data`` pair
-    because both need the aiohttp request / response stored on the
-    context's message. There is no message-first ``encode`` / ``decode``.
+    ``encode_data`` / ``decode_data`` read the aiohttp request / response
+    stored on the context's message.
     """
 
     def encode_data(self, context: TrpcContext, body: bytes) -> bytes:
@@ -275,12 +274,12 @@ class ServerHttpCodec(BaseCodec):
         message.set_server_req_head(trpc_req)
 
 
-@register_plugin(PluginType.CLIENT_CHECKER, HTTP, init_pos=PluginInitPos.WORKER)
-class ClientHttpChecker(BaseClientProtocolChecker):
-    """HTTP client frame checker.
+@register_plugin(PluginType.CLIENT_PARSER, HTTP, init_pos=PluginInitPos.WORKER)
+class ClientHttpParser(BaseClientProtocolParser):
+    """HTTP client frame parser.
 
-    HTTP framing is handled by aiohttp, so this checker is a no-op
-    plugin registration that occupies the ``http`` checker slot.
+    HTTP framing is handled by aiohttp, so this parser is a no-op
+    plugin registration that occupies the ``http`` parser slot.
     """
 
     async def read_frame(self, connection: Any) -> bytes:
@@ -293,37 +292,31 @@ class ClientHttpChecker(BaseClientProtocolChecker):
             NotImplementedError: Always; the HTTP client transport reads
                 the response through aiohttp instead of framing bytes.
         """
-        raise NotImplementedError("HTTP frames are read by aiohttp, not by ClientHttpChecker")
+        raise NotImplementedError("HTTP frames are read by aiohttp, not by ClientHttpParser")
 
 
 @register_plugin(PluginType.CLIENT_CODEC, HTTP, init_pos=PluginInitPos.WORKER)
 class ClientHttpCodec(BaseCodec):
     """Client codec: fill method/caller defaults and decode HTTP errors.
 
-    ``encode`` is message-first and does not build an HTTP packet: it
-    only creates a :class:`HttpClientReqHeader` when missing (GET for
-    empty body, else POST) and a ``trpc.http.<script>.service`` caller
-    name when the caller identity was never set. Callers go through
-    the base ``encode_data``. ``decode_data`` is context-first because
-    it must ``pop_http_ok_codes`` from the context; there is no
-    matching message-first ``decode``.
+    ``encode_data`` does not build an HTTP packet: it only creates a
+    :class:`HttpClientReqHeader` when missing (GET for empty body, else
+    POST) and a ``trpc.http.<script>.service`` caller name when the
+    caller identity was never set. ``decode_data`` pops the accepted
+    status codes from the context.
     """
 
-    @classmethod
-    def encode(cls, message: TrpcMessage, body: bytes) -> bytes:
+    def encode_data(self, context: TrpcContext, body: bytes) -> bytes:
         """Fill default method and caller identity when the caller omitted them.
 
-        Message-first: this method only reads ``client_req_head`` and
-        ``caller_service``, so it does not need the context. The base
-        ``encode_data`` pulls the message and forwards here.
-
         Args:
-            message: Client-side tRPC message.
+            context: Client call context owning the outbound message.
             body: Already-serialized request body.
 
         Returns:
             ``body`` unchanged.
         """
+        message: TrpcMessage = get_message(context)
         req_head = message.client_req_head
 
         if not req_head:
@@ -339,9 +332,6 @@ class ClientHttpCodec(BaseCodec):
 
     def decode_data(self, context: TrpcContext, _: bytes) -> bytes:
         """Map HTTP status and tRPC error headers onto ``client_rsp_err``.
-
-        Context-first because the accepted status codes live on the
-        context, not the message.
 
         Args:
             context: Client call context; the accepted status codes are

@@ -1,96 +1,51 @@
-# -*- coding: utf-8 -*-
-__version__ = '0.0.1'
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
 
-import asyncio
-import logging
-import threading
+"""tRPC-Python admin plugin.
 
-from trpc_sdk import config
-from trpc_sdk import plugin
-from trpc_sdk.plugin import PluginType
-from trpc_sdk.plugin import PluginInitPos
-from trpc_sdk.utils import get_async_lib
+The package is split by responsibility:
 
+- :mod:`~trpc_sdk.admin._constants` — WS path, User-Agent prefix and other
+  constants shared by both sides
+- :mod:`~trpc_sdk.admin._loglevel` — log level accessors for the admin
+  ``loglevel`` commands
+- :mod:`~trpc_sdk.admin._hooks` — user callbacks run when the admin
+  endpoints start
+- :mod:`~trpc_sdk.admin._server` — admin HTTP server, run in the root process
+- :mod:`~trpc_sdk.admin._client` — WS client each worker uses to connect back
+  to the admin server
+- :mod:`~trpc_sdk.admin._plugin` — :class:`~trpc_sdk.admin.AdminPlugin`,
+  registered as the ``admin`` plugin on import
 
-def getLoglevel(logger):
-    """Return the level exposed by the Loguru runtime backend."""
-    return logger.get_min_level()
-    # for writer in logger.writers:
-    #     if hasattr(writer, 'filename') and writer.filename == logger.filename:
-    #         return writer.level
+Importing this package registers the plugin and two process hooks;
+``Server.serve`` imports it when ``server.admin`` is configured.
+:meth:`~trpc_sdk.admin.AdminPlugin.on_master_start` runs from the
+after-fork-in-parent hook, once in the root process after every child is
+forked. :meth:`~trpc_sdk.admin.AdminPlugin.on_worker_start` runs from the
+``ProcessType.WORKER`` child callback in every worker process; task processes
+do not run it.
+"""
 
+from __future__ import annotations
 
-def setLoglevel(logger, level):
-    """Set the level exposed by the Loguru runtime backend."""
-    logger.set_min_level(level)
-    # min_level = level
-    # for writer in logger.writers:
-    #     if hasattr(writer, 'filename') and writer.filename == logger.filename:
-    #         writer.level = level
-    #         writer.handler.setLevel(level)
-    #     elif writer.level is not None and (min_level is None or writer.level < min_level):
-    #         min_level = writer.level
-    # if min_level is None:
-    #     min_level = logging.DEBUG
-    # logger.min_level = min_level
-    # logger.logger.setLevel(min_level)
-
-
-on_master_starts = []
-on_worker_starts = []
-
-
-def on_master_start(func):
-    on_master_starts.append(func)
-    return func
+from ._hooks import on_master_start
+from ._hooks import on_master_starts
+from ._hooks import on_worker_start
+from ._hooks import on_worker_starts
+from ._loglevel import getLoglevel
+from ._loglevel import setLoglevel
+from ._plugin import AdminPlugin
 
 
-def on_worker_start(func):
-    on_worker_starts.append(func)
-    return func
-
-
-@plugin.register_plugin(PluginType.ADMIN, 'admin', init_pos=PluginInitPos.WORKER)
-class AdminPlugin(plugin.BasePlugin):
-
-    def get_config(self, master):
-        cfg = config.global_config_obj.server.admin
-        if not cfg:
-            return '', 0
-        ip, port = cfg.ip, cfg.port
-        if not master and ip == '0.0.0.0':
-            ip = '127.0.0.1'
-        return ip, port
-
-    def on_master_start(self):
-        ip, port = self.get_config(True)
-        if not ip or not port:
-            return
-
-        from . import server
-        for func in on_master_starts:
-            func(server.routes, server.configer)
-
-        def run():
-            asynclib = get_async_lib(config.TrpcConfig.global_config().enable_uvloop)
-            asyncio.set_event_loop(asynclib.new_event_loop())
-            server.run(ip, port, print=None, access_log=None, handle_signals=False)
-
-        threading.Thread(target=run, daemon=True).start()
-
-    def on_worker_start(self):
-        ip, port = self.get_config(False)
-        if not ip or not port:
-            return
-
-        from . import client
-        for func in on_worker_starts:
-            func(client.configer)
-
-        def run():
-            asynclib = get_async_lib(config.TrpcConfig.global_config().enable_uvloop)
-            loop = asynclib.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(client.run(ip, port))
-
-        threading.Thread(target=run, daemon=True).start()
+__all__ = [
+    "AdminPlugin",
+    "getLoglevel",
+    "on_master_start",
+    "on_master_starts",
+    "on_worker_start",
+    "on_worker_starts",
+    "setLoglevel",
+]

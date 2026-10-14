@@ -1,4 +1,8 @@
-# -*- coding: utf-8 -*-
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
 """Test client transport stream module"""
 import asyncio
 import socket
@@ -7,7 +11,7 @@ import pytest
 
 from tests.common_util import BaseTestProtocol
 from tests.common_util import create_test_connection
-from tests.transport_util import TestChecker
+from tests.transport_util import TestParser
 from tests.transport_util import TestConn
 from trpc_sdk.abc.codec import Parser
 from trpc_sdk.codec import TrpcServerParser
@@ -16,7 +20,7 @@ from trpc_sdk.context import Context
 from trpc_sdk.exceptions import ClientInvokeError
 from trpc_sdk.transport.client_transport import ClientTaskStreamTransport
 from trpc_sdk.transport.client_transport_stream import ClientConn
-from trpc_sdk.transport.options import RoundTripOptions
+from trpc_sdk.transport import RoundTripOptions
 
 
 class _TestProtocol(BaseTestProtocol):
@@ -63,7 +67,7 @@ async def test_client_stream_transport():
     client_transport.close(ctx)
 
 
-class _TestExceptionChecker(Parser):
+class _TestExceptionParser(Parser):
 
     def create(self):
         """Create parser"""
@@ -80,7 +84,7 @@ async def test_recv_frame():
     client_conn = ClientConn(None, None)
     client_conn.conn = TestConn()
     client_conn.options = RoundTripOptions()
-    client_conn.options.checker = TestChecker()
+    client_conn.options.parser = TestParser()
     ctx = Context()
     ctx.deadline = 0
     try:
@@ -89,7 +93,7 @@ async def test_recv_frame():
         assert True
 
     try:
-        client_conn.options.checker = _TestExceptionChecker()
+        client_conn.options.parser = _TestExceptionParser()
         client_conn.conn = TestConn()
         await client_conn.recv_frame(ctx)
     except Exception:  # pylint: disable=broad-except

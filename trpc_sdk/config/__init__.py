@@ -61,6 +61,7 @@ from ._types import SaveBindInfo
 from ._types import ServerConfig
 from ._types import ServerService
 from ._types import SocketType
+from ._types import default_worker_num
 
 __all__ = [
     # Config models
@@ -76,6 +77,7 @@ __all__ = [
     "ServerConfig",
     "ServerService",
     "SocketType",
+    "default_worker_num",
     # Loading and deserializing
     "TrpcConfig",
     "TrpcConfigParser",

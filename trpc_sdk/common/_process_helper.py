@@ -99,10 +99,10 @@ def is_timer_process() -> bool:
     return get_process_type() == ProcessType.TIMER
 
 
-def bind_lifetime_to_parent() -> None:
-    """Make this forked child receive SIGTERM when its parent dies.
+def bind_lifetime_to_parent(sig: int = signal.SIGTERM) -> None:
+    """Make this forked child receive ``sig`` when its parent dies.
 
-    Linux only: sets ``PR_SET_PDEATHSIG`` to SIGTERM, then compares
+    Linux only: sets ``PR_SET_PDEATHSIG`` to ``sig``, then compares
     ``os.getppid()`` with the pid ``multiprocessing`` recorded for the parent.
     The comparison covers the window where the parent died before ``prctl``
     ran, in which case the signal would never come; the child exits at once
@@ -116,6 +116,11 @@ def bind_lifetime_to_parent() -> None:
     Other platforms rely on the parent sentinel watched by the worker's
     event loop instead. A no-op in a process ``multiprocessing`` did not fork.
 
+    Args:
+        sig: Signal to deliver. A child that ignores SIGTERM (the
+            separate-mode rpc tasks and their task processes) passes one it
+            does handle, such as SIGUSR1; otherwise the binding is useless.
+
     Raises:
         SystemExit: The parent had already exited before the binding took
             effect.
@@ -125,6 +130,6 @@ def bind_lifetime_to_parent() -> None:
         return
     if sys.platform.startswith("linux"):
         libc = ctypes.CDLL(None, use_errno=True)
-        libc.prctl(_PR_SET_PDEATHSIG, int(signal.SIGTERM), 0, 0, 0)
+        libc.prctl(_PR_SET_PDEATHSIG, int(sig), 0, 0, 0)
     if os.getppid() != parent.pid:
         sys.exit(1)

@@ -1,4 +1,8 @@
-# -*- coding: utf-8 -*-
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
 """Test network"""
 import socket
 import os
@@ -7,8 +11,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from trpc_sdk.utils.network import *
-from trpc_sdk.utils import network
+from trpc_sdk.utils._network import *
+from trpc_sdk.utils import _network as network
 
 
 def test_int2str_for_ip():

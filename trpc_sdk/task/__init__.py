@@ -24,11 +24,14 @@ The package is split by responsibility:
   :class:`~trpc_sdk.abc.TaskCodec` contract lives in ``trpc_sdk.abc``
 - :mod:`~trpc_sdk.task._consumer` — the batch consumer threads and the
   response pump running inside the task child
+- :mod:`~trpc_sdk.task._connection` — the asyncio protocols on both ends of
+  the worker <-> task pipe, and the ``TASK_CONN`` map the response pump
+  writes through
 - :mod:`~trpc_sdk.task._cython` — the native frame codec and request queue
 
 Business code normally only needs :func:`send_to_task`. The registration and
-frame-level helpers are re-exported here because the server and transport
-packages drive the task children through them.
+frame-level helpers are re-exported here because the runtime package drives
+the task children through them.
 """
 
 from ._default_codec import DefaultTaskCodec
@@ -43,6 +46,9 @@ from ._cython import inner_encode_task_req
 from ._cython import inner_encode_task_rsp
 from ._cython import receive_pkg_from_worker
 from ._cython import task_init
+from ._connection import TASK_CONN
+from ._connection import TaskWorkerConnection
+from ._connection import WorkerTaskConnection
 from ._consumer import TaskConsumer
 from ._consumer import consume_response
 from ._types import TaskRegistry
@@ -74,6 +80,10 @@ __all__ = [
     "receive_from_task",
     "register_task_conn",
     "register_task_num",
+    # Worker <-> task pipe protocols
+    "WorkerTaskConnection",
+    "TaskWorkerConnection",
+    "TASK_CONN",
     # Task child process internals
     "TaskConsumer",
     "consume_response",

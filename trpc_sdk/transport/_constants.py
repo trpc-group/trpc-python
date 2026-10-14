@@ -6,9 +6,9 @@
 
 """Constants used by both halves of the transport package.
 
-Listen-socket defaults live here so :mod:`trpc_sdk.transport._socket` and any
-future listener code share one backlog. The IPC frame constants are the
-single source of truth for the Cython inner-IPC codec in
+The listen backlog lives in :data:`trpc_sdk.utils.DEFAULT_BACKLOG` next to
+the listen-socket constructors. The IPC frame constants are the single
+source of truth for the Cython inner-IPC codec in
 :mod:`trpc_sdk.transport._cython._ipc_codec`, which copies them into typed
 ``cdef`` locals at module import.
 
@@ -24,10 +24,6 @@ from __future__ import annotations
 import struct
 from enum import IntEnum
 from enum import unique
-
-# backlog passed to listen() for TCP and UNIX stream sockets created by
-# create_server_socket(). 1500 matches the historical net_util default.
-DEFAULT_BACKLOG = 1500
 
 # Inner IPC frame: big-endian ushort magic + uint32 total length.
 INNER_MAGIC_VALUE = 1314

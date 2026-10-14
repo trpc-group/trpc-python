@@ -27,7 +27,7 @@ contents.
 
 Registry-heartbeat pause count. :func:`pause_heartbeat` /
 :func:`resume_heartbeat` are a nested counter, not a boolean.
-:func:`trpc_sdk.server._task.build_task_infos` increments once per task
+:func:`trpc_sdk.runtime._process._task_process.build_task_infos` increments once per task
 that set ``pause_heartbeat``, still in the parent, so the registry client
 stops advertising before any child is forked. :func:`resume_heartbeat`
 runs in each such child after its initializer; :func:`should_heartbeat`

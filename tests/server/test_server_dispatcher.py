@@ -1,11 +1,15 @@
-# -*- coding: utf-8 -*-
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
 """Test transport module"""
 import asyncio
 import time
 
 import pytest
 
-from tests.transport_util import TestChecker
+from tests.transport_util import TestParser
 from tests.transport_util import TestClientConn
 from trpc_sdk.server import dispatcher
 from trpc_sdk.server import server_engine
@@ -29,12 +33,12 @@ async def test_conn_idle_check():
     engine = server_engine.TrpcServerEngine(ServerOption())
     engine.process_info.add_address(("127.0.0.1", 8000))
     engine.process_info.add_socket_type("net")
-    engine.process_info.add_checker(TestChecker())
+    engine.process_info.add_parser(TestParser())
     dispatcher_obj = dispatcher.Dispatcher()
     app = _TestDispatcherProcess(dispatcher_obj, engine)
     app.loop = get_or_create_event_loop()
 
-    dispatcher_conn = server_dispatcher.DispatcherConnection(app, ('127.0.0.1', 8000), TestChecker())
+    dispatcher_conn = server_dispatcher.DispatcherConnection(app, ('127.0.0.1', 8000), TestParser())
     dispatcher_conn.check_idle_timeout = 50
     dispatcher_conn.last_recv_time = time.time() - 0.06
     dispatcher_conn.connection_made(TestClientConn())
@@ -52,12 +56,12 @@ async def test_conn_idle_check_lost():
     engine = server_engine.TrpcServerEngine(ServerOption())
     engine.process_info.add_address(("127.0.0.1", 8000))
     engine.process_info.add_socket_type("net")
-    engine.process_info.add_checker(TestChecker())
+    engine.process_info.add_parser(TestParser())
     dispatcher_obj = dispatcher.Dispatcher()
     app = _TestDispatcherProcess(dispatcher_obj, engine)
     app.loop = get_or_create_event_loop()
 
-    dispatcher_conn = server_dispatcher.DispatcherConnection(app, ('127.0.0.1', 8000), TestChecker())
+    dispatcher_conn = server_dispatcher.DispatcherConnection(app, ('127.0.0.1', 8000), TestParser())
     dispatcher_conn.check_idle_timeout = 50
     dispatcher_conn.last_recv_time = time.time() - 0.06
     dispatcher_conn.connection_made(TestClientConn())
@@ -75,11 +79,11 @@ def test_server_dispatcher_tcp():
     engine = server_engine.TrpcServerEngine(ServerOption())
     engine.process_info.add_address(("127.0.0.1", 8000))
     engine.process_info.add_socket_type("net")
-    engine.process_info.add_checker(TestChecker())
+    engine.process_info.add_parser(TestParser())
     dispatcher_obj = dispatcher.Dispatcher()
     app = _TestDispatcherProcess(dispatcher_obj, engine)
 
-    dispatcher_conn = server_dispatcher.DispatcherConnection(app, ('127.0.0.1', 8000), TestChecker())
+    dispatcher_conn = server_dispatcher.DispatcherConnection(app, ('127.0.0.1', 8000), TestParser())
     worker_conn = server_dispatcher.WorkerConnection(app)
 
     dispatcher_conn.connection_made(TestClientConn())
@@ -145,12 +149,12 @@ async def test_dispatcher_connection_made_exception():
     engine = server_engine.TrpcServerEngine(ServerOption())
     engine.process_info.add_address(("127.0.0.1", 8000))
     engine.process_info.add_socket_type("net")
-    engine.process_info.add_checker(TestChecker())
+    engine.process_info.add_parser(TestParser())
     dispatcher_obj = dispatcher.Dispatcher()
     app = _TestDispatcherProcess(dispatcher_obj, engine)
     app.loop = get_or_create_event_loop()
 
-    dispatcher_conn = server_dispatcher.DispatcherConnection(app, ('127.0.0.1', 8000), TestChecker())
+    dispatcher_conn = server_dispatcher.DispatcherConnection(app, ('127.0.0.1', 8000), TestParser())
 
     # Create a mock transport that raises exception when getting extra info
     mock_transport = TestClientConn()
@@ -170,12 +174,12 @@ async def test_dispatcher_connection_made_exception():
     assert dispatcher_conn.fd not in app.client_connections
 
 
-def test_dispatcher_data_received_checker_exception():
-    """Test dispatcher data_received with checker exception to cover line 125"""
+def test_dispatcher_data_received_parser_exception():
+    """Test dispatcher data_received with parser exception to cover line 125"""
     engine = server_engine.TrpcServerEngine(ServerOption())
     engine.process_info.add_address(("127.0.0.1", 8000))
     engine.process_info.add_socket_type("net")
-    engine.process_info.add_checker(TestChecker())
+    engine.process_info.add_parser(TestParser())
     dispatcher_obj = dispatcher.Dispatcher()
     app = _TestDispatcherProcess(dispatcher_obj, engine)
     app.loop = get_or_create_event_loop()
@@ -183,7 +187,7 @@ def test_dispatcher_data_received_checker_exception():
     class MockParse():
 
         def read(self):
-            raise RuntimeError("Mock checker fatal error")
+            raise RuntimeError("Mock parser fatal error")
 
         def feeds_data(self, data):
             pass
@@ -191,7 +195,7 @@ def test_dispatcher_data_received_checker_exception():
         def reset(self):
             pass
 
-    dispatcher_conn = server_dispatcher.DispatcherConnection(app, ('127.0.0.1', 8000), TestChecker(MockParse))
+    dispatcher_conn = server_dispatcher.DispatcherConnection(app, ('127.0.0.1', 8000), TestParser(MockParse))
     dispatcher_conn.connection_made(TestClientConn())
 
     # Feed some data to trigger the exception at line 125
@@ -206,7 +210,7 @@ def test_dispatcher_data_received_worker_write_exception():
     engine = server_engine.TrpcServerEngine(ServerOption())
     engine.process_info.add_address(("127.0.0.1", 8000))
     engine.process_info.add_socket_type("net")
-    engine.process_info.add_checker(TestChecker())
+    engine.process_info.add_parser(TestParser())
     dispatcher_obj = dispatcher.Dispatcher()
     app = _TestDispatcherProcess(dispatcher_obj, engine)
     app.loop = get_or_create_event_loop()
@@ -226,7 +230,7 @@ def test_dispatcher_data_received_worker_write_exception():
         def reset(self):
             pass
 
-    dispatcher_conn = server_dispatcher.DispatcherConnection(app, ('127.0.0.1', 8000), TestChecker(MockParse))
+    dispatcher_conn = server_dispatcher.DispatcherConnection(app, ('127.0.0.1', 8000), TestParser(MockParse))
     worker_conn = server_dispatcher.WorkerConnection(app)
 
     dispatcher_conn.connection_made(TestClientConn())
@@ -251,12 +255,12 @@ def test_dispatcher_connection_lost_with_exception():
     engine = server_engine.TrpcServerEngine(ServerOption())
     engine.process_info.add_address(("127.0.0.1", 8000))
     engine.process_info.add_socket_type("net")
-    engine.process_info.add_checker(TestChecker())
+    engine.process_info.add_parser(TestParser())
     dispatcher_obj = dispatcher.Dispatcher()
     app = _TestDispatcherProcess(dispatcher_obj, engine)
     app.loop = get_or_create_event_loop()
 
-    dispatcher_conn = server_dispatcher.DispatcherConnection(app, ('127.0.0.1', 8000), TestChecker())
+    dispatcher_conn = server_dispatcher.DispatcherConnection(app, ('127.0.0.1', 8000), TestParser())
     dispatcher_conn.connection_made(TestClientConn())
 
     # Call connection_lost with an exception to trigger line 143

@@ -1,6 +1,8 @@
-# -*- coding: utf-8 -*-
+# Tencent is pleased to support the open source community by making tRPC-Python available.
 #
-# Copyright @ 2025 Tencent.com
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
 """Test cases for address utilities in TRPC framework.
 
 This module contains unit tests for verifying the behavior of address utility
@@ -13,13 +15,13 @@ from unittest.mock import patch
 
 import pytest
 
-from trpc_sdk.utils import AddrType
 from trpc_sdk.utils import convert_address_to_str
 from trpc_sdk.utils import get_addr_from_transport
 from trpc_sdk.utils import get_address_from_str
 from trpc_sdk.utils import make_addr_info_to_bytes
 from trpc_sdk.utils import parse_addr_info_from_bytes
 from trpc_sdk.utils import set_addr_to_ctx_from_transport
+from trpc_sdk.utils._types import AddrType
 
 
 class TestAddressUtilities:
@@ -110,12 +112,12 @@ class TestAddressUtilities:
 
         mock_ctx = Mock()
         mock_msg = Mock()
-        mock_ctx.get_client_message.return_value = mock_msg
+        mock_ctx.get_message.return_value = mock_msg
 
         set_addr_to_ctx_from_transport(mock_ctx, mock_transport)
 
         # Verify message methods were called
-        mock_msg.set_local_addr.assert_called_once_with("192.168.1.1")
+        mock_msg.set_local_ip.assert_called_once_with("192.168.1.1")
         mock_msg.set_remote_addr.assert_called_once_with("10.0.0.1")
 
         # Verify context attributes were set
@@ -132,12 +134,12 @@ class TestAddressUtilities:
 
         mock_ctx = Mock()
         mock_msg = Mock()
-        mock_ctx.get_client_message.return_value = mock_msg
+        mock_ctx.get_message.return_value = mock_msg
 
         set_addr_to_ctx_from_transport(mock_ctx, mock_transport)
 
         # Verify default addresses were set
-        mock_msg.set_local_addr.assert_called_once_with("0.0.0.0")
+        mock_msg.set_local_ip.assert_called_once_with("0.0.0.0")
         mock_msg.set_remote_addr.assert_called_once_with("0.0.0.0")
 
         assert mock_ctx.remote_ip == "0.0.0.0"
@@ -156,12 +158,12 @@ class TestAddressUtilities:
 
         mock_ctx = Mock()
         mock_msg = Mock()
-        mock_ctx.get_client_message.return_value = mock_msg
+        mock_ctx.get_message.return_value = mock_msg
 
         set_addr_to_ctx_from_transport(mock_ctx, mock_transport)
 
         # Verify message methods were called with correct arguments
-        mock_msg.set_local_addr.assert_called_once_with("192.168.1.1")
+        mock_msg.set_local_ip.assert_called_once_with("192.168.1.1")
         mock_msg.set_remote_addr.assert_called_once_with("10.0.0.1")
 
         # Verify context attributes were set correctly
@@ -177,12 +179,12 @@ class TestAddressUtilities:
 
         mock_ctx = Mock()
         mock_msg = Mock()
-        mock_ctx.get_client_message.return_value = mock_msg
+        mock_ctx.get_message.return_value = mock_msg
 
         set_addr_to_ctx_from_transport(mock_ctx, mock_transport)
 
         # Verify default addresses were set
-        mock_msg.set_local_addr.assert_called_once_with("0.0.0.0")
+        mock_msg.set_local_ip.assert_called_once_with("0.0.0.0")
         mock_msg.set_remote_addr.assert_called_once_with("0.0.0.0")
 
         assert mock_ctx.remote_ip == "0.0.0.0"
@@ -197,12 +199,12 @@ class TestAddressUtilities:
 
         mock_ctx = Mock()
         mock_msg = Mock()
-        mock_ctx.get_client_message.return_value = mock_msg
+        mock_ctx.get_message.return_value = mock_msg
 
         set_addr_to_ctx_from_transport(mock_ctx, mock_transport)
 
         # Verify string addresses were converted to tuples with port 0
-        mock_msg.set_local_addr.assert_called_once_with("192.168.1.1")
+        mock_msg.set_local_ip.assert_called_once_with("192.168.1.1")
         mock_msg.set_remote_addr.assert_called_once_with("10.0.0.1")
 
         assert mock_ctx.remote_ip == "10.0.0.1"
@@ -220,7 +222,7 @@ class TestAddressUtilities:
 
         mock_ctx = Mock()
         mock_msg = Mock()
-        mock_ctx.get_client_message.return_value = mock_msg
+        mock_ctx.get_message.return_value = mock_msg
 
         with pytest.raises(ValueError, match="Invalid local address"):
             set_addr_to_ctx_from_transport(mock_ctx, mock_transport)
@@ -235,7 +237,7 @@ class TestAddressUtilities:
 
         mock_ctx = Mock()
         mock_msg = Mock()
-        mock_ctx.get_client_message.return_value = mock_msg
+        mock_ctx.get_message.return_value = mock_msg
 
         with pytest.raises(ValueError, match="Invalid peer address"):
             set_addr_to_ctx_from_transport(mock_ctx, mock_transport)
@@ -250,12 +252,12 @@ class TestAddressUtilities:
 
         mock_ctx = Mock()
         mock_msg = Mock()
-        mock_ctx.get_client_message.return_value = mock_msg
+        mock_ctx.get_message.return_value = mock_msg
 
         set_addr_to_ctx_from_transport(mock_ctx, mock_transport)
 
         # Verify both types were handled correctly
-        mock_msg.set_local_addr.assert_called_once_with("192.168.1.1")
+        mock_msg.set_local_ip.assert_called_once_with("192.168.1.1")
         mock_msg.set_remote_addr.assert_called_once_with("10.0.0.1")
 
         assert mock_ctx.remote_ip == "10.0.0.1"
@@ -273,12 +275,12 @@ class TestAddressUtilities:
 
         mock_ctx = Mock()
         mock_msg = Mock()
-        mock_ctx.get_client_message.return_value = mock_msg
+        mock_ctx.get_message.return_value = mock_msg
 
         set_addr_to_ctx_from_transport(mock_ctx, mock_transport)
 
         # Empty tuple is falsy, so default address is used
-        mock_msg.set_local_addr.assert_called_once_with("0.0.0.0")
+        mock_msg.set_local_ip.assert_called_once_with("0.0.0.0")
         mock_msg.set_remote_addr.assert_called_once_with("10.0.0.1")
 
         assert mock_ctx.remote_ip == "10.0.0.1"
@@ -296,7 +298,7 @@ class TestAddressUtilities:
 
         mock_ctx = Mock()
         mock_msg = Mock()
-        mock_ctx.get_client_message.return_value = mock_msg
+        mock_ctx.get_message.return_value = mock_msg
 
         with pytest.raises(ValueError, match="Invalid local address"):
             set_addr_to_ctx_from_transport(mock_ctx, mock_transport)
@@ -308,12 +310,12 @@ class TestAddressUtilities:
 
         mock_ctx = Mock()
         mock_msg = Mock()
-        mock_ctx.get_client_message.return_value = mock_msg
+        mock_ctx.get_message.return_value = mock_msg
 
         set_addr_to_ctx_from_transport(mock_ctx, mock_transport)
 
         # Verify None was handled as default, string was converted
-        mock_msg.set_local_addr.assert_called_once_with("0.0.0.0")
+        mock_msg.set_local_ip.assert_called_once_with("0.0.0.0")
         mock_msg.set_remote_addr.assert_called_once_with("10.0.0.1")
 
         assert mock_ctx.remote_ip == "10.0.0.1"

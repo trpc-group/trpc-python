@@ -1,4 +1,8 @@
-# -*- coding: utf-8 -*-
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
 """Test client transport module"""
 import asyncio
 import socket
@@ -20,10 +24,10 @@ from trpc_sdk.exceptions import ClientTimeoutError
 from trpc_sdk.exceptions import ServerSystemError
 from trpc_sdk.pool.connpool import _default_connection_pools
 from trpc_sdk.pool.multiplexed import new_multiplexed
-from trpc_sdk.transport import udp_connection
+from trpc_sdk.transport._client import _client_transport_udp
 from trpc_sdk.transport.client_transport import ClientTaskStreamTransport
 from trpc_sdk.transport.client_transport import ClientTransport
-from trpc_sdk.transport.options import RoundTripOptions
+from trpc_sdk.transport import RoundTripOptions
 from trpc_sdk.utils import get_or_create_event_loop
 
 
@@ -261,7 +265,7 @@ async def test_client_transport():
     assert rsp == b'\t0\x00\x00\x00\x00\x00\x1f\x00\x02\x00\x00\x00\x00\x00\x00\x18\x01\n\x0bhi: hello: '
 
     options.set_network("udp")
-    udp_connection.open_datagram_endpoint = _mock_open_datagram_endpoint
+    _client_transport_udp.open_datagram_endpoint = _mock_open_datagram_endpoint
     try:
         rsp = await client_transport.round_trip(ctx, req_data, options)
         assert rsp == b'hi: hello: '
@@ -290,7 +294,7 @@ class _MockMultiplexedConn:
 class _MockMultiplexed:
     """Mock multiplexed pool that returns a mock connection"""
 
-    async def get_conn(self, network, address, request_id, msg, checker, codec, timeout):
+    async def get_conn(self, network, address, request_id, msg, parser, codec, timeout):
         return _MockMultiplexedConn()
 
 

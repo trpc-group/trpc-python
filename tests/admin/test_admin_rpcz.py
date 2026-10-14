@@ -1,4 +1,9 @@
-# -*- coding: utf-8 -*-
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
+
 import asyncio
 import json
 import time
@@ -7,17 +12,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import trpc_sdk.admin.server as server_mod
-import trpc_sdk.config as trpc_config_package
-from trpc_sdk.admin.server import Configer
-from trpc_sdk.admin.server import handler_rpcz
-from trpc_sdk.admin.server import init as admin_init
-from trpc_sdk.admin.server import make_response
-from trpc_sdk.config import config as trpc_config_core
-from trpc_sdk.rpcz.span import Span
-from trpc_sdk.rpcz.span import SpanType
+import trpc_sdk.admin._server as server_mod
+from trpc_sdk.admin._server import Configer
+from trpc_sdk.admin._server import handler_rpcz
+from trpc_sdk.admin._server import init as admin_init
+from trpc_sdk.config import TrpcConfig
+from trpc_sdk.rpcz import Span
+from trpc_sdk.rpcz import SpanType
 from trpc_sdk.utils import get_or_create_event_loop
-# 勿用 "trpc_sdk.config.config.global_config_obj" 字符串路径：pytest 解析时易与包名/子模块混淆。
 
 
 class _FakeWs:
@@ -100,7 +102,7 @@ def test_decode_span_exception_branches(monkeypatch):
     cfg = Configer()
 
     monkeypatch.setattr(
-        "trpc_sdk.admin.server.Span.from_dict",
+        "trpc_sdk.admin._server.Span.from_dict",
         lambda _: (_ for _ in ()).throw(ValueError("bad dict")),
     )
     assert cfg._decode_span({"span_id": 1}) is None  # pylint: disable=protected-access
@@ -206,20 +208,20 @@ async def test_handler_rpcz_span_id_detail_success(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_handler_rpcz_brief_fallback_when_config_read_failed(monkeypatch):
+async def test_handler_rpcz_brief_limited_by_print_spans_num(monkeypatch):
     old_configer = server_mod.configer
     try:
         cfg = Configer()
         cfg.rpcz_sorted_spans = [_make_server_span(i, 1000 + i) for i in range(20)]
         server_mod.configer = cfg
 
-        monkeypatch.setattr(trpc_config_core, "global_config_obj", None, raising=False)
-        monkeypatch.setattr(trpc_config_package, "global_config_obj", None, raising=False)
+        rpcz_cfg = SimpleNamespace(print_spans_num=5)
+        monkeypatch.setattr(TrpcConfig, "global_config", lambda: SimpleNamespace(rpcz=rpcz_cfg))
         req = _FakeRequest({})
         resp = await handler_rpcz(req)
         out = _response_json(resp)
         assert out["errorcode"] == 0
-        assert len(out["spans"]) == 10
+        assert len(out["spans"]) == 5
     finally:
         server_mod.configer = old_configer
 
@@ -228,8 +230,8 @@ def _rpcz_cfg(server_filter=None, services=None, client_filter=None, backends=No
     services = services or []
     backends = backends or []
     return SimpleNamespace(
-        server=SimpleNamespace(filter=server_filter or [], service=services),
-        client=SimpleNamespace(filter=client_filter or [], service=backends),
+        server=SimpleNamespace(filters=server_filter or [], service=services),
+        client=SimpleNamespace(filters=client_filter or [], service=backends),
     )
 
 
@@ -242,7 +244,7 @@ def test_is_rpcz_filter_enabled_server_level():
 
 
 def test_is_rpcz_filter_enabled_service_level():
-    svc = SimpleNamespace(filter=["other", "rpcz"])
+    svc = SimpleNamespace(filters=["other", "rpcz"])
     assert server_mod.is_rpcz_filter_enabled_in_config(_rpcz_cfg(services=[svc])) is True
 
 
@@ -251,7 +253,7 @@ def test_is_rpcz_filter_enabled_client_level():
 
 
 def test_is_rpcz_filter_enabled_backend_level():
-    backend = SimpleNamespace(filter=["rpcz"])
+    backend = SimpleNamespace(filters=["rpcz"])
     assert server_mod.is_rpcz_filter_enabled_in_config(_rpcz_cfg(backends=[backend])) is True
 
 
@@ -343,17 +345,15 @@ def test_evict_expired_spans_removes_old_spans():
     assert cfg.rpcz_sorted_spans[0].span_id == 2
 
 
-def test_init_enable_rpcz_collector_via_global_config_obj(monkeypatch):
-    """通过 global_config_obj 判定为启用时，同样应走采集线程启动分支。"""
+def test_init_enable_rpcz_collector_via_trpc_config(monkeypatch):
+    """通过 TrpcConfig.config() 判定为启用时，同样应走采集线程启动分支。"""
     monkeypatch.delattr(admin_init, "_rpcz_collector_started", raising=False)
     empty = _rpcz_cfg()
-    monkeypatch.setattr(trpc_config_core, "global_config_obj", empty)
-    monkeypatch.setattr(trpc_config_package, "global_config_obj", empty)
+    monkeypatch.setattr(TrpcConfig, "config", lambda: empty)
     n_base = len(admin_init().on_startup)
 
     enabled = _rpcz_cfg(server_filter=["rpcz"])
-    monkeypatch.setattr(trpc_config_core, "global_config_obj", enabled)
-    monkeypatch.setattr(trpc_config_package, "global_config_obj", enabled)
+    monkeypatch.setattr(TrpcConfig, "config", lambda: enabled)
     monkeypatch.delattr(admin_init, "_rpcz_collector_started", raising=False)
 
     mock_thread_cls = MagicMock()

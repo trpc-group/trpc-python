@@ -65,6 +65,12 @@ class SchedulerParams:
     # whether a frame belongs to a streaming RPC — the authoritative flag is
     # FrameType.
     frame_type: int = trpc_pb2.TRPC_UNARY_FRAME  # 0 = UNARY, 1 = STREAM
+    # Which choice this is, when one process makes several with the same
+    # ``worker_conn_num``. Merge mode with ``io_handle_type: separate`` passes
+    # "io_conn" (connection -> I/O loop), "handle_req" (unary request ->
+    # handle thread) or "handle_conn" (HTTP connection -> handle thread);
+    # every other caller leaves it empty.
+    target: str = ""
 
 
 @unique

@@ -1,3 +1,9 @@
+# Tencent is pleased to support the open source community by making tRPC-Python available.
+#
+# Copyright (C) 2026 Tencent. All rights reserved.
+#
+# tRPC-Python is licensed under Apache-2.0.
+
 import asyncio
 import socket
 import time
@@ -67,8 +73,8 @@ class TestMultiplexed():
         opts = Options()
         o = with_protocol('trpc')
         o(opts)
-        conns = Connections(("127.0.0.1", self.port), default_multiplexed_pool, opts.call_options.checker, opts.codec)
-        conn = Connection(("127.0.0.1", self.port), conns, opts.call_options.checker, opts.codec,
+        conns = Connections(("127.0.0.1", self.port), default_multiplexed_pool, opts.call_options.parser, opts.codec)
+        conn = Connection(("127.0.0.1", self.port), conns, opts.call_options.parser, opts.codec,
                           default_multiplexed_pool.opts)
         vconn = VirtualConnection(1, conn, None)
         return conns, conn, vconn
@@ -92,7 +98,7 @@ class TestMultiplexed():
         opts = Options()
         o = with_protocol('trpc')
         o(opts)
-        res = await default_multiplexed_pool.get_conn("", ("127.0.0.1", self.port), 1, None, opts.call_options.checker,
+        res = await default_multiplexed_pool.get_conn("", ("127.0.0.1", self.port), 1, None, opts.call_options.parser,
                                                       opts.codec, 3.0)
         assert res
         res.write(bytes('hi： ', encoding="utf8"))

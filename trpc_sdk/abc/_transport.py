@@ -19,19 +19,29 @@ from typing import Callable
 from typing import Optional
 from typing import Tuple
 
-from ._cython import BaseClientProtocolChecker
+from ._cython import BaseClientProtocolParser
 from ._cython import BaseCodec
-from ._cython import BaseServerProtocolChecker
+from ._cython import BaseServerProtocolParser
 from ._cython import BaseService
 from ._cython import TrpcContext
 from ._plugin import BasePlugin
-from ._server import BaseTrpcServerEngine
 
 AddrType = Tuple[str, int]
 """Network endpoint as ``(host, port)``."""
 
 ServiceHandler = Callable[[TrpcContext, bytes], bytes]
 """Unary service handler that accepts a context and request bytes."""
+
+STREAM_WRITER_CTX_KEY = "stream_writer"
+"""Context meta key holding the write handle of a stream frame's connection.
+
+Set by whoever receives the frame: the TCP protocol puts the connection's
+``ConnWriter`` here, and under ``server.mode: separate`` the rpc task puts an
+``IpcStreamWriter``. On INIT the stream transport saves the handle for that
+stream and clears the key; other frames clear it as well, so cloned contexts
+never carry a stale handle. Every outgoing frame of the stream is written
+through the saved handle, which has ``write(data)`` and a ``closed`` flag.
+"""
 
 
 @dataclass
@@ -40,10 +50,12 @@ class BaseServerTransportOption:
 
     Attributes:
         service: Optional service implementation bound to the transport.
-        address: Bind host or IP address.
-        port: Bind port number.
-        checker: Server protocol checker used to validate inbound frames.
-        handle: Optional unary service handler.
+        address: Bind endpoint as ``(host, port)``; for a UNIX socket it is
+            ``(unix_path, 0)`` and only ``address[0]`` is used.
+        port: Bind port number, kept in sync with ``address[1]`` by
+            :meth:`set_address`.
+        parser: Server protocol parser that splits inbound frames.
+        rpc_handler: Optional unary service handler.
         network: Network type such as ``tcp`` or ``udp``.
         service_name: Logical service name exposed by this listener.
         socket_type: Socket family label such as ``net`` or ``unix``.
@@ -53,13 +65,19 @@ class BaseServerTransportOption:
         tls_key: Path to the TLS private key, if any.
         tls_cert: Path to the TLS certificate, if any.
         target: Optional target name used by the transport backend.
+        backlog: ``listen()`` backlog for the listen socket built by
+            :meth:`BaseServerTransport.listen`.
+        reuse_port: Not read by the built-in transports: whether a socket
+            gets ``SO_REUSEPORT`` depends on the process model, so the
+            runtime decides it after fork.
+        is_stream: True when the listener carries tRPC streaming RPCs.
     """
 
     service: Optional[BaseService] = None
-    address: str = ""
+    address: AddrType = ("", 0)
     port: int = 8000
-    checker: Optional[BaseServerProtocolChecker] = None
-    handle: Optional[ServiceHandler] = None
+    parser: Optional[BaseServerProtocolParser] = None
+    rpc_handler: Optional[ServiceHandler] = None
     network: str = "tcp"
     service_name: str = ""
     socket_type: str = ""
@@ -69,15 +87,18 @@ class BaseServerTransportOption:
     tls_key: str = ""
     tls_cert: str = ""
     target: str = ""
+    backlog: int = 1024
+    reuse_port: bool = False
+    is_stream: bool = False
 
     def set_address(self, address_info: AddrType):
-        """Set the bind host and port from an address tuple.
+        """Set the bind endpoint and keep ``port`` in sync with it.
 
         Args:
             address_info: Bind endpoint as ``(host, port)``.
         """
-        self.address = address_info[0]
-        self.port = int(address_info[1])
+        self.address = (address_info[0], int(address_info[1]))
+        self.port = self.address[1]
 
     def set_service(self, service: Optional[BaseService]) -> None:
         """Bind the service instance this listener will dispatch into."""
@@ -99,9 +120,9 @@ class BaseServerTransportOption:
         """Set the idle-connection timeout copied from ``service.timeout``."""
         self.idle_timeout = timeout
 
-    def set_checker(self, checker: Optional[BaseServerProtocolChecker]) -> None:
-        """Install the protocol frame checker for this listener."""
-        self.checker = checker
+    def set_parser(self, parser: Optional[BaseServerProtocolParser]) -> None:
+        """Install the protocol frame parser for this listener."""
+        self.parser = parser
 
     def set_worker_num(self, worker_num: int) -> None:
         """Copy process-model worker count onto this listener."""
@@ -125,26 +146,65 @@ class BaseServerTransportOption:
 
 
 class BaseServerTransport(BasePlugin):
-    """Define server transport lifecycle operations."""
+    """Define server transport lifecycle operations.
+
+    The lifecycle is split around the fork. :meth:`bind` runs once in the
+    parent, from ``ServiceAdapter.run``, and only records the options; the engine
+    then checks the endpoint with :meth:`check_endpoint` and registers the
+    transport so every forked worker inherits it. :meth:`listen` runs after
+    fork, in each process that serves the endpoint. :meth:`stop` and
+    :meth:`destroy` undo :meth:`listen` in two steps so a caller can stop
+    accepting first and wait for the close afterwards.
+    """
 
     @abstractmethod
-    def listen_and_serve(
-        self,
-        opts: BaseServerTransportOption,
-        server_engine: BaseTrpcServerEngine,
-    ):
-        """Bind the configured endpoint and start serving traffic.
+    def bind(self, opts: BaseServerTransportOption) -> None:
+        """Record the listener options. Called before fork.
+
+        Must not create sockets or touch an event loop: the transport object
+        is inherited by every forked worker.
 
         Args:
-            opts: Server transport options.
-            server_engine: Server engine that owns process lifecycle hooks.
+            opts: Server transport options for this listener.
         """
         ...
 
+    def check_endpoint(self) -> bool:
+        """Check, before fork, that the endpoint can be served. Default: True.
+
+        Called by the engine right after :meth:`bind`. Logs the reason
+        itself; the server exits with status 1 on False.
+
+        Returns:
+            Whether startup may continue.
+        """
+        return True
+
     @abstractmethod
-    def close(self):
-        """Stop the transport and release owned resources."""
+    def listen(self) -> None:
+        """Start serving the endpoint on the calling thread's event loop.
+
+        Called after fork, in each process that serves the endpoint, before
+        that loop runs. Everything that must be closed to stop accepting is
+        kept on the transport for :meth:`stop`.
+
+        A subclass may add parameters with defaults, such as the built-in
+        transports' ``opt`` that tells them which loops to serve on.
+        """
         ...
+
+    def stop(self) -> None:
+        """Stop accepting new requests; requests already taken in keep running.
+
+        Synchronous because the runtime calls it from its stop-signal path,
+        on the thread :meth:`listen` ran on, before any serving loop stops.
+        Must be idempotent. Default: nothing to stop.
+        """
+        return None
+
+    async def destroy(self) -> None:
+        """Wait for the close to finish and release resources. Default: no-op."""
+        return None
 
 
 @dataclass
@@ -160,7 +220,7 @@ class BaseClientTransportOption:
         socket_type: Socket backend type such as ``net``.
         network: Network type such as ``tcp`` or ``udp``.
         short_conn: Whether each request should use a short-lived connection.
-        checker: Client protocol checker used to validate frames.
+        parser: Client protocol parser used to split response frames.
         codec: Optional codec used to encode and decode payloads.
         local_addr: Optional local bind endpoint.
         sock: Optional pre-created socket reused by the transport.
@@ -171,7 +231,7 @@ class BaseClientTransportOption:
     socket_type: str = "net"
     network: str = "tcp"
     short_conn: bool = False
-    checker: Optional[BaseClientProtocolChecker] = None
+    parser: Optional[BaseClientProtocolParser] = None
     codec: Optional[BaseCodec] = None
     local_addr: Optional[AddrType] = None
     sock: Optional[socket] = None

@@ -8,8 +8,8 @@
 
 ``create_server(yaml)`` copies YAML ``server:`` fields onto :class:`ServerOption`
 and each ``server.service[]`` entry onto a :class:`ServiceOption`. The engine
-reads ``ServerOption.mode`` (``merge`` or ``separate``) and how many
-threads or rpc tasks to start. Each ``Service`` keeps its ``ServiceOption``
+reads ``ServerOption.mode`` (``merge``, ``separate`` or ``peer``), the merge-mode
+thread model, and how many rpc tasks or peer workers to start. Each ``ServiceAdapter`` keeps its ``ServiceOption``
 for listen address, codec, registry, and filters.
 """
 
@@ -20,9 +20,10 @@ from typing import Any
 from typing import Callable
 from typing import Optional
 
-from trpc_sdk.codec import get_server_checker
+from trpc_sdk.codec import get_server_parser
 from trpc_sdk.codec import get_server_codec
 from trpc_sdk.filters import FilterChain
+from trpc_sdk.log import logger
 from trpc_sdk.naming import defaultRegistry
 from trpc_sdk.naming import get_registry
 from trpc_sdk.transport import DefaultServerTransport
@@ -33,17 +34,22 @@ from ._constants import DEFAULT_COMPRESS_TYPE
 from ._constants import DEFAULT_DISABLE_REQUEST_TIMEOUT
 from ._constants import DEFAULT_ENABLE_STREAM_FILTER
 from ._constants import DEFAULT_ENV_NAME
+from ._constants import DEFAULT_HANDLE_THREAD_NUM
+from ._constants import DEFAULT_HANDLER_MAX_CONCURRENCY
+from ._constants import DEFAULT_HANDLER_QUEUE_SIZE
 from ._constants import DEFAULT_HANDLER_SET
+from ._constants import DEFAULT_IO_HANDLE_TYPE
+from ._constants import DEFAULT_IO_THREAD_NUM
 from ._constants import DEFAULT_MAX_WINDOW_SIZE
 from ._constants import DEFAULT_MODE
 from ._constants import DEFAULT_NAMESPACE
 from ._constants import DEFAULT_PROTOCOL
 from ._constants import DEFAULT_QUEUE_WAIT_POLICY
 from ._constants import DEFAULT_QUEUE_WAIT_TIMEOUT
+from ._constants import DEFAULT_READY_TIMEOUT_MS
 from ._constants import DEFAULT_REBOOT_CHILD
 from ._constants import DEFAULT_REGISTRY_DELAY
 from ._constants import DEFAULT_REGISTRY_OPTION
-from ._constants import DEFAULT_RPC_TASK_NUM
 from ._constants import DEFAULT_SERIALIZATION_TYPE
 from ._constants import DEFAULT_SERVICE_NAME
 from ._constants import DEFAULT_SERVICE_NUM
@@ -53,10 +59,10 @@ from ._constants import DEFAULT_TASK_BATCH_SIZE
 from ._constants import DEFAULT_TASK_CONSUMER_NUM
 from ._constants import DEFAULT_TASK_QUEUE_SIZE
 from ._constants import DEFAULT_TASK_WAIT_INTERVAL
+from ._constants import DEFAULT_TCP_REUSE_PORT
 from ._constants import DEFAULT_TIMEOUT
 from ._constants import DEFAULT_TIMER_SPEC
 from ._constants import DEFAULT_WORKER_NUM
-from ._constants import DEFAULT_WORKER_THREAD_NUM
 
 if TYPE_CHECKING:
     from asyncio import AbstractEventLoop
@@ -76,20 +82,43 @@ class ServerOption:
     Not a listen endpoint. Worker count, process mode, task-queue knobs, and
     child-restart policy live here. Per-port settings are :class:`ServiceOption`.
 
-    Example: ``server.mode: merge`` and ``server.worker_thread_num: 4`` become
-    ``mode="merge"`` and ``worker_thread_num=4``; the worker then spreads
-    connections over four event-loop threads in this process.
+    Example: ``server.mode: merge`` and ``server.io_thread_num: 1`` become
+    ``mode="merge"`` and ``io_thread_num=1``.
+
+    The thread- and process-model fields hold *resolved* values:
+    ``create_server`` copies the raw YAML here and then runs
+    :func:`~trpc_sdk.server._option_resolver.resolve_server_option` on it.
     """
 
     def __init__(self) -> None:
-        # Process model: "merge" / "separate".
+        # Process model: "merge" / "separate" / "peer".
         self.mode: str = DEFAULT_MODE
-        # Worker (or executor) process count. YAML default is CPU core count.
+        # Processes of separate mode (rpc tasks) and peer mode (workers,
+        # worker-0 included); merge does not read it. ``0`` means the CPU
+        # count, resolved by ``create_server`` (or by the worker when the
+        # option is built by hand).
         self.worker_num: int = DEFAULT_WORKER_NUM
-        # Event-loop threads inside a merge-mode worker; 1 stays single-threaded.
-        self.worker_thread_num: int = DEFAULT_WORKER_THREAD_NUM
-        # Rpc task processes forked by a separate-mode worker.
-        self.rpc_task_num: int = DEFAULT_RPC_TASK_NUM
+        # Thread model of a merge-mode worker: "merge" or "separate". Left
+        # empty in YAML it is inferred: separate iff ``handle_thread_num > 0``.
+        self.io_handle_type: str = DEFAULT_IO_HANDLE_TYPE
+        # Serving threads. In merge they do both I/O and handlers; 
+        # in separate they are the I/O loops, the main loop
+        # included. 1 in merge stays single-threaded.
+        self.io_thread_num: int = DEFAULT_IO_THREAD_NUM
+        # Handle threads that run user code; only read by the separate thread model.
+        self.handle_thread_num: int = DEFAULT_HANDLE_THREAD_NUM
+        # Unary requests in flight per serving loop; 0 means unlimited.
+        self.handler_max_concurrency: int = DEFAULT_HANDLER_MAX_CONCURRENCY
+        # Per-loop FIFO capacity once the limit is reached; unused when the
+        # limit is 0.
+        self.handler_queue_size: int = DEFAULT_HANDLER_QUEUE_SIZE
+        # Set SO_REUSEPORT on the TCP listen sockets; shared by merge and
+        # separate (merge also applies it to HTTP).
+        self.tcp_reuse_port: bool = DEFAULT_TCP_REUSE_PORT
+        # Milliseconds the serving / I/O threads, or the separate-mode rpc
+        # tasks, get together to finish startup (task pipes, ``on_start``
+        # hooks, self-bound listeners).
+        self.ready_timeout: int = DEFAULT_READY_TIMEOUT_MS
         # Number of ServiceOption entries; filled as len(server.service).
         self.service_num: int = DEFAULT_SERVICE_NUM
         # Task-process batch wait, in milliseconds.
@@ -100,8 +129,6 @@ class ServerOption:
         self.task_queue_size: int = DEFAULT_TASK_QUEUE_SIZE
         # Consumer threads inside each task process.
         self.task_consumer_num: int = DEFAULT_TASK_CONSUMER_NUM
-        # Optional callback for master -> worker message-pipe payloads.
-        self.on_worker_message: Optional[Callable[[int, bytes], Any]] = None
         # Restart a crashed child instead of exiting. Not supported in this
         # version: the worker treats it as False and warns when it is set.
         self.reboot_child: bool = DEFAULT_REBOOT_CHILD
@@ -123,7 +150,7 @@ class ServiceOption:
 
     Example: YAML ``name: trpc.test.helloworld.Greeter``, ``ip/port``,
     ``protocol: trpc`` becomes this object; ``set_protocol`` installs the
-    server codec and the frame checker used by the dispatcher.
+    server codec and the frame parser used by the dispatcher.
     """
 
     def __init__(self) -> None:
@@ -166,7 +193,7 @@ class ServiceOption:
         # Whether a custom handler is set.
         self.handler_set: bool = DEFAULT_HANDLER_SET
 
-        # Listen/transport knobs (address, network, checker, TLS, mode).
+        # Listen/transport knobs (address, network, parser, TLS, mode).
         # DefaultServerTransportOption is the same class as
         # BaseServerTransportOption; DefaultServerTransport() is a placeholder
         # that create_server() replaces with whatever sits in the plugin slot.
@@ -378,14 +405,14 @@ class ServiceOption:
     def set_protocol(self, protocol: str) -> None:
         """Set the service protocol name, e.g. trpc.
 
-        Also installs the codec and the frame checker on the transport option.
+        Also installs the codec and the frame parser on the transport option.
 
         Args:
             protocol: Protocol name, e.g. ``trpc`` or ``http``.
         """
         self.protocol = protocol
         self.codec = get_server_codec(protocol)
-        self.transport_option.set_checker(get_server_checker(protocol))
+        self.transport_option.set_parser(get_server_parser(protocol))
 
     def set_handler(self, handler: Any) -> None:
         """Set the server transport handle.
@@ -394,9 +421,9 @@ class ServiceOption:
         replaces that handle.
 
         Args:
-            handler: Callable used as ``transport_option.handle``.
+            handler: Callable used as ``transport_option.rpc_handler``.
         """
-        self.transport_option.handle = handler
+        self.transport_option.rpc_handler = handler
         self.handler_set = True
 
     def set_timer(self, spec: str) -> None:

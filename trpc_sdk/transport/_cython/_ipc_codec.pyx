@@ -132,7 +132,7 @@ cdef class InnerStreamParser:
 cdef class InnerDatagramParser:
     """Read ``DataHeader.flags`` from one C-dispatcher UDP datagram.
 
-    One datagram is one frame; this checker does not reassemble chunks.
+    One datagram is one frame; this parser does not reassemble chunks.
     """
 
     def __cinit__(self):
