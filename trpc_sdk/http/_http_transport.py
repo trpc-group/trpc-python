@@ -9,12 +9,15 @@
 :class:`HttpServerTransport` records the options before fork and serves the
 endpoint after it. The aiohttp application itself is built by the runtime,
 which owns the services and the routes, and handed over as
-``ListenOption.http_runner_factory``. The aiohttp-to-tRPC request bridge
+:meth:`HttpServerTransport.set_runner_factory`. The aiohttp-to-tRPC request bridge
 lives in :mod:`~trpc_sdk.http._message_handle`.
 """
 
 from __future__ import annotations
 
+from typing import Awaitable
+from typing import Callable
+from typing import Dict
 from typing import Optional
 
 from aiohttp import web
@@ -24,8 +27,6 @@ from trpc_sdk.abc import BaseServerTransportOption
 from trpc_sdk.abc import PluginInitPos
 from trpc_sdk.abc import PluginType
 from trpc_sdk.plugin import register_plugin
-from trpc_sdk.transport import AcceptTarget
-from trpc_sdk.transport import ListenOption
 from trpc_sdk.transport import TrpcServerTransport
 from trpc_sdk.transport import ssl_context_from_opts
 from ._constants import HTTP
@@ -40,6 +41,11 @@ class HttpServerTransport(TrpcServerTransport):
     loop gets its own runner, built on that loop.
     """
 
+    def __init__(self) -> None:
+        super().__init__()
+        # Builds and starts one runner; awaited on the loop that will serve it.
+        self._runner_factory: Optional[Callable[[], Awaitable[web.AppRunner]]] = None
+
     def bind(self, opts: BaseServerTransportOption) -> None:
         """Record the options and set the network to ``http``. Called before fork.
 
@@ -52,41 +58,41 @@ class HttpServerTransport(TrpcServerTransport):
         super().bind(opts)
         opts.set_network(HTTP)
 
-    def listen(self, opt: Optional[ListenOption] = None) -> None:
-        """Serve the aiohttp application on the loops in ``opt``.
+    def set_runner_factory(self, factory: Callable[[], Awaitable[web.AppRunner]]) -> None:
+        """Set how a runner is built; called by the runtime after fork, before :meth:`listen`.
 
-        With no serving loops the runner is served on ``opt.loop`` through a
-        ``web.SockSite`` on our own listen socket. Otherwise each serving loop
-        builds its own runner and an acceptor on ``opt.loop`` hands every
-        connection to one of them. Each runner is kept for
-        :meth:`pop_loop_resources`, keyed by the loop to clean it up on.
+        The application is built from the worker's services and routes, which
+        only the runtime has, so it cannot be recorded at :meth:`bind` time.
 
         Args:
-            opt: Needs ``http_runner_factory``.
+            factory: Coroutine factory returning a started ``AppRunner``.
+        """
+        self._runner_factory = factory
+
+    def listen(self) -> None:
+        """Build one runner per ``handle`` reactor, on that reactor's loop, and serve them.
+
+        Each runner is kept on the thread model, to be cleaned up on its own
+        loop when it stops; cleaning a runner up closes its connections.
 
         Raises:
-            ValueError: ``opt`` carries no ``http_runner_factory``.
+            ValueError: No runner factory was set.
         """
-        if opt is None or opt.http_runner_factory is None:
-            raise ValueError(f"HTTP endpoint {self.opts.address} needs an http_runner_factory")
-        ssl_context = opt.ssl_context or ssl_context_from_opts(self.opts)
-        if not opt.serving_loops:
-            runner = opt.loop.run_until_complete(opt.http_runner_factory())
-            self.keep_loop_resource(None, runner)
-            site = web.SockSite(runner,
-                                self.create_socket(opt.reuse_port),
-                                ssl_context=ssl_context,
-                                backlog=self.opts.backlog)
-            opt.loop.run_until_complete(site.start())
-            self.keep_site(opt.loop, site)
-            return
+        # Local import: trpc_sdk.runtime imports this package at module level.
+        from trpc_sdk.runtime import ResourceKind
+        from trpc_sdk.runtime import current_thread_model
 
-        targets = []
-        for target in opt.serving_loops:
-            runner = target.submit(opt.http_runner_factory, timeout=opt.ready_timeout)
-            self.keep_loop_resource(target.index, runner)
-            targets.append(AcceptTarget(target, runner.server))
-        self.serve_via_acceptor(opt, targets, ssl_context=ssl_context)
+        if self._runner_factory is None:
+            raise ValueError(f"HTTP endpoint {self.opts.address} needs a runner factory")
+        model = current_thread_model()
+        group = model.handle
+        runners: Dict[int, web.AppRunner] = {}
+        for reactor in group.reactors:
+            runner = reactor.submit(self._runner_factory, timeout=model.ready_timeout)
+            model.keep_resource(reactor, runner, ResourceKind.RUNNER)
+            runners[id(reactor)] = runner
+        self._serve_stream(model, group, lambda reactor: runners[id(reactor)].server,
+                           ssl_context_from_opts(self.opts))
 
 
 @register_plugin(PluginType.SERVER_TRANSPORT, HTTP, init_pos=PluginInitPos.WORKER)

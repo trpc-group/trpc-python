@@ -37,8 +37,9 @@ The package is split by responsibility:
   trip dials through; a tRPC-Python extension with no cross-language
   counterpart, so it is scoped to the client transport half
 - :mod:`~trpc_sdk.transport._server` — the server half's listen transports:
-  ``TrpcServerTransport`` (bind before fork, listen after it) and the
-  ``Acceptor`` it serves through, the ``ListenOption`` the runtime passes in,
+  ``TrpcServerTransport`` (bind before fork, listen after it; its private
+  acceptor picks ``create_server`` or a main-thread accept loop from the
+  :class:`~trpc_sdk.runtime.ThreadModel` the runtime installs),
   ``TrpcServerStreamTransport`` with its stream write handles,
   ``UserProtocolTransport`` with the ``register_protocol_handle`` registry,
   the plugin factory (``DefaultServerTransport*``,
@@ -102,8 +103,6 @@ from ._client import RoundTripOptions
 from ._client import get_client_transport
 from ._client import get_default_client_transport
 from ._client import open_datagram_endpoint
-from ._server import AcceptTarget
-from ._server import Acceptor
 from ._server import ConnectionCloseHandler
 from ._server import ConnectionIdleCleanHandler
 from ._server import ConnectionInitHandler
@@ -114,7 +113,6 @@ from ._server import DefaultServerTransport
 from ._server import DefaultServerTransportOption
 from ._server import IpcStreamWriter
 from ._server import MsgHandler
-from ._server import ListenOption
 from ._server import ProtocolStarter
 from ._server import ServerConnection
 from ._server import TcpConnectionOption
@@ -125,7 +123,6 @@ from ._server import UserProtocolTransport
 from ._server import get_protocol_handle
 from ._server import get_server_transport
 from ._server import register_protocol_handle
-from ._server import release_loop_resources
 from ._server import resolve_server_transport
 from ._server import ssl_context_from_opts
 
@@ -151,7 +148,6 @@ __all__ = [
     "PacketReaderProtocol",
     "PacketWriter",
     # Listen / process-model registration
-    "ListenOption",
     "TrpcServerTransport",
     "TrpcServerStreamTransport",
     "UserProtocolTransport",
@@ -165,12 +161,9 @@ __all__ = [
     "ConnectionIdleCleanHandler",
     "ConnectionInitHandler",
     "ConnectionCloseHandler",
-    "Acceptor",
-    "AcceptTarget",
     "ProtocolStarter",
     "get_protocol_handle",
     "register_protocol_handle",
-    "release_loop_resources",
     "resolve_server_transport",
     "ssl_context_from_opts",
     "DefaultServerTransport",

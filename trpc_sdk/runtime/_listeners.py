@@ -4,11 +4,11 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
-"""Listener selection and the aiohttp application of an HTTP endpoint.
+"""Address classification and the aiohttp application of an HTTP endpoint.
 
-:func:`classify_address` is the one place that decides how a listen address
-is served, so the modes can never disagree about what an address is. They
-only differ in which process and loop call ``listen``:
+:func:`classify_address` is the one place that decides what kind of endpoint a
+listen address is, so the modes can never disagree about it. They only differ
+in which process and loop call ``listen``:
 
 * ``merge``: the server process serves everything.
 * ``separate``: the I/O process serves the ``TCP`` addresses, whose tRPC
@@ -21,7 +21,7 @@ Sockets, servers and sites are the transport's. What stays here is the
 aiohttp application, because it is built from the worker's services and the
 registered routes: :func:`http_runner_factory` hands it to an
 :class:`~trpc_sdk.http.HttpServerTransport` as
-``ListenOption.http_runner_factory``.
+``HttpServerTransport.set_runner_factory``.
 """
 
 from __future__ import annotations
@@ -30,9 +30,6 @@ from functools import partial
 from typing import Any
 from typing import Awaitable
 from typing import Callable
-from typing import Iterable
-from typing import List
-from typing import Optional
 
 from aiohttp import hdrs
 from aiohttp import web
@@ -41,7 +38,6 @@ from trpc_sdk.config import TrpcConfig
 from trpc_sdk.http import HttpMessageHandle
 from trpc_sdk.http import RegisteredRoutes
 from trpc_sdk.http import StaticFileRouters
-from trpc_sdk.transport import TrpcServerTransport
 from trpc_sdk.transport import UserProtocolTransport
 from ._constants import AddressKind
 from ._constants import Network
@@ -72,16 +68,6 @@ def classify_address(worker: Any, index: int) -> AddressKind:
     if network.find(Network.HTTP) != -1:
         return AddressKind.HTTP
     return AddressKind.UNKNOWN
-
-
-def pop_loop_resources(transports: Iterable[TrpcServerTransport], key: Optional[int]) -> List[Any]:
-    """Take what ``transports`` serve with on one loop, for ``release_loop_resources``.
-
-    Args:
-        transports: Transports that listened in this process.
-        key: That serving loop's ``index``; ``None`` is the loop ``listen`` ran on.
-    """
-    return [resource for transport in transports for resource in transport.pop_loop_resources(key)]
 
 
 def create_http_msg_handle(worker: Any, index: int) -> HttpMessageHandle:
@@ -162,7 +148,7 @@ async def setup_http_runner(worker: Any, index: int, msg_handle: HttpMessageHand
 
 
 def http_runner_factory(worker: Any, index: int, msg_handle: HttpMessageHandle) -> Callable[[], Awaitable[Any]]:
-    """Return the ``ListenOption.http_runner_factory`` of one HTTP address.
+    """Return the factory given to ``HttpServerTransport.set_runner_factory`` for one HTTP address.
 
     Args:
         worker: Worker serving the address.

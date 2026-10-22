@@ -80,6 +80,7 @@ import traceback
 from dataclasses import dataclass
 from functools import partial
 from typing import Any
+from typing import Callable
 from typing import Dict
 from typing import List
 from typing import Optional
@@ -91,10 +92,10 @@ from trpc_sdk.log import logger
 from trpc_sdk.plugin import init_task_plugins
 from trpc_sdk.telemetry import report_attr
 from trpc_sdk.transport import ClientConnectionInfo
-from trpc_sdk.transport import ListenOption
 from trpc_sdk.transport import SeparateClientConnection
 from trpc_sdk.transport import SeparateRpcTaskConnection
 from trpc_sdk.transport import SeparateRpczConnection
+from trpc_sdk.transport import TrpcServerTransport
 from trpc_sdk.utils import PipeConnection
 from trpc_sdk.utils import PipeEnd
 from trpc_sdk.utils import PipeKind
@@ -148,6 +149,40 @@ class RpcTaskPipes:
         for pair in (self.request, self.rpcz):
             pair[0].close()
             pair[1].close()
+
+
+class SeparateForwardTransport(TrpcServerTransport):
+    """TCP listener of the separate-mode I/O process: frames are cut here and forwarded to rpc tasks.
+
+    Built after fork from the transport the parent bound, so it serves the
+    same endpoint with the same options; only the connection protocol differs.
+    """
+
+    def __init__(self, app: "SeparateWorker", index: int, parser: Any, schedule_target: str) -> None:
+        """Record what every forwarding connection needs.
+
+        Args:
+            app: The I/O process, which owns the rpc task pipes.
+            index: Position of the address in ``app.addresses``; carried in
+                every forwarded frame head.
+            parser: Cuts the client byte stream into frames.
+            schedule_target: ``SchedulerParams.target`` used to pick an rpc task.
+        """
+        super().__init__()
+        self._app = app
+        self._index = index
+        self._parser = parser
+        self._schedule_target = schedule_target
+
+    def protocol_factory(self, shared_pool: Optional[Any] = None) -> Callable[[], Any]:
+        """Return the forwarding connection; ``shared_pool`` does not apply here."""
+        del shared_pool
+        return partial(SeparateClientConnection,
+                       app=self._app,
+                       address=self.opts.address,
+                       parser=self._parser,
+                       index=self._index,
+                       schedule_target=self._schedule_target)
 
 
 class SeparateWorker(ChildReadiness, BaseWorker):
@@ -363,8 +398,10 @@ class SeparateWorker(ChildReadiness, BaseWorker):
         """Serve every ``TCP`` address on the main loop, forwarding its frames.
 
         Other kinds are left to the rpc tasks, which listen on them
-        themselves. The transport serves with this process's protocol factory
-        instead of its own: frames are cut here and forwarded, not handled.
+        themselves. Each transport is replaced by a
+        :class:`SeparateForwardTransport` bound to the same options: frames
+        are cut here and forwarded, not handled. The replacement happens after
+        fork, so neither the parent nor the rpc tasks see it.
         ``SO_REUSEPORT`` only with ``tcp_reuse_port``: without it a second
         instance started by mistake fails here instead of silently sharing the
         port. A bind failure aborts startup, since serving half the addresses
@@ -373,15 +410,11 @@ class SeparateWorker(ChildReadiness, BaseWorker):
         for i, address in enumerate(self.addresses):
             if classify_address(self, i) is not AddressKind.TCP:
                 continue
-            handle = partial(SeparateClientConnection,
-                             app=self,
-                             address=address,
-                             parser=self.parsers[i],
-                             index=i,
-                             schedule_target=SCHEDULE_TARGET_RPC_TASK)
+            forward = SeparateForwardTransport(self, i, self.parsers[i], SCHEDULE_TARGET_RPC_TASK)
+            forward.bind(self.transports[i].opts)
+            self.transports[i] = forward
             try:
-                self._listen_on(i, ListenOption(loop=self.loop, reuse_port=self.tcp_reuse_port,
-                                                 protocol_factory=handle))
+                self._listen_on(i)
             except OSError as err:
                 logger.error("[separate worker] failed to bind TCP %s (errno %s): %s", address, err.errno, err)
                 self._exit_now(1)

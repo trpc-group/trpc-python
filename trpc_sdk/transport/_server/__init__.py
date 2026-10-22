@@ -9,17 +9,18 @@
 A server transport is constructed and bound in the parent (``bind`` only
 records options) and listens in the forked child (``listen`` creates the
 socket on the child's event loop). The runtime decides which processes and
-loops call ``listen`` and passes them in a :class:`ListenOption`; the
-transport alone decides how the endpoint is served and closed. The dispatcher
+loops call ``listen`` and describes them in a
+:class:`~trpc_sdk.runtime.ThreadModel`, which the transport reads from
+:func:`~trpc_sdk.runtime.current_thread_model`; the transport alone
+decides how the endpoint is served and closed. The dispatcher
 / worker / executor / task pipe protocols stay in the parent package; this
 package only holds the objects a service registers on the engine.
 
 The package is split by responsibility:
 
-- :mod:`~trpc_sdk.transport._server._listen` — :class:`ListenOption`, the
-  loops and socket options the runtime hands to ``listen``
 - :mod:`~trpc_sdk.transport._server._acceptor` — :class:`Acceptor`, which
-  accepts on one loop and hands connections to serving loops
+  accepts on one loop and hands connections to serving loops, and
+  :func:`serve_stream`, which picks it or ``create_server``
 - :mod:`~trpc_sdk.transport._server._trpc_transport` — :class:`TrpcServerTransport`,
   the tRPC-over-TCP / UDP listener, whose socket, ``create_server`` /
   acceptor serving and closing :class:`~trpc_sdk.http.HttpServerTransport`
@@ -50,8 +51,9 @@ from __future__ import annotations
 
 from ._acceptor import AcceptTarget
 from ._acceptor import Acceptor
+from ._acceptor import StreamListener
+from ._acceptor import serve_stream
 from ._datagram_connection import DefaultDatagramConnection
-from ._listen import ListenOption
 from ._stream_connection import BaseConnection
 from ._stream_connection import ConnectionCloseHandler
 from ._stream_connection import ConnectionIdleCleanHandler
@@ -68,7 +70,6 @@ from ._stream_factory import get_server_transport
 from ._stream_transport import IpcStreamWriter
 from ._stream_transport import TrpcServerStreamTransport
 from ._trpc_transport import TrpcServerTransport
-from ._trpc_transport import release_loop_resources
 from ._trpc_transport import ssl_context_from_opts
 from ._custom_transport import ProtocolStarter
 from ._custom_transport import UserProtocolTransport
@@ -90,8 +91,8 @@ __all__ = [
     "DefaultServerTransportOption",
     "MsgHandler",
     "ServerConnection",
+    "StreamListener",
     "TcpConnectionOption",
-    "ListenOption",
     "TrpcServerTransport",
     "TrpcServerStreamTransport",
     "TrpcServerTransportFactory",
@@ -101,7 +102,7 @@ __all__ = [
     "get_protocol_handle",
     "get_server_transport",
     "register_protocol_handle",
-    "release_loop_resources",
     "resolve_server_transport",
+    "serve_stream",
     "ssl_context_from_opts",
 ]

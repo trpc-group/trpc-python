@@ -8,7 +8,7 @@
 
 In ``merge`` mode one process both accepts connections and runs handlers.
 With ``io_thread_num > 1`` the main thread only accepts (see
-:class:`~trpc_sdk.transport.Acceptor`) and the accepted sockets are served by
+:class:`~trpc_sdk.transport._server.Acceptor`) and the accepted sockets are served by
 ``io_thread_num`` :class:`LoopThread` instances, each owning one event loop
 for its whole lifetime. ``io_handle_type: separate`` uses the same class for
 both of its thread kinds: handle threads that run user code, and extra I/O
@@ -49,6 +49,7 @@ from typing import Sequence
 from trpc_sdk.config import TrpcConfig
 from trpc_sdk.log import logger
 from trpc_sdk.utils import get_async_lib
+from ._thread_model import InlineReactor
 
 # ``init(loop)``: runs on the new thread before the loop turns.
 LoopInit = Callable[[asyncio.AbstractEventLoop], None]
@@ -91,6 +92,32 @@ def connect_accepted(loop: asyncio.AbstractEventLoop,
 
     task = loop.create_task(loop.connect_accepted_socket(protocol_factory, sock, ssl=ssl_context))
     task.add_done_callback(_on_attached)
+
+
+class MainLoopReactor(InlineReactor):
+    """The worker's main loop as a reactor of its thread model.
+
+    The acceptor runs on this loop too, so an accepted socket is wrapped
+    directly rather than through ``call_soon_threadsafe``.
+    """
+
+    @property
+    def name(self) -> str:
+        """Owner of the loop, for log messages."""
+        return "main loop"
+
+    def attach_socket(self,
+                      sock: socket.socket,
+                      protocol_factory: Callable[[], asyncio.BaseProtocol],
+                      ssl_context: Optional[Any] = None) -> None:
+        """Wrap an accepted socket in a transport on the main loop; runs on the main thread.
+
+        Args:
+            sock: Socket returned by ``accept()``, already non-blocking.
+            protocol_factory: Builds the protocol serving this connection.
+            ssl_context: Server-side ``SSLContext``, or ``None`` for plaintext.
+        """
+        connect_accepted(self.loop, sock, protocol_factory, ssl_context, self.name)
 
 
 class LoopThread:

@@ -56,7 +56,6 @@ from trpc_sdk.log import logger
 from trpc_sdk.plugin import init_worker_plugins
 from trpc_sdk.task import WorkerTaskConnection
 from trpc_sdk.task import register_task_conn
-from trpc_sdk.transport import ListenOption
 from trpc_sdk.utils import PipeConnection
 from trpc_sdk.utils import TimerExecutor
 from trpc_sdk.utils import get_async_lib
@@ -67,6 +66,10 @@ from ._common import init_healthy_checker
 from ._common import start_heartbeat_monitor
 from ._common._shutdown import _run_callbacks
 from ._constants import IO_WAIT_POLL_INTERVAL
+from ._threadmodel import MainLoopReactor
+from ._threadmodel import ReactorGroup
+from ._threadmodel import ThreadModel
+from ._threadmodel import install_thread_model
 from ._types import ChildRecord
 from ._types import TaskInfo
 from ._types import WorkerInfo
@@ -203,6 +206,9 @@ class BaseWorker(ExitTemplate):
         # Transports this process listened on, each with the loop whose thread
         # must call its ``stop``. Filled after fork only.
         self._listening: List[Tuple[BaseServerTransport, asyncio.AbstractEventLoop]] = []
+        # Where this process serves its endpoints; built and installed after
+        # fork by :meth:`_install_thread_model`, read by ``listen``.
+        self.thread_model: Optional[ThreadModel] = None
         self.enable_memory_inspection: bool = False
 
     def _bind_process_info(self, engine) -> None:
@@ -602,14 +608,16 @@ class BaseWorker(ExitTemplate):
         """Wire task IPC, the request source, then timers. The order matters.
 
         1. Publish ``current_worker()`` when forked from a :class:`WorkerInfo`.
-        2. Drop foreign pipe ends; attach or drop the heartbeat pipes.
-        3. Connect to each task.
-        4. :meth:`start_worker_process` — attach the pipe or bind sockets.
-        5. ``ready_callbacks`` — addresses are reachable now, so naming
+        2. Build and install the thread model, before any loop thread starts.
+        3. Drop foreign pipe ends; attach or drop the heartbeat pipes.
+        4. Connect to each task.
+        5. :meth:`start_worker_process` — attach the pipe or bind sockets.
+        6. ``ready_callbacks`` — addresses are reachable now, so naming
            registration is truthful from here on.
-        6. :meth:`_start_timers`.
+        7. :meth:`_start_timers`.
         """
         self._publish_current_worker()
+        self._install_thread_model()
 
         self._bind_task_mesh()
         self._close_foreign_pipes()
@@ -619,6 +627,27 @@ class BaseWorker(ExitTemplate):
         self.start_worker_process()
         _run_callbacks(self.name, "ready", self.ready_callbacks)
         self._start_timers()
+
+    def _install_thread_model(self) -> None:
+        """Build this process's thread model and install it; runs after fork, before any loop thread starts.
+
+        Never uninstalled: the process exits right after serving.
+        """
+        self.thread_model = self._build_thread_model()
+        install_thread_model(self.thread_model)
+
+    def _build_thread_model(self) -> ThreadModel:
+        """Describe where this process serves its endpoints. Default: everything on the main loop.
+
+        Subclasses that run loop threads create the thread objects here, so the
+        model can name them before they start.
+        """
+        main = MainLoopReactor(self.loop)
+        return ThreadModel(acceptor=main,
+                           io=ReactorGroup([main]),
+                           handle=ReactorGroup([main]),
+                           tcp_reuse_port=getattr(self, "tcp_reuse_port", False),
+                           worker=self)
 
     def _attach_heartbeats(self) -> None:
         """Monitor the tasks this process forked, or close pipes it only inherited.
@@ -694,22 +723,24 @@ class BaseWorker(ExitTemplate):
             self.loop.add_signal_handler(signal.SIGUSR2, self.memory_inspector.dump_to_file)
         self._watch_children()
 
-    def _listen_on(self, index: int, opt: ListenOption) -> BaseServerTransport:
+    def _listen_on(self, index: int, loop: Optional[asyncio.AbstractEventLoop] = None) -> BaseServerTransport:
         """Call ``listen`` on the transport of address ``index`` and remember it.
 
         Recorded before the call, so a ``listen`` that fails halfway still
-        gets its ``stop`` when startup is undone.
+        gets its ``stop`` when startup is undone. The transport reads where to
+        serve from the installed thread model.
 
         Args:
             index: Position of the address in ``transports``.
-            opt: Options for this call; ``opt.loop`` is where ``stop`` runs.
+            loop: Loop of the calling thread, where ``stop`` must run; the
+                main loop by default.
 
         Returns:
-            The transport, so the caller can release its per-loop resources.
+            The transport.
         """
         transport = self.transports[index]
-        self._listening.append((transport, opt.loop))
-        transport.listen(opt)
+        self._listening.append((transport, loop or self.loop))
+        transport.listen()
         return transport
 
     def _stop_listening(self) -> None:
@@ -733,10 +764,5 @@ class BaseWorker(ExitTemplate):
                 logger.error("[%s] failed to destroy %s: %s", self.name, type(transport).__name__, repr(err))
 
     def start_worker_process(self) -> None:
-        """Connect this worker to whatever feeds it requests; no-op here.
-
-        :class:`~trpc_sdk.runtime._process._rpc_task.RpcTaskProcess` attaches
-        to its pipe; :class:`~trpc_sdk.runtime._merge_worker.MergeWorker`
-        binds its listen sockets.
-        """
+        """Connect this worker to whatever feeds it requests; no-op here."""
         return None

@@ -47,7 +47,8 @@ mode. Subpackages hold the pieces those workers are built from:
 - :mod:`~trpc_sdk.runtime._merge_worker` — merge mode (trpc-cpp
   ``merge_runtime``); every mode listens through the services' transports
   (:mod:`trpc_sdk.transport._server`), dispatching on ``classify_address``
-- :mod:`~trpc_sdk.runtime._threadmodel` — loop threads, the handle-thread
+- :mod:`~trpc_sdk.runtime._threadmodel` — the :class:`ThreadModel` every
+  server transport reads in ``listen``, loop threads, the handle-thread
   pool, per-serving-loop hooks, and
   :class:`~trpc_sdk.runtime._threadmodel._separate_thread.SeparateThread`
   for merge mode with the separate thread model (trpc-cpp
@@ -55,8 +56,8 @@ mode. Subpackages hold the pieces those workers are built from:
   to the I/O loops through :class:`~trpc_sdk.protocol.ConnWriter`,
   re-exported here
 - :mod:`~trpc_sdk.runtime._listeners` — address classification and the aiohttp
-  application every mode serves HTTP with. The reactor itself is
-  :mod:`trpc_sdk.transport._server`
+  application every mode serves HTTP with. Sockets and serving are the
+  transports' (:mod:`trpc_sdk.transport._server`)
 - :mod:`~trpc_sdk.runtime._common` — heartbeat pipes, SIGTERM callbacks,
   process metadata and the exit template every mode shares (trpc-cpp
   ``runtime/common``)
@@ -104,8 +105,16 @@ from ._process import SeparateWorker
 from ._process import TaskProcess
 from ._switches import use_c_task
 from ._threadmodel import HandlerThreadInfo
+from ._threadmodel import InlineReactor
+from ._threadmodel import Reactor
+from ._threadmodel import ReactorGroup
+from ._threadmodel import ResourceKind
+from ._threadmodel import ThreadModel
 from ._threadmodel import current_handler_thread
+from ._threadmodel import current_thread_model
+from ._threadmodel import install_thread_model
 from ._threadmodel import register_handler_thread_hook
+from ._threadmodel import use_thread_model
 from ._types import TaskInfo
 from ._types import WorkerInfo
 from ._worker import BaseWorker
@@ -142,6 +151,15 @@ __all__ = [
     "PROCESS_MODEL_MULTI",
     "PROCESS_MODEL_SINGLE",
     "Network",
+    # Thread model the worker installs after fork; server transports read it
+    "InlineReactor",
+    "Reactor",
+    "ReactorGroup",
+    "ResourceKind",
+    "ThreadModel",
+    "current_thread_model",
+    "install_thread_model",
+    "use_thread_model",
     # Lifecycle and extension hooks
     "HandlerThreadInfo",
     "current_handler_thread",

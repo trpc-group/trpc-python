@@ -15,6 +15,12 @@ loops to handle loops.
 
 The package is split by responsibility:
 
+- :mod:`~trpc_sdk.runtime._threadmodel._thread_model` -- :class:`ThreadModel`,
+  the reactors a worker installs after fork and every server transport's
+  ``listen`` reads, and the per-reactor resources released when a loop stops
+- :mod:`~trpc_sdk.runtime._threadmodel._worker_view` --
+  :class:`WorkerLoopView`, the worker as a user protocol starter sees it
+  from a serving loop other than the worker's own
 - :mod:`~trpc_sdk.runtime._threadmodel._separate_thread` --
   :class:`SeparateThread`, merge mode with the separate thread model
   (trpc-cpp ``separate_runtime``)
@@ -31,6 +37,7 @@ The package is split by responsibility:
 from ._handler_pool import HandleSlot
 from ._handler_pool import SharedHandlerPool
 from ._loop_thread import LoopThread
+from ._loop_thread import MainLoopReactor
 from ._loop_thread import connect_accepted
 from ._loop_thread import stop_loop_threads
 from ._thread_hooks import HandlerThreadInfo
@@ -40,6 +47,15 @@ from ._thread_hooks import register_handler_thread_hook
 from ._thread_hooks import run_start_hooks
 from ._thread_hooks import run_stop_hooks
 from ._thread_hooks import set_current_handler_thread
+from ._thread_model import InlineReactor
+from ._thread_model import Reactor
+from ._thread_model import ReactorGroup
+from ._thread_model import ResourceKind
+from ._thread_model import ThreadModel
+from ._thread_model import current_thread_model
+from ._thread_model import install_thread_model
+from ._thread_model import use_thread_model
+from ._worker_view import WorkerLoopView
 
 
 def __getattr__(name: str):
@@ -70,15 +86,25 @@ def __getattr__(name: str):
 __all__ = [
     "HandleSlot",
     "HandlerThreadInfo",
+    "InlineReactor",
     "LoopThread",
+    "MainLoopReactor",
+    "Reactor",
+    "ReactorGroup",
+    "ResourceKind",
     "SeparateThread",
     "SharedHandlerPool",
+    "ThreadModel",
+    "WorkerLoopView",
     "connect_accepted",
     "current_handler_thread",
+    "current_thread_model",
     "freeze_handler_thread_hooks",
+    "install_thread_model",
     "register_handler_thread_hook",
     "run_start_hooks",
     "run_stop_hooks",
     "set_current_handler_thread",
     "stop_loop_threads",
+    "use_thread_model",
 ]

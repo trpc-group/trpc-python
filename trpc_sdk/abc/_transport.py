@@ -68,8 +68,10 @@ class BaseServerTransportOption:
         backlog: ``listen()`` backlog for the listen socket built by
             :meth:`BaseServerTransport.listen`.
         reuse_port: Not read by the built-in transports: whether a socket
-            gets ``SO_REUSEPORT`` depends on the process model, so the
-            runtime decides it after fork.
+            gets ``SO_REUSEPORT`` depends on the process model, so it comes
+            from :attr:`~trpc_sdk.runtime.ThreadModel.tcp_reuse_port` /
+            ``udp_reuse_port``, which
+            the runtime installs after fork.
         is_stream: True when the listener carries tRPC streaming RPCs.
     """
 
@@ -188,8 +190,10 @@ class BaseServerTransport(BasePlugin):
         that loop runs. Everything that must be closed to stop accepting is
         kept on the transport for :meth:`stop`.
 
-        A subclass may add parameters with defaults, such as the built-in
-        transports' ``opt`` that tells them which loops to serve on.
+        The built-in transports read which loops to serve on from
+        :func:`~trpc_sdk.runtime.current_thread_model`, which the runtime
+        installs after fork; with none installed it is the calling thread's
+        loop.
         """
         ...
 

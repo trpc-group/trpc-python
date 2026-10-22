@@ -47,67 +47,25 @@ setup, HTTP, timer and shutdown machinery and only overrides what differs.
 
 from __future__ import annotations
 
-import asyncio
-import inspect
-import socket
-from typing import Any
-from typing import Callable
 from typing import List
 from typing import Optional
 
 from trpc_sdk.log import logger
-from trpc_sdk.transport import ListenOption
-from trpc_sdk.transport import TrpcServerTransport
-from trpc_sdk.transport import release_loop_resources
 from .._constants import AddressKind
 from .._constants import LOOP_THREAD_STOP_TIMEOUT
 from .._constants import SCHEDULE_TARGET_HANDLE_CONN
 from .._constants import SCHEDULE_TARGET_IO_CONN
 from .._listeners import classify_address
-from .._listeners import pop_loop_resources
 from .._merge_worker import MergeWorker
 from ._handler_pool import HandleSlot
 from ._handler_pool import SharedHandlerPool
 from ._loop_thread import LoopThread
-from ._loop_thread import connect_accepted
+from ._loop_thread import MainLoopReactor
 from ._loop_thread import stop_loop_threads
-
-
-class _MainLoopTarget:
-    """The main loop as a serving loop, beside the I/O threads; I/O loop 0.
-
-    Has the members a transport uses on a serving loop: ``index``, ``loop``,
-    ``submit`` and ``attach_socket``. The acceptor already runs on the main
-    loop, so the hand-off is a direct call rather than a
-    ``call_soon_threadsafe``.
-    """
-
-    index = 0
-
-    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
-        self.loop = loop
-
-    def submit(self, func: Callable[[], Any], timeout: Optional[float] = None) -> Any:
-        """Run ``func`` on the main loop, which is not running yet at bind time.
-
-        Args:
-            func: Callable; an awaitable result is driven to completion.
-            timeout: Unused: the call runs on this thread.
-
-        Returns:
-            Whatever ``func`` returned, after awaiting it when applicable.
-        """
-        del timeout
-        result = func()
-        if inspect.isawaitable(result):
-            result = self.loop.run_until_complete(result)
-        return result
-
-    def attach_socket(self,
-                      sock: socket.socket,
-                      protocol_factory: Callable[[], asyncio.BaseProtocol],
-                      ssl_context: Optional[Any] = None) -> None:
-        connect_accepted(self.loop, sock, protocol_factory, ssl_context, "main loop")
+from ._thread_model import ReactorGroup
+from ._thread_model import ResourceKind
+from ._thread_model import ThreadModel
+from ._worker_view import WorkerLoopView
 
 
 class SeparateThread(MergeWorker):
@@ -137,8 +95,6 @@ class SeparateThread(MergeWorker):
         self.io_thread_num: int = max(1, engine.opts.io_thread_num)
         self.io_threads: List[LoopThread] = []
         self.shared_pool: Optional[SharedHandlerPool] = None
-        # UDP transports, holding an endpoint per I/O loop; key 0 is the main loop.
-        self._io_udp_transports: List[TrpcServerTransport] = []
         self._warn_io_threads_without_tls()
 
     @staticmethod
@@ -173,6 +129,23 @@ class SeparateThread(MergeWorker):
         """
         return classify_address(self, index) is AddressKind.TCP
 
+    def _build_thread_model(self) -> ThreadModel:
+        """I/O on the main loop plus ``io_thread_num - 1`` I/O threads; handlers on the handle threads.
+
+        The thread objects are created here, not started. ``handler_pool`` is
+        filled by :meth:`_start_loop_threads`, once the handle loops run.
+        """
+        main = MainLoopReactor(self.loop)
+        self.loop_threads = [LoopThread(i, name_prefix=self._thread_name_prefix) for i in range(self.thread_num)]
+        self.io_threads = [LoopThread(i, name_prefix="trpc-io") for i in range(1, self.io_thread_num)]
+        return ThreadModel(acceptor=main,
+                           io=ReactorGroup([main, *self.io_threads], SCHEDULE_TARGET_IO_CONN),
+                           handle=ReactorGroup(list(self.loop_threads), SCHEDULE_TARGET_HANDLE_CONN),
+                           tcp_reuse_port=self.tcp_reuse_port,
+                           ready_timeout=self.ready_timeout,
+                           worker=self,
+                           view_factory=WorkerLoopView)
+
     def _start_loop_threads(self) -> None:
         """Start the handle threads, build the shared pool, then start the I/O loops.
 
@@ -183,17 +156,12 @@ class SeparateThread(MergeWorker):
         super()._start_loop_threads()
         slots = [HandleSlot(thread.index, thread.loop) for thread in self.loop_threads]
         self.shared_pool = SharedHandlerPool(slots, self.handler_max_concurrency, self.handler_queue_size)
+        self.thread_model.handler_pool = self.shared_pool
 
-        for index in range(1, self.io_thread_num):
-            thread = LoopThread(index, name_prefix="trpc-io")
-            self.io_threads.append(thread)
+        for thread in self.io_threads:
             thread.start()
         if self.io_threads:
             self._wait_threads_ready(self.io_threads, "I/O")
-
-    def _io_loops(self) -> List[Any]:
-        """The I/O loops as serving loops: the main loop first, then the I/O threads."""
-        return [_MainLoopTarget(self.loop), *self.io_threads]
 
     def _start_stream(self, index: int) -> None:
         """Serve tRPC over TCP on one address from the I/O loops.
@@ -206,31 +174,32 @@ class SeparateThread(MergeWorker):
         Args:
             index: Position of the address in ``addresses``.
         """
-        self._listen_on(index,
-                        ListenOption(loop=self.loop,
-                                      serving_loops=self._io_loops() if self.io_threads else (),
-                                      reuse_port=self.tcp_reuse_port,
-                                      shared_pool=self.shared_pool,
-                                      schedule_target=SCHEDULE_TARGET_IO_CONN,
-                                      ready_timeout=self.ready_timeout))
+        self._listen_on(index)
 
     def _start_datagram(self, index: int) -> None:
         """Serve tRPC over UDP on one address, once per I/O loop.
 
+        Several sockets on one address need ``SO_REUSEPORT``, which the
+        transport sets; a single one does not get it, so a second instance
+        fails to bind instead of sharing.
+
         Args:
             index: Position of the address in ``addresses``.
         """
-        # Several sockets on one address need SO_REUSEPORT; a single one
-        # must not, so a second instance fails to bind instead of sharing.
-        self._io_udp_transports.append(self.transports[index])
-        self._listen_on(index,
-                        ListenOption(loop=self.loop,
-                                      serving_loops=self._io_loops(),
-                                      reuse_port=self.io_thread_num > 1,
-                                      shared_pool=self.shared_pool,
-                                      ready_timeout=self.ready_timeout,
-                                      worker=self,
-                                      index=index))
+        self._listen_on(index)
+
+    async def _release_main_loop(self) -> None:
+        """Release the main loop's user protocol transports and aiohttp runners; idempotent.
+
+        Its UDP endpoints stay open until :meth:`_stop_serving_threads` has
+        flushed the responses the handle threads queued on the main loop.
+        """
+        model = self.thread_model
+        if model is None:
+            return
+        main = model.acceptor
+        await self._destroy_transports(self._user_transports.pop(id(main), []))
+        await model.release_resources(main, ResourceKind.RUNNER)
 
     def _stop_serving_threads(self) -> None:
         """Stop the handle threads first, then the I/O loops.
@@ -245,8 +214,10 @@ class SeparateThread(MergeWorker):
         if self.io_threads:
             stop_loop_threads(self.io_threads, self._before_stop_io_thread, LOOP_THREAD_STOP_TIMEOUT)
             self.io_threads.clear()
-        for endpoint in pop_loop_resources(self._io_udp_transports, _MainLoopTarget.index):
-            endpoint.close()
+        model = self.thread_model
+        if model is not None:
+            for endpoint in model.pop_resources(model.acceptor, ResourceKind.ENDPOINT):
+                endpoint.close()
 
     def _flush_main_loop(self) -> None:
         """Run the callbacks already queued on the stopped main loop, once."""
@@ -261,4 +232,4 @@ class SeparateThread(MergeWorker):
         Args:
             index: Position of the I/O loop; ``1 .. io_thread_num - 1``.
         """
-        await release_loop_resources(pop_loop_resources(self._io_udp_transports, index))
+        await self.thread_model.release_resources(self.io_threads[index - 1], ResourceKind.ENDPOINT)
