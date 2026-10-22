@@ -22,6 +22,7 @@ worker before ``serve()`` runs it.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from typing import Callable
 from typing import Dict
@@ -29,7 +30,6 @@ from typing import Optional
 
 from trpc_sdk.abc import BaseServerTransport
 from trpc_sdk.abc import BaseServerTransportOption
-from ._listen import ListenOption
 
 # ``starter(worker, index)``: ``worker`` is the
 # :class:`~trpc_sdk.runtime.BaseWorker` serving the address, which gives the
@@ -95,18 +95,23 @@ class UserProtocolTransport(BaseServerTransport):
         """
         self.opts = opts
 
-    def listen(self, opt: Optional[ListenOption] = None) -> None:
-        """Call the starter for this endpoint; the starter keeps whatever it opened.
+    def listen(self) -> None:
+        """Call the starter with the serving worker, as seen from the calling thread's loop.
 
-        Args:
-            opt: ``worker`` and ``index`` are passed on to the starter.
+        The worker and this endpoint's index come from the current thread
+        model; the starter keeps whatever it opened.
 
         Raises:
-            ValueError: ``opt`` is missing: the starter needs the worker.
+            ValueError: The thread model names no worker: the starter needs one.
         """
-        if opt is None:
-            raise ValueError(f"user protocol {self.opts.address} needs a ListenOption")
-        self.starter(opt.worker, opt.index)
+        # Local import: trpc_sdk.runtime imports this package at module level.
+        from trpc_sdk.runtime import current_thread_model
+
+        model = current_thread_model()
+        if model.worker is None:
+            raise ValueError(f"user protocol {self.opts.address} needs a worker in the thread model")
+        worker = model.worker_view(asyncio.get_event_loop())
+        self.starter(worker, model.worker.transports.index(self))
 
 
 def resolve_server_transport(protocol: str, transport: BaseServerTransport) -> BaseServerTransport:

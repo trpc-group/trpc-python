@@ -21,18 +21,17 @@ from trpc_sdk.abc import BaseServerTransport
 from trpc_sdk.abc import ProcessType
 from trpc_sdk.log import flush_logs
 from trpc_sdk.log import logger
-from trpc_sdk.transport import ListenOption
 from trpc_sdk.transport import RpcTaskConnection
-from trpc_sdk.transport import TrpcServerTransport
-from trpc_sdk.transport import release_loop_resources
 from trpc_sdk.utils import PipeEnd
 from .._constants import AddressKind
 from .._constants import RPC_TASK_PRODUCER_PREFIX
 from .._listeners import classify_address
 from .._listeners import create_http_msg_handle
 from .._listeners import http_runner_factory
-from .._listeners import pop_loop_resources
 from .._threadmodel import HandlerThreadInfo
+from .._threadmodel import MainLoopReactor
+from .._threadmodel import ReactorGroup
+from .._threadmodel import ThreadModel
 from .._threadmodel import run_start_hooks
 from .._threadmodel import run_stop_hooks
 from .._threadmodel import set_current_handler_thread
@@ -69,8 +68,6 @@ class RpcTaskProcess(BaseWorker, Process):
         self.drain_seconds = max(0, int(getattr(engine.opts, "close_wait_time", 0) or 0)) / 1000.0
         # User protocol transports, destroyed after ``on_stop``.
         self._user_transports: List[BaseServerTransport] = []
-        # UDP and HTTP transports; their endpoints and runners are released last.
-        self._resource_transports: List[TrpcServerTransport] = []
         self._thread_info: Optional[HandlerThreadInfo] = None
 
     def _owned_producer_names(self) -> List[str]:
@@ -87,6 +84,7 @@ class RpcTaskProcess(BaseWorker, Process):
     def _prepare_to_serve(self) -> None:
         """Wire IPC, run hooks, bind own listeners, and publish readiness."""
         try:
+            self._install_thread_model()
             self._bind_task_mesh()
             self._close_foreign_pipes()
             self._attach_heartbeats()
@@ -101,6 +99,16 @@ class RpcTaskProcess(BaseWorker, Process):
             self._ready_flags[self.index] = 1
         except Exception as err:  # pylint: disable=broad-except
             self._fail_startup("startup failed", err)
+
+    def _build_thread_model(self) -> ThreadModel:
+        """Main loop only; every rpc task binds the same addresses, so ``SO_REUSEPORT`` is always on."""
+        main = MainLoopReactor(self.loop)
+        return ThreadModel(acceptor=main,
+                           io=ReactorGroup([main]),
+                           handle=ReactorGroup([main]),
+                           tcp_reuse_port=True,
+                           udp_reuse_port=True,
+                           worker=self)
 
     def _fail_startup(self, what: str, err: BaseException) -> None:
         """Log a startup failure and exit with status 1."""
@@ -144,14 +152,12 @@ class RpcTaskProcess(BaseWorker, Process):
             kind = classify_address(self, i)
             if kind in (AddressKind.TCP, AddressKind.UNKNOWN):
                 continue
-            opt = ListenOption(loop=self.loop, reuse_port=True, worker=self, index=i)
             if kind is AddressKind.USER:
-                self._user_transports.append(self._listen_on(i, opt))
+                self._user_transports.append(self._listen_on(i))
                 continue
             if kind is AddressKind.HTTP:
-                opt.http_runner_factory = http_runner_factory(self, i, create_http_msg_handle(self, i))
-            self._resource_transports.append(self.transports[i])
-            self._listen_on(i, opt)
+                self.transports[i].set_runner_factory(http_runner_factory(self, i, create_http_msg_handle(self, i)))
+            self._listen_on(i)
 
     def _stop_accepting(self) -> None:
         """Stop the transports this process listens with from accepting."""
@@ -180,4 +186,5 @@ class RpcTaskProcess(BaseWorker, Process):
         """Destroy the user protocol transports, then release aiohttp runners and UDP endpoints; idempotent."""
         transports, self._user_transports = self._user_transports, []
         await self._destroy_transports(transports)
-        await release_loop_resources(pop_loop_resources(self._resource_transports, None))
+        if self.thread_model is not None:
+            await self.thread_model.release_resources(self.thread_model.acceptor)

@@ -11,17 +11,20 @@ options; ``ServiceAdapter.run`` then registers the transport on the engine, and 
 forked worker inherits it through ``process_info.transports``.
 
 :meth:`TrpcServerTransport.listen` runs in each serving process after fork.
-``opts.network`` decides how it serves:
+It reads the loops to serve on from
+:func:`~trpc_sdk.runtime.current_thread_model`, and ``opts.network``
+decides how it serves:
 
-* ``tcp``: one listen socket. With no serving loops it is served by
-  ``create_server`` on ``opt.loop``; otherwise an acceptor on ``opt.loop``
-  hands each connection to one of ``opt.serving_loops``.
-* ``udp``: nothing to accept, so every serving loop binds its own socket on
+* ``tcp``: one listen socket, served by
+  :func:`~trpc_sdk.transport._server._acceptor.serve_stream` on the model's
+  ``io`` group.
+* ``udp``: nothing to accept, so every ``io`` reactor binds its own socket on
   the address and the kernel spreads the datagrams.
 
-Everything a ``listen`` call starts is recorded on the transport, which is
-safe because the transport object is only *created* before fork: the tables
-are empty there and every forked process fills its own copy.
+The listen sockets are recorded on the transport, which is safe because the
+transport object is only *created* before fork: the list is empty there and
+every forked process fills its own copy. UDP endpoints are kept on the thread
+model instead, and the runtime releases them before their loop stops.
 :class:`~trpc_sdk.http.HttpServerTransport` reuses all of it for aiohttp.
 """
 
@@ -32,13 +35,11 @@ import os
 import socket
 import ssl
 from functools import partial
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import Callable
-from typing import Dict
-from typing import Iterable
 from typing import List
 from typing import Optional
-from typing import Sequence
 from typing import Type
 
 from trpc_sdk.abc import BaseServerTransport
@@ -59,15 +60,19 @@ from trpc_sdk.utils import now_ms
 from trpc_sdk.utils import now_us
 from trpc_sdk.utils import set_addr_to_ctx
 from trpc_sdk.utils import unix_path_valid
-from ._acceptor import AcceptTarget
-from ._acceptor import Acceptor
+from ._acceptor import StreamListener
+from ._acceptor import serve_stream
 from ._constants import SERVER_CONN_KEY
 from ._datagram_connection import DefaultDatagramConnection
-from ._listen import ListenOption
 from ._stream_connection import ConnectionOption
 from ._stream_connection import DefaultIoConnection
 from ._stream_connection import ServerConnection
 from ._stream_connection import TcpConnectionOption
+
+if TYPE_CHECKING:
+    from trpc_sdk.runtime import Reactor
+    from trpc_sdk.runtime import ReactorGroup
+    from trpc_sdk.runtime import ThreadModel
 
 
 def ssl_context_from_opts(opts: BaseServerTransportOption) -> Optional[ssl.SSLContext]:
@@ -98,31 +103,6 @@ def ssl_context_from_opts(opts: BaseServerTransportOption) -> Optional[ssl.SSLCo
     return ssl_context
 
 
-async def release_loop_resources(resources: Iterable[Any]) -> None:
-    """Release resources of one loop; await on that loop.
-
-    aiohttp runners are cleaned up, which closes their connections; datagram
-    transports are closed. One failure does not keep the rest open.
-
-    Args:
-        resources: What :meth:`TrpcServerTransport.pop_loop_resources` returned.
-    """
-    for resource in resources:
-        try:
-            cleanup = getattr(resource, "cleanup", None)
-            if cleanup is not None:
-                await cleanup()
-            else:
-                resource.close()
-        except Exception as err:  # pylint: disable=broad-except
-            logger.error("[server transport] failed to release %r: %s", resource, repr(err))
-
-
-def _stop_site(loop: asyncio.AbstractEventLoop, site: Any) -> None:
-    """Schedule ``site.stop()`` on the loop the site was started on."""
-    loop.create_task(site.stop())
-
-
 class TrpcServerTransport(BaseServerTransport):
     """Own one service's tRPC-over-TCP or tRPC-over-UDP listener.
 
@@ -143,16 +123,10 @@ class TrpcServerTransport(BaseServerTransport):
     def __init__(self) -> None:
         super().__init__()
         self.opts = BaseServerTransportOption()
-        # What :meth:`stop` closes: servers, acceptors and aiohttp sites.
-        self._closers: List[Callable[[], Any]] = []
-        # ``asyncio.Server`` objects whose close :meth:`destroy` waits for.
-        self._servers: List[asyncio.AbstractServer] = []
-        # Datagram transports and aiohttp runners, keyed by the serving loop
-        # that owns them (``None`` for ``opt.loop``). The runtime releases
-        # them when that loop stops, not in :meth:`stop`: a datagram socket
-        # must keep answering while requests drain, and neither may be closed
-        # from another thread.
-        self._loop_resources: Dict[Optional[int], List[Any]] = {}
+        # Listen sockets started and not stopped yet, closed by :meth:`stop`.
+        self._listeners: List[StreamListener] = []
+        # Listen sockets :meth:`stop` closed, waited for by :meth:`destroy`.
+        self._closing: List[StreamListener] = []
         # Python connection class of accepted stream connections; ``None``
         # serves them with the Cython ``TCPConnection``.
         self._io_connection: Optional[Type[DefaultIoConnection]] = None
@@ -195,56 +169,42 @@ class TrpcServerTransport(BaseServerTransport):
             return False
         return True
 
-    def listen(self, opt: Optional[ListenOption] = None) -> None:
-        """Serve the endpoint on the loops in ``opt``.
+    def listen(self) -> None:
+        """Serve the endpoint on the ``io`` reactors of the current thread model.
 
-        Args:
-            opt: Loops, ``reuse_port`` and the optional connection override.
-                ``None`` serves on the calling thread's loop alone.
+        Runs on the acceptor thread, before its loop runs.
         """
-        if opt is None:
-            opt = ListenOption(loop=asyncio.get_event_loop())
+        # Local import: trpc_sdk.runtime imports this package at module level.
+        from trpc_sdk.runtime import current_thread_model
+
+        model = current_thread_model()
         if self._is_datagram():
-            self._listen_datagram(opt)
+            self._listen_datagram(model)
             return
-        factory = opt.protocol_factory or self.protocol_factory(opt.shared_pool)
-        if not opt.serving_loops:
-            self.serve_on_loop(opt.loop, factory, opt.reuse_port)
-        else:
-            self.serve_via_acceptor(opt, [AcceptTarget(target, factory) for target in opt.serving_loops])
+        factory = self.protocol_factory(model.handler_pool)
+        self._serve_stream(model, model.io, lambda _: factory)
 
     def stop(self) -> None:
         """Close every listen socket this transport started; idempotent.
 
-        Open connections keep being served. Callable from a signal handler:
-        an aiohttp site's ``stop`` is a coroutine, so it is scheduled on its
-        loop and runs on that loop's next turn.
+        Open connections keep being served. Callable from a signal handler,
+        on the thread :meth:`listen` ran on.
         """
-        closers, self._closers = self._closers, []
-        for close in closers:
-            close()
+        listeners, self._listeners = self._listeners, []
+        for listener in listeners:
+            listener.close()
+        self._closing.extend(listeners)
 
     async def destroy(self) -> None:
-        """Wait until every closed ``asyncio`` server is gone, then forget them.
+        """Close every listen socket, wait until each ``asyncio`` server is gone, then forget them.
 
         On Python 3.12 and later ``wait_closed`` also waits for the accepted
         connections to close.
         """
-        servers, self._servers = self._servers, []
-        for server in servers:
-            server.close()
-            await server.wait_closed()
-
-    def pop_loop_resources(self, key: Optional[int]) -> List[Any]:
-        """Take the datagram transports and aiohttp runners owned by one loop.
-
-        Args:
-            key: That serving loop's ``index``; ``None`` is ``opt.loop``.
-
-        Returns:
-            The resources, for :func:`release_loop_resources` on that loop.
-        """
-        return self._loop_resources.pop(key, [])
+        self.stop()
+        closing, self._closing = self._closing, []
+        for listener in closing:
+            await listener.wait_closed()
 
     def set_io_connection(self, conn_cls: Type[DefaultIoConnection] = DefaultIoConnection) -> None:
         """Serve accepted stream connections with a Python connection class.
@@ -326,19 +286,20 @@ class TrpcServerTransport(BaseServerTransport):
             logger.error(f"[server transport] failed to send rsp to client {conn.remote_addr}, err: {err}",
                          exc_info=True)
 
-    def datagram_protocol_factory(self, opt: ListenOption) -> Callable[[], Any]:
+    def datagram_protocol_factory(self, shared_pool: Optional[Any] = None) -> Callable[[], Any]:
         """Return the protocol serving datagrams; safe to share across loops.
 
         Every frame goes through :meth:`_msg_handler`, overridden or not.
 
         Args:
-            opt: Supplies ``shared_pool``.
+            shared_pool: ``SharedHandlerPool`` that runs the handlers, or
+                ``None`` to run them on the datagram's loop.
         """
         opts = self.opts
         return partial(DefaultDatagramConnection,
                        ConnectionOption(parser=opts.parser,
                                         msg_handler=self._msg_handler,
-                                        shared_pool=opt.shared_pool))
+                                        shared_pool=shared_pool))
 
     def create_socket(self, reuse_port: bool, stream: bool = True) -> socket.socket:
         """Create and bind one socket on the configured address.
@@ -356,99 +317,55 @@ class TrpcServerTransport(BaseServerTransport):
         opts = self.opts
         return create_new_socket(opts.address, opts.socket_type, reuse_port, stream, opts.backlog)
 
-    def serve_on_loop(self,
-                      loop: asyncio.AbstractEventLoop,
-                      factory: Callable[[], asyncio.BaseProtocol],
-                      reuse_port: bool) -> asyncio.AbstractServer:
-        """Serve a new listen socket with ``create_server`` on ``loop``.
+    def _serve_stream(self,
+                      model: ThreadModel,
+                      group: ReactorGroup,
+                      factory_for: Callable[[Reactor], Callable[[], asyncio.BaseProtocol]],
+                      ssl_context: Optional[ssl.SSLContext] = None) -> StreamListener:
+        """Bind one listen socket and serve it on ``group``; kept for :meth:`stop`.
 
         Args:
-            loop: Loop that accepts and serves; must not be running yet.
-            factory: Protocol factory of accepted connections.
-            reuse_port: Set ``SO_REUSEPORT`` on the socket.
-
-        Returns:
-            The started server, also kept for :meth:`stop` and :meth:`destroy`.
-        """
-        sock = self.create_socket(reuse_port)
-        coro = loop.create_server(factory, sock=sock, reuse_port=reuse_port, backlog=self.opts.backlog)
-        server = loop.run_until_complete(coro)
-        self._servers.append(server)
-        self._closers.append(server.close)
-        return server
-
-    def serve_via_acceptor(self,
-                           opt: ListenOption,
-                           targets: Sequence[AcceptTarget],
-                           ssl_context: Optional[ssl.SSLContext] = None) -> Acceptor:
-        """Accept on ``opt.loop`` and hand every connection to one of ``targets``.
-
-        Args:
-            opt: ``loop`` watches the socket; ``reuse_port`` and
-                ``schedule_target`` are applied.
-            targets: Serving loops and the protocol factory for each.
+            model: Thread model of this process.
+            group: Reactors that serve the accepted connections.
+            factory_for: Protocol factory of the connections a reactor serves.
             ssl_context: Server ``SSLContext``, or ``None`` for plaintext.
 
         Returns:
-            The started acceptor, also kept for :meth:`stop`.
+            The started listener.
         """
-        sock = self.create_socket(opt.reuse_port)
-        acceptor = Acceptor(sock=sock,
-                            targets=targets,
-                            loop=opt.loop,
-                            address=self.opts.address,
-                            ssl_context=ssl_context,
-                            schedule_target=opt.schedule_target)
-        acceptor.start()
-        self._closers.append(acceptor.close)
-        return acceptor
+        sock = self.create_socket(model.tcp_reuse_port)
+        try:
+            listener = serve_stream(model, group, sock, factory_for, self.opts.backlog,
+                                    ssl_context=ssl_context, address=self.opts.address)
+        except BaseException:
+            sock.close()
+            raise
+        self._listeners.append(listener)
+        return listener
 
-    def keep_site(self, loop: asyncio.AbstractEventLoop, site: Any) -> None:
-        """Record a started aiohttp site so :meth:`stop` closes it.
+    def _listen_datagram(self, model: ThreadModel) -> None:
+        """Bind one datagram socket per ``io`` reactor; the kernel spreads datagrams over them.
+
+        The socket is created on this thread and the endpoint on the reactor's
+        loop, so the protocol object is constructed there. Each endpoint is
+        kept on ``model`` for the runtime to release on that loop.
 
         Args:
-            loop: Loop the site was started on.
-            site: The started ``web.BaseSite``.
+            model: Thread model of this process.
         """
-        self._closers.append(partial(_stop_site, loop, site))
+        from trpc_sdk.runtime import ResourceKind
 
-    def keep_loop_resource(self, key: Optional[int], resource: Any) -> None:
-        """Record a resource the runtime releases when the loop at ``key`` stops.
-
-        Args:
-            key: That serving loop's ``index``; ``None`` is ``opt.loop``.
-            resource: A datagram transport (``close()``) or an aiohttp runner
-                (``await cleanup()``).
-        """
-        self._loop_resources.setdefault(key, []).append(resource)
-
-    def _listen_datagram(self, opt: ListenOption) -> None:
-        """Bind one datagram socket per serving loop and serve it there.
-
-        The socket is created on this thread and the endpoint on the target
-        loop, so the protocol object is constructed there. Each loop's
-        datagram transport is kept for
-        :meth:`pop_loop_resources`.
-
-        Args:
-            opt: With no serving loops the endpoint is served on ``opt.loop``.
-        """
-        factory = self.datagram_protocol_factory(opt)
-        if not opt.serving_loops:
-            sock = self.create_socket(opt.reuse_port, stream=False)
-            endpoint = opt.loop.create_datagram_endpoint(protocol_factory=factory, sock=sock)
-            transport, _ = opt.loop.run_until_complete(endpoint)
-            self.keep_loop_resource(None, transport)
-            return
-
-        for target in opt.serving_loops:
-            sock = self.create_socket(opt.reuse_port, stream=False)
+        reactors = model.io.reactors
+        reuse_port = model.udp_reuse_port or len(reactors) > 1
+        factory = self.datagram_protocol_factory(model.handler_pool)
+        for reactor in reactors:
+            sock = self.create_socket(reuse_port, stream=False)
             try:
-                transport, _ = target.submit(partial(target.loop.create_datagram_endpoint,
+                endpoint, _ = reactor.submit(partial(reactor.loop.create_datagram_endpoint,
                                                      protocol_factory=factory,
                                                      sock=sock),
-                                             timeout=opt.ready_timeout)
+                                             timeout=model.ready_timeout)
             except BaseException:
                 sock.close()
                 raise
-            self.keep_loop_resource(target.index, transport)
+            model.keep_resource(reactor, endpoint, ResourceKind.ENDPOINT)

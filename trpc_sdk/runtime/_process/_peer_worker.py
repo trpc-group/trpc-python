@@ -175,6 +175,7 @@ class PeerWorkerProcess(PeerWorker, Process):
         sentinel.
         """
         try:
+            self._install_thread_model()
             self._bind_task_mesh()
             self._close_foreign_pipes()
             self._attach_heartbeats()

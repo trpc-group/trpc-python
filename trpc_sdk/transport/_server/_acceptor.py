@@ -27,6 +27,11 @@ That keeps one policy — including anything registered through
 The selector's sticky-stream branch never fires here, and does not need to: it
 exists so all frames of one stream reach one worker, and routing whole
 connections already guarantees that. Streams do not span connections.
+
+:func:`serve_stream` is the one place that chooses between the two ways of
+serving a listen socket: ``create_server`` when the acceptor's own reactor is
+the only one in the group, an :class:`Acceptor` otherwise. Either way the
+caller gets a :class:`StreamListener` to close it with.
 """
 
 from __future__ import annotations
@@ -34,10 +39,12 @@ from __future__ import annotations
 import asyncio
 import errno
 import socket
+import ssl
 from dataclasses import dataclass
 from typing import Any
 from typing import Callable
 from typing import List
+from typing import TYPE_CHECKING
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
@@ -47,6 +54,11 @@ from .._scheduler import get_next_worker
 from .._types import SchedulerParams
 from ._constants import ACCEPT_BURST
 from ._constants import ACCEPT_RETRY_DELAY
+
+if TYPE_CHECKING:
+    from trpc_sdk.runtime import Reactor
+    from trpc_sdk.runtime import ReactorGroup
+    from trpc_sdk.runtime import ThreadModel
 
 # errnos that mean "out of resources", not "this connection is broken".
 _RESOURCE_ERRNOS = frozenset({errno.EMFILE, errno.ENFILE, errno.ENOBUFS, errno.ENOMEM})
@@ -225,3 +237,81 @@ class Acceptor:
         # an out-of-range value must not take the whole accept loop down.
         target = self._targets[get_next_worker(schedule) % len(self._targets)]
         target.thread.attach_socket(conn, target.protocol_factory, self._ssl_context)
+
+
+class StreamListener:
+    """One started stream listen socket, however it is served.
+
+    Wraps either an ``asyncio.Server`` (the acceptor's reactor serves alone)
+    or an :class:`Acceptor`. :meth:`close` must run on the acceptor thread,
+    where it was started.
+    """
+
+    def __init__(self,
+                 server: Optional[asyncio.AbstractServer] = None,
+                 acceptor: Optional[Acceptor] = None) -> None:
+        self.server = server
+        self.acceptor = acceptor
+        self._closed = False
+
+    def close(self) -> None:
+        """Stop accepting and close the listen socket; idempotent.
+
+        Connections already accepted keep being served.
+        """
+        if self._closed:
+            return
+        self._closed = True
+        if self.server is not None:
+            self.server.close()
+        if self.acceptor is not None:
+            self.acceptor.close()
+
+    async def wait_closed(self) -> None:
+        """Close, then wait until an ``asyncio.Server`` is gone; nothing to wait for with an acceptor.
+
+        On Python 3.12 and later ``wait_closed`` also waits for the accepted
+        connections to close.
+        """
+        self.close()
+        if self.server is not None:
+            await self.server.wait_closed()
+
+
+def serve_stream(model: ThreadModel,
+                 group: ReactorGroup,
+                 sock: socket.socket,
+                 factory_for: Callable[[Reactor], Callable[[], asyncio.BaseProtocol]],
+                 backlog: int,
+                 ssl_context: Optional[ssl.SSLContext] = None,
+                 address: Optional[Tuple[str, int]] = None) -> StreamListener:
+    """Serve ``sock`` on ``group``: directly on the acceptor loop when it is the only reactor.
+
+    Runs on the acceptor thread, before its loop runs.
+
+    Args:
+        model: Thread model of this process; its ``acceptor`` watches ``sock``.
+        group: Reactors that serve the accepted connections.
+        sock: Bound, listening, non-blocking socket.
+        factory_for: Protocol factory of the connections a reactor serves.
+        backlog: ``listen()`` backlog, for ``create_server``.
+        ssl_context: Server ``SSLContext``, or ``None`` for plaintext.
+        address: Bind address, used only in log messages.
+
+    Returns:
+        The started listener.
+    """
+    reactors = list(group.reactors)
+    if len(reactors) == 1 and reactors[0] is model.acceptor:
+        loop = model.acceptor.loop
+        server = loop.run_until_complete(
+            loop.create_server(factory_for(model.acceptor), sock=sock, backlog=backlog, ssl=ssl_context))
+        return StreamListener(server=server)
+    acceptor = Acceptor(sock=sock,
+                        targets=[AcceptTarget(reactor, factory_for(reactor)) for reactor in reactors],
+                        loop=model.acceptor.loop,
+                        address=address,
+                        ssl_context=ssl_context,
+                        schedule_target=group.schedule_target)
+    acceptor.start()
+    return StreamListener(acceptor=acceptor)
