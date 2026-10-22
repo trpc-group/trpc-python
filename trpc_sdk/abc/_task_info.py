@@ -36,7 +36,8 @@ class TaskInfo:
         c_task_driver_params: Optional parameters forwarded to the C-task
             driver.
         on_fork: Optional hook invoked after the worker process forks.
-        task_num: Number of worker processes or task instances to start.
+        task_num: Number of task processes to start; 0 means not set, so
+            YAML ``global.processmodel.task_num`` (default 1) applies.
         pause_heartbeat: Whether heartbeats should be paused for this task.
     """
 
@@ -50,5 +51,5 @@ class TaskInfo:
     use_c_task: bool = False
     c_task_driver_params: Optional[Dict[str, Any]] = None
     on_fork: Optional[Callable[[None], None]] = None
-    task_num: int = 1
+    task_num: int = 0
     pause_heartbeat: bool = False

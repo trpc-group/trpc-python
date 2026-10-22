@@ -24,7 +24,7 @@ from trpc_sdk.codec import get_server_parser
 from trpc_sdk.codec import get_server_codec
 from trpc_sdk.filters import FilterChain
 from trpc_sdk.log import logger
-from trpc_sdk.naming import defaultRegistry
+from trpc_sdk.naming import default_registry
 from trpc_sdk.naming import get_registry
 from trpc_sdk.transport import DefaultServerTransport
 from trpc_sdk.transport import DefaultServerTransportOption
@@ -57,6 +57,7 @@ from ._constants import DEFAULT_SET_NAME
 from ._constants import DEFAULT_SOCKET_TYPE
 from ._constants import DEFAULT_TASK_BATCH_SIZE
 from ._constants import DEFAULT_TASK_CONSUMER_NUM
+from ._constants import DEFAULT_TASK_NUM
 from ._constants import DEFAULT_TASK_QUEUE_SIZE
 from ._constants import DEFAULT_TASK_WAIT_INTERVAL
 from ._constants import DEFAULT_TCP_REUSE_PORT
@@ -82,12 +83,12 @@ class ServerOption:
     Not a listen endpoint. Worker count, process mode, task-queue knobs, and
     child-restart policy live here. Per-port settings are :class:`ServiceOption`.
 
-    Example: ``server.mode: merge`` and ``server.io_thread_num: 1`` become
-    ``mode="merge"`` and ``io_thread_num=1``.
-
-    The thread- and process-model fields hold *resolved* values:
-    ``create_server`` copies the raw YAML here and then runs
-    :func:`~trpc_sdk.server._option_resolver.resolve_server_option` on it.
+    The thread- and process-model fields come from YAML ``global.processmodel``
+    and hold *resolved* values: ``create_server`` fills them through
+    :func:`~trpc_sdk.server._option_resolver.apply_process_model` and then runs
+    :func:`~trpc_sdk.server._option_resolver.resolve_server_option` on them.
+    Example: ``mode: single_process`` with ``io_num: 2`` becomes
+    ``mode="merge"`` and ``io_thread_num=2``.
     """
 
     def __init__(self) -> None:
@@ -129,6 +130,9 @@ class ServerOption:
         self.task_queue_size: int = DEFAULT_TASK_QUEUE_SIZE
         # Consumer threads inside each task process.
         self.task_consumer_num: int = DEFAULT_TASK_CONSUMER_NUM
+        # Processes of a task registered without ``task_num``; filled from
+        # YAML ``global.processmodel.task_num``.
+        self.task_num: int = DEFAULT_TASK_NUM
         # Restart a crashed child instead of exiting. Not supported in this
         # version: the worker treats it as False and warns when it is set.
         self.reboot_child: bool = DEFAULT_REBOOT_CHILD
@@ -168,7 +172,7 @@ class ServiceOption:
 
         # Cron spec for a timer service; empty means not a timer.
         # Format: "second minute hour day month weekday", e.g. "0 */5 * * * ?".
-        self.timerSpec: str = DEFAULT_TIMER_SPEC
+        self.timer_spec: str = DEFAULT_TIMER_SPEC
 
         # Bind address as (host, port), or (unix_path, 0) for UNIX sockets.
         self.address: AddrType = DEFAULT_ADDRESS
@@ -201,8 +205,8 @@ class ServiceOption:
         # Server transport implementation (default or protocol plugin).
         self.transport: BaseServerTransport = DefaultServerTransport()
 
-        # Service registry plugin; defaultRegistry is a no-op.
-        self.registry: Optional[BaseServiceRegistry] = defaultRegistry
+        # Service registry plugin; default_registry is a no-op.
+        self.registry: Optional[BaseServiceRegistry] = default_registry
         # Delay before registering, in milliseconds.
         self.registry_delay: int = DEFAULT_REGISTRY_DELAY
         # Registry control: 0 = off, 1 = on.
@@ -435,7 +439,7 @@ class ServiceOption:
             spec: ``second minute hour day month weekday``,
                 e.g. ``"0 */5 * * * ?"`` (every 5 minutes).
         """
-        self.timerSpec = spec
+        self.timer_spec = spec
 
     def set_stream_handle(self, stream_handle: StreamDispatcher) -> None:
         """Set the streaming transport handler.

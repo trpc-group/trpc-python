@@ -276,7 +276,7 @@ class BaseWorker(ExitTemplate):
         self._warn_unsupported_reboot_child()
         self._warn_threads_before_fork()
 
-        self.task_infos = build_task_infos()
+        self.task_infos = build_task_infos(getattr(self.server_engine.opts, "task_num", 1))
         self.task_name = [task_info.name for task_info in self.task_infos]
 
         # Heartbeat pipes must exist before fork so the children inherit them.

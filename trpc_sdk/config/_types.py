@@ -87,6 +87,29 @@ class Rpcz:
 
 
 @dataclass
+class ProcessModel:
+    """Process and thread model (YAML ``global.processmodel``).
+
+    Zero or empty means "not configured".
+    :func:`~trpc_sdk.server._option_resolver.apply_process_model` translates
+    this block into the ``mode`` / ``worker_num`` / ``io_handle_type`` /
+    ``io_thread_num`` / ``handle_thread_num`` fields of ``ServerOption``.
+    """
+
+    mode: str = ''  # single_process | multi_process; '' means single_process with one thread
+    # merge | separate; '' means merge for single_process and separate for multi_process.
+    # multi_process also accepts peer as a spelling of merge.
+    io_handle_type: str = ''
+    # single_process: I/O threads (must equal handle_num under merge);
+    # multi_process separate: I/O processes, only 1 is supported; peer: not read.
+    io_num: int = 0
+    # single_process: handle threads; multi_process: rpc tasks (separate) or
+    # peer workers (merge), 0 meaning the CPU count.
+    handle_num: int = 0
+    task_num: int = 0  # processes of a task that sets no task_num itself; 0 means 1
+
+
+@dataclass
 class GlobalConfig:
     """Global framework configuration."""
 
@@ -99,12 +122,15 @@ class GlobalConfig:
     enable_uvloop: bool = False  # Use the uvloop event-loop policy when uvloop is installed.
     save_bind_info: Optional[SaveBindInfo] = None  # Save bind information to a file.
     rpcz: Optional[Rpcz] = None  # Rpcz sampling and caching configuration.
+    processmodel: Optional[ProcessModel] = None  # Process and thread model of the server.
 
     def __post_init__(self) -> None:
         if self.save_bind_info is None:
             self.save_bind_info = SaveBindInfo()
         if self.rpcz is None:
             self.rpcz = Rpcz()
+        if self.processmodel is None:
+            self.processmodel = ProcessModel()
 
 
 @dataclass
@@ -170,7 +196,7 @@ class MemoryInspection:
 
 
 def default_worker_num() -> int:
-    """Return the process count ``server.worker_num: 0`` resolves to.
+    """Return the process count ``global.processmodel.handle_num: 0`` resolves to under ``multi_process``.
 
     The CPU count the process may use (cgroup quota included), or
     :data:`DEFAULT_WORKER_NUM_FALLBACK` when it is unknown. Read at call
@@ -200,16 +226,6 @@ class ServerConfig:
     filters: Optional[List[str]] = None
     network: str = ''
     protocol: str = ''
-    mode: str = ''  # server running mode
-    # separate-mode rpc tasks / peer-mode workers (worker-0 included); 0 means the CPU count; merge ignores it
-    worker_num: int = 0
-    # Merge-mode thread model, named after trpc-cpp's global_conf.h. Zero or
-    # empty means "not configured"; ``server._option_resolver`` resolves them in create_server.
-    # handle_thread_num > 0 selects the separate thread model (I/O threads hand requests to
-    # handle threads); io_handle_type is an optional explicit form that must agree with it.
-    io_handle_type: str = ''  # merge | separate; '' means inferred from handle_thread_num
-    io_thread_num: int = 0  # threads doing I/O (and handlers when handle_thread_num is 0); 0 means 1
-    handle_thread_num: int = 0  # threads running handlers; 0 means the I/O threads run them
     handler_max_concurrency: int = 0  # handle threads only: unary requests in flight per handle thread; 0 = unlimited
     handler_queue_size: int = 1024  # handle threads only: shared overflow queue; used when handler_max_concurrency > 0
     tcp_reuse_port: bool = False  # SO_REUSEPORT on TCP listen sockets, shared by merge and separate

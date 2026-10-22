@@ -48,7 +48,7 @@ class AddressKind(Enum):
     UNKNOWN = "unknown"
 
 
-# Process models for ServerOption.mode (YAML server.mode).
+# Process models for ServerOption.mode, translated from YAML `global.processmodel`.
 # merge: the worker accepts and runs handlers in one process. Its thread model
 # comes from `io_thread_num` / `handle_thread_num`; see `trpc_sdk/server/_option_resolver.py`.
 MODE_MERGE = "merge"
@@ -62,14 +62,21 @@ MODE_PEER = "peer"
 
 # Thread models of a merge-mode worker (ServerOption.io_handle_type). merge:
 # every serving thread does I/O and runs handlers. separate: I/O loops hand
-# requests to dedicated handle threads. YAML selects separate by setting
-# `handle_thread_num > 0`; `server.io_handle_type` is an optional explicit form.
+# requests to dedicated handle threads. Also the values of YAML
+# `global.processmodel.io_handle_type`.
 IO_HANDLE_TYPE_MERGE = "merge"
 IO_HANDLE_TYPE_SEPARATE = "separate"
 
-# Accepted spellings of `server.mode` and `server.io_handle_type` that are not
-# the canonical name, mapped to it.
+# Accepted spellings of a mode or `io_handle_type` that are not the canonical
+# name, mapped to it.
 MODE_SPELLINGS = {"seperate": MODE_SEPARATE}
+
+# Values of YAML `global.processmodel.mode`.
+# single_process: merge mode, threads from `io_num` / `handle_num`.
+# multi_process: separate mode (`io_handle_type: separate`) or peer mode
+# (`io_handle_type: merge`, also spelled `peer`).
+PROCESS_MODEL_SINGLE = "single_process"
+PROCESS_MODEL_MULTI = "multi_process"
 
 # Logged once by worker-0 before forking; SO_REUSEPORT cannot tell a second
 # instance from a sibling worker.

@@ -139,8 +139,8 @@ class ConnectionOption:
     :class:`~trpc_sdk.transport.DefaultDatagramConnection` ignores them.
     ``shared_pool`` is UDP only.
     :meth:`~trpc_sdk.transport.TrpcServerTransport.protocol_factory` never
-    sets it on the TCP path, because a subclass that overrides
-    ``_msg_handler`` runs its handlers on the connection's own loop, and
+    sets it on the TCP path, because a transport that called
+    ``set_io_connection`` runs its handlers on the connection's own loop, and
     :class:`DefaultIoConnection` ignores the field.
 
     Every callback left ``None`` falls back to a default kept on the TCP

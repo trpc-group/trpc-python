@@ -30,7 +30,7 @@ from trpc_sdk.version import __version__
 from ._constants import WS_PATH
 from ._constants import WS_RECONNECT_INTERVAL_S
 from ._constants import WS_USER_AGENT_PREFIX
-from ._loglevel import setLoglevel
+from ._loglevel import set_log_level
 
 
 class Configer:
@@ -143,7 +143,7 @@ async def handle_loglevel(ws_sock, cfg):
     logger.debug('set loglevel, cfg:%s', cfg)
     for name, level in cfg.items():
         logger_ins = get_logger(name)
-        setLoglevel(logger_ins, level)
+        set_log_level(logger_ins, level)
         if name == DEFAULT_LOG_NAME:
             logging.getLogger().setLevel(logger_ins.min_level)
 

@@ -45,7 +45,7 @@ The package is split by responsibility:
   :func:`get_server_transport`), and the accepted connections:
   ``TcpConnectionOption`` for the Cython ``TCPConnection``,
   ``DefaultIoConnection`` with its ``ConnectionOption`` for subclasses
-  overriding ``_msg_handler``, ``DefaultDatagramConnection`` for UDP listen
+  calling ``set_io_connection``, ``DefaultDatagramConnection`` for UDP listen
   sockets (built from the same ``ConnectionOption``), and
   ``ServerConnection``, the peer view both hand to ``_msg_handler``
 - :mod:`~trpc_sdk.transport._separate` — the asyncio protocols on both ends

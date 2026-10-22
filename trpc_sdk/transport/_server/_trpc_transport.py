@@ -39,6 +39,7 @@ from typing import Iterable
 from typing import List
 from typing import Optional
 from typing import Sequence
+from typing import Type
 
 from trpc_sdk.abc import BaseServerTransport
 from trpc_sdk.abc import BaseServerTransportOption
@@ -128,11 +129,11 @@ class TrpcServerTransport(BaseServerTransport):
     Constructed in the parent; :meth:`listen` must only be called after fork,
     because a socket created before the fork would be shared with every child.
 
-    Accepted stream connections are Cython ``TCPConnection`` objects. A
-    subclass serving another protocol over the same listen machinery
-    overrides :meth:`_msg_handler` and, when the framing differs, sets another
-    ``opts.parser``; its connections are then :class:`DefaultIoConnection`.
-    Datagrams are always served by :class:`DefaultDatagramConnection`, which
+    Accepted stream connections are Cython ``TCPConnection`` objects by
+    default. A subclass serving another protocol over the same listen
+    machinery calls :meth:`set_io_connection`, overrides :meth:`_msg_handler`
+    and, when the framing differs, sets another ``opts.parser``; its
+    connections are then :class:`DefaultIoConnection` objects. Datagrams are always served by :class:`DefaultDatagramConnection`, which
     hands every frame to :meth:`_msg_handler`.
 
     Attributes:
@@ -152,6 +153,9 @@ class TrpcServerTransport(BaseServerTransport):
         # must keep answering while requests drain, and neither may be closed
         # from another thread.
         self._loop_resources: Dict[Optional[int], List[Any]] = {}
+        # Python connection class of accepted stream connections; ``None``
+        # serves them with the Cython ``TCPConnection``.
+        self._io_connection: Optional[Type[DefaultIoConnection]] = None
 
     def bind(self, opts: BaseServerTransportOption) -> None:
         """Record this endpoint's options. No socket is created.
@@ -242,6 +246,17 @@ class TrpcServerTransport(BaseServerTransport):
         """
         return self._loop_resources.pop(key, [])
 
+    def set_io_connection(self, conn_cls: Type[DefaultIoConnection] = DefaultIoConnection) -> None:
+        """Serve accepted stream connections with a Python connection class.
+
+        Every frame then goes to :meth:`_msg_handler`; ``shared_pool`` is
+        ignored and there is no tRPC stream support. Call before :meth:`listen`.
+
+        Args:
+            conn_cls: :class:`DefaultIoConnection` or a subclass of it.
+        """
+        self._io_connection = conn_cls
+
     def protocol_factory(self, shared_pool: Optional[Any] = None) -> Callable[[], Any]:
         """Return the connection class of accepted stream connections.
 
@@ -249,31 +264,31 @@ class TrpcServerTransport(BaseServerTransport):
         when they are constructed, so one factory is safe to share across
         loops.
 
-        * :meth:`_msg_handler` not overridden: Cython :class:`TCPConnection`,
-          which serves unary, stream and ``shared_pool`` requests itself.
-        * Overridden by a subclass: :class:`DefaultIoConnection`, which hands
-          every frame to that override. This path ignores ``shared_pool`` and
-          has no tRPC stream support.
+        * Default: Cython :class:`TCPConnection`, which serves unary, stream
+          and ``shared_pool`` requests itself.
+        * After :meth:`set_io_connection`: that :class:`DefaultIoConnection`
+          class, which hands every frame to :meth:`_msg_handler`. This path
+          ignores ``shared_pool`` and has no tRPC stream support.
 
         Args:
             shared_pool: ``SharedHandlerPool`` that runs the handlers, or
                 ``None`` to run them on the connection's loop.
         """
         opts = self.opts
-        if type(self)._msg_handler is TrpcServerTransport._msg_handler:
+        if self._io_connection is None:
             return partial(TCPConnection,
                            TcpConnectionOption(parser=opts.parser,
                                                rpc_handler=opts.rpc_handler,
                                                timeout=opts.idle_timeout,
                                                shared_pool=shared_pool))
-        return partial(DefaultIoConnection, ConnectionOption(parser=opts.parser, msg_handler=self._msg_handler))
+        return partial(self._io_connection, ConnectionOption(parser=opts.parser, msg_handler=self._msg_handler))
 
     async def _msg_handler(self, conn: ServerConnection, data: bytes) -> None:
         """Serve one unary tRPC frame from a TCP connection or a UDP datagram.
 
-        For TCP, ``conn`` is a :class:`DefaultIoConnection`; the default tRPC
-        TCP path never calls this, since its connections are Cython
-        ``TCPConnection`` objects. 
+        For TCP, ``conn`` is a :class:`DefaultIoConnection` and this only runs
+        after :meth:`set_io_connection`; the default tRPC TCP path never calls
+        this, since its connections are Cython ``TCPConnection`` objects.
         For UDP, ``conn`` is the per-datagram peer
         built by :class:`DefaultDatagramConnection`, and this runs on a handle
         thread under ``shared_pool``. It is the reference a subclass

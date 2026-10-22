@@ -549,7 +549,7 @@ class LoguruLogger(BaseLogger):
     def set_min_level(self, level: int) -> None:
         """Set the level of this logger's file output (admin entry point).
 
-        Mirrors ``trpc.admin.setLoglevel`` on the stdlib backend: the output
+        Mirrors ``trpc_sdk.admin.set_log_level`` on the stdlib backend: the output
         writing ``self.filename`` takes the requested level, the other outputs
         keep the level they were configured with, and the logger-wide gate drops
         to the lowest of them so that it hides none of them.  A logger with no

@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 
-def getLoglevel(logger) -> int:
+def get_log_level(logger) -> int:
     """Return the level of a logger's file output.
 
     Delegates to the Loguru runtime backend. When the logger has file
@@ -25,7 +25,7 @@ def getLoglevel(logger) -> int:
     return logger.get_min_level()
 
 
-def setLoglevel(logger, level: int) -> None:
+def set_log_level(logger, level: int) -> None:
     """Set the level of a logger's file output.
 
     Delegates to the Loguru runtime backend. Only the outputs writing the

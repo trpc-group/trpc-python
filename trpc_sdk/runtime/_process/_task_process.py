@@ -64,7 +64,7 @@ def worker_producer_name(index: int) -> str:
     return f"{WORKER_PRODUCER_PREFIX}:{index}"
 
 
-def build_task_infos() -> List[TaskInfo]:
+def build_task_infos(default_task_num: int = 1) -> List[TaskInfo]:
     """Turn every ``@trpc.task`` registration into pre-fork records.
 
     One :class:`TaskInfo` per child: a task declared with ``task_num: 3``
@@ -75,16 +75,21 @@ def build_task_infos() -> List[TaskInfo]:
     ``pause_heartbeat()`` is called here, while still in the process that will
     fork, so the registry client stops before any child exists.
 
+    Args:
+        default_task_num: Process count of a task whose ``task_num`` is 0
+            (not set); YAML ``global.processmodel.task_num``.
+
     Returns:
         Pre-fork records in the order they will be forked.
     """
     task_infos: List[TaskInfo] = []
     for task_handler in get_registered_tasks():
-        register_task_num(task_handler.name, task_handler.task_num)
+        task_num = task_handler.task_num or default_task_num
+        register_task_num(task_handler.name, task_num)
 
         handle = TaskProcess
 
-        for i in range(task_handler.task_num):
+        for i in range(task_num):
             task = TaskInfo()
             task.name = f"{task_handler.name}:{i}"
             task.handle = handle
@@ -480,12 +485,7 @@ class TaskProcess(BaseTaskProcess):
             consumer.join(remaining)
 
     def _owned_producer_names(self) -> List[str]:
-        """Return this task's own name, which covers both roles it plays.
-
-        The mesh is checked cell by cell, so one name is enough: it keeps the
-        task end of every pipe pointed at this task, and the producer end of
-        every pipe this task declared as a peer.
-        """
+        """Return this task's own name, which covers both roles it plays."""
         return [self.task_info.name]
 
     def _on_drained(self) -> None:

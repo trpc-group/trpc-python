@@ -40,8 +40,8 @@ from trpc_sdk.version import __version__
 from ._constants import RPCZ_FILTER_PLUGIN_NAME
 from ._constants import WS_PATH
 from ._constants import WS_USER_AGENT_PREFIX
-from ._loglevel import getLoglevel
-from ._loglevel import setLoglevel
+from ._loglevel import get_log_level
+from ._loglevel import set_log_level
 
 
 class Configer:
@@ -428,7 +428,7 @@ _LEVEL_NAMES = {level: name for name, level in LEVEL_NAME_TO_LOGGING_LEVEL.items
 async def handler_loglevel(lognames=None):
     """Return ``{logger_name: level}`` for the given or all registered loggers."""
     loggers = _LoggerManager._loggers  # pylint: disable=protected-access
-    return {name: getLoglevel(loggers[name]) for name in (lognames or loggers)}
+    return {name: get_log_level(loggers[name]) for name in (lognames or loggers)}
 
 
 def get_logger(logname):
@@ -452,7 +452,7 @@ def get_logger(logname):
 async def handler_loglevel_get(request):
     """get trpc log level. (params eg. logger=default)"""
     logname, log_instance = get_logger(request.query.get('logger'))
-    return make_response({'logger': logname, 'level': _LEVEL_NAMES.get(getLoglevel(log_instance))})
+    return make_response({'logger': logname, 'level': _LEVEL_NAMES.get(get_log_level(log_instance))})
 
 
 @routes.put("/cmds/loglevel")
@@ -466,12 +466,12 @@ async def handler_loglevel_put(request):
         set_error(res, -1, 'wrong content, please use value={LEVEL}')
     else:
         res['logger'] = logname
-        res['prelevel'] = _LEVEL_NAMES.get(getLoglevel(log_instance))
-        setLoglevel(log_instance, level)
+        res['prelevel'] = _LEVEL_NAMES.get(get_log_level(log_instance))
+        set_log_level(log_instance, level)
         if logname == DEFAULT_LOG_NAME:
             logging.getLogger().setLevel(log_instance.min_level)
         await configer.config({'loglevel': [logname]})
-        res['level'] = _LEVEL_NAMES.get(getLoglevel(log_instance))
+        res['level'] = _LEVEL_NAMES.get(get_log_level(log_instance))
     return make_response(res)
 
 
