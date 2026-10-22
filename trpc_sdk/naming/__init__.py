@@ -56,7 +56,7 @@ from ._ip_selector import DNSSelector
 from ._ip_selector import IpSelector
 from ._ip_selector import get_random_addr
 from ._load_balance import RandomLoadBalance
-from ._registry import defaultRegistry
+from ._registry import default_registry
 from ._registry import get_registry
 from ._selector_lookup import get_default_selector
 from ._selector_lookup import get_selector
@@ -89,7 +89,7 @@ __all__ = [
     # Load balance
     "RandomLoadBalance",
     # Registry
-    "defaultRegistry",
+    "default_registry",
     "get_registry",
     # Circuit breaker
     "NoopCircuitBreaker",

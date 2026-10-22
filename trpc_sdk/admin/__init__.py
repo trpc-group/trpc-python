@@ -35,17 +35,17 @@ from ._hooks import on_master_start
 from ._hooks import on_master_starts
 from ._hooks import on_worker_start
 from ._hooks import on_worker_starts
-from ._loglevel import getLoglevel
-from ._loglevel import setLoglevel
+from ._loglevel import get_log_level
+from ._loglevel import set_log_level
 from ._plugin import AdminPlugin
 
 
 __all__ = [
     "AdminPlugin",
-    "getLoglevel",
+    "get_log_level",
     "on_master_start",
     "on_master_starts",
     "on_worker_start",
     "on_worker_starts",
-    "setLoglevel",
+    "set_log_level",
 ]

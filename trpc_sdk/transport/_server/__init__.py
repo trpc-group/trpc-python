@@ -24,12 +24,12 @@ The package is split by responsibility:
   the tRPC-over-TCP / UDP listener, whose socket, ``create_server`` /
   acceptor serving and closing :class:`~trpc_sdk.http.HttpServerTransport`
   reuses
-- :mod:`~trpc_sdk.transport._server._user_transport` — :class:`UserProtocolTransport` and
+- :mod:`~trpc_sdk.transport._server._custom_transport` — :class:`UserProtocolTransport` and
   the :func:`register_protocol_handle` registry
 - :mod:`~trpc_sdk.transport._server._stream_connection` — :class:`TcpConnectionOption`
   for the Cython ``TCPConnection``; :class:`BaseConnection` /
-  :class:`DefaultIoConnection`, the Python connection used when
-  ``_msg_handler`` is overridden, with its :class:`ConnectionOption` and the
+  :class:`DefaultIoConnection`, the Python connection used after
+  ``set_io_connection``, with its :class:`ConnectionOption` and the
   ``MsgHandler`` / ``Connection*Handler`` callback types it holds; and
   :class:`ServerConnection`, the peer view ``_msg_handler`` reads
 - :mod:`~trpc_sdk.transport._server._datagram_connection` —
@@ -70,11 +70,11 @@ from ._stream_transport import TrpcServerStreamTransport
 from ._trpc_transport import TrpcServerTransport
 from ._trpc_transport import release_loop_resources
 from ._trpc_transport import ssl_context_from_opts
-from ._user_transport import ProtocolStarter
-from ._user_transport import UserProtocolTransport
-from ._user_transport import get_protocol_handle
-from ._user_transport import register_protocol_handle
-from ._user_transport import resolve_server_transport
+from ._custom_transport import ProtocolStarter
+from ._custom_transport import UserProtocolTransport
+from ._custom_transport import get_protocol_handle
+from ._custom_transport import register_protocol_handle
+from ._custom_transport import resolve_server_transport
 
 __all__ = [
     "AcceptTarget",

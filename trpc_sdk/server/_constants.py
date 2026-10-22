@@ -45,9 +45,9 @@ DEFAULT_READY_TIMEOUT_MS = 300000
 # Thresholds above which a configured count is reported as probably
 # misconfigured; the value is still used.
 
-# ``server.io_thread_num`` / ``handle_thread_num`` per CPU core.
+# ``global.processmodel.io_num`` / ``handle_num`` threads per CPU core (single_process).
 THREADS_PER_CPU_WARN = 4
-# ``server.worker_num`` per CPU (separate and peer mode).
+# ``global.processmodel.handle_num`` processes per CPU (multi_process).
 WORKERS_PER_CPU_WARN = 2
 # Number of ServiceOption entries; filled as len(server.service).
 DEFAULT_SERVICE_NUM = 1
@@ -59,6 +59,9 @@ DEFAULT_TASK_BATCH_SIZE = 1
 DEFAULT_TASK_QUEUE_SIZE = 1000
 # Consumer threads inside each task process.
 DEFAULT_TASK_CONSUMER_NUM = 1
+# Processes of a task that sets no ``task_num`` itself (YAML
+# ``global.processmodel.task_num``).
+DEFAULT_TASK_NUM = 1
 # If True, master restarts a crashed worker/task child.
 DEFAULT_REBOOT_CHILD = False
 # Graceful-shutdown wait on SIGTERM, in milliseconds.

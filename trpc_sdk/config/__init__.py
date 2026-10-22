@@ -55,6 +55,7 @@ from ._types import ClientServiceConfig
 from ._types import Config
 from ._types import GlobalConfig
 from ._types import MemoryInspection
+from ._types import ProcessModel
 from ._types import QueueCircuitBreakerConfig
 from ._types import Rpcz
 from ._types import SaveBindInfo
@@ -71,6 +72,7 @@ __all__ = [
     "Config",
     "GlobalConfig",
     "MemoryInspection",
+    "ProcessModel",
     "QueueCircuitBreakerConfig",
     "Rpcz",
     "SaveBindInfo",

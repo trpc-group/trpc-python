@@ -7,7 +7,7 @@
 """Service-registry lookup.
 
 :func:`get_registry` is the naming counterpart of :func:`get_selector`:
-``get_plugin(PluginType.NAMING_REGISTRY, name)``. :data:`defaultRegistry`
+``get_plugin(PluginType.NAMING_REGISTRY, name)``. :data:`default_registry`
 is the no-op default that :class:`~trpc_sdk.server._option.ServiceOption`
 starts with when YAML does not name a registry plugin.
 """
@@ -21,7 +21,7 @@ from trpc_sdk.abc import PluginType
 from trpc_sdk.plugin import get_plugin
 
 # No-op default used by ServiceOption until set_registry() loads a plugin.
-defaultRegistry: Optional[BaseServiceRegistry] = None
+default_registry: Optional[BaseServiceRegistry] = None
 
 
 def get_registry(name: str) -> Optional[BaseServiceRegistry]:

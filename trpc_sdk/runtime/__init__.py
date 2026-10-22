@@ -13,23 +13,24 @@ child the worker forks before it has an event loop, to run batch or inference
 handlers off an IPC pipe. There is no master process; the worker is not forked
 by anything.
 
-``server.mode`` picks what the worker does with a request. The public values
-are ``merge``, ``separate`` and ``peer``:
+``ServerOption.mode`` picks what the worker does with a request. It is
+translated from YAML ``global.processmodel`` and is one of ``merge``,
+``separate`` and ``peer``:
 
-- ``merge`` (default) — one process accepts and runs handlers. Its thread
-  model is configured by ``io_thread_num`` / ``handle_thread_num`` (named
-  after trpc-cpp): one event loop by default, ``io_thread_num`` serving
-  loops that each read and handle, or, with ``handle_thread_num > 0`` (the
-  separate thread model), I/O loops that hand each request to one of
+- ``merge`` (default, ``single_process``) — one process accepts and runs
+  handlers. Its thread model is ``io_thread_num`` / ``handle_thread_num``
+  (YAML ``io_num`` / ``handle_num``): one event loop by default,
+  ``io_thread_num`` serving loops that each read and handle, or, with
+  ``io_handle_type: separate``, I/O loops that hand each request to one of
   ``handle_thread_num`` handle loops. A request never crosses a process
   boundary. Threads share one GIL, so the parallelism is real only for I/O
   waits and C extensions that release it.
-- ``separate`` — the worker only does I/O and forwards frames to
+- ``separate`` (``multi_process`` with ``io_handle_type: separate``) — the worker only does I/O and forwards frames to
   ``worker_num`` rpc task processes, which is where handlers run. This is
   what a CPU-bound service needs; ``merge`` will not scale it across cores.
   Only tRPC-over-TCP addresses pass through the worker; UDP, HTTP and
   user-protocol addresses are bound by every rpc task with ``SO_REUSEPORT``.
-- ``peer`` — the worker forks ``worker_num - 1`` equal workers; every one,
+- ``peer`` (``multi_process`` with ``io_handle_type: merge``) — the worker forks ``worker_num - 1`` equal workers; every one,
   itself included, binds every address with ``SO_REUSEPORT`` and serves it
   like a single-loop ``merge`` worker. Nothing is forwarded between
   processes; the kernel spreads connections. Tasks are not supported.
@@ -92,6 +93,8 @@ from ._constants import MODE_MERGE
 from ._constants import MODE_PEER
 from ._constants import MODE_SEPARATE
 from ._constants import MODE_SPELLINGS
+from ._constants import PROCESS_MODEL_MULTI
+from ._constants import PROCESS_MODEL_SINGLE
 from ._constants import Network
 from ._merge_worker import MergeWorker
 from ._process import BaseTaskProcess
@@ -136,6 +139,8 @@ __all__ = [
     "MODE_PEER",
     "MODE_SEPARATE",
     "MODE_SPELLINGS",
+    "PROCESS_MODEL_MULTI",
+    "PROCESS_MODEL_SINGLE",
     "Network",
     # Lifecycle and extension hooks
     "HandlerThreadInfo",

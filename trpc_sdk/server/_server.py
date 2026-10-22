@@ -60,6 +60,7 @@ from . import _engine as _engine_module
 from ._engine import TrpcServerEngine
 from ._option import ServerOption
 from ._option import ServiceOption
+from ._option_resolver import apply_process_model
 from ._option_resolver import resolve_server_option
 from ._cython import ServiceAdapter
 from ._cython import create_service
@@ -274,10 +275,10 @@ def create_server(conf_path: str,
     each listen endpoint. Registration happens in :meth:`Server.serve`, once
     the worker listens.
 
-    An empty YAML ``server.mode`` is left untouched so :class:`ServerOption`'s
-    own default (``merge``) stands; a missing field must not become a
-    lookup failure in :func:`create_worker`. The thread- and process-model
-    fields are copied raw and then resolved by
+    The thread- and process-model fields come from YAML ``global.processmodel``
+    through :func:`~trpc_sdk.server._option_resolver.apply_process_model`; an
+    empty ``processmodel.mode`` leaves :class:`ServerOption`'s own defaults
+    (single-loop merge) in place. They are then resolved by
     :func:`~trpc_sdk.server._option_resolver.resolve_server_option`.
 
     Args:
@@ -299,15 +300,6 @@ def create_server(conf_path: str,
 
     if server_option is None:
         server_option = ServerOption()
-    # An absent ``server.mode`` parses as the empty string, which is not a mode
-    # name. Leaving the option untouched lets its own default stand, so a config
-    # that never mentions the field gets merge mode rather than a lookup failure.
-    if server_cfg.mode:
-        server_option.mode = server_cfg.mode
-    server_option.worker_num = server_cfg.worker_num
-    server_option.io_handle_type = server_cfg.io_handle_type
-    server_option.io_thread_num = server_cfg.io_thread_num
-    server_option.handle_thread_num = server_cfg.handle_thread_num
     server_option.handler_max_concurrency = server_cfg.handler_max_concurrency
     server_option.handler_queue_size = server_cfg.handler_queue_size
     server_option.tcp_reuse_port = server_cfg.tcp_reuse_port
@@ -319,6 +311,7 @@ def create_server(conf_path: str,
     server_option.task_consumer_num = server_cfg.task_consumer_num
     server_option.reboot_child = server_cfg.reboot_child
     server_option.close_wait_time = server_cfg.close_wait_time
+    apply_process_model(server_option, global_cfg.processmodel)
     resolve_server_option(server_option, server_cfg.service)
     server = Server(server_option)
 
