@@ -16,6 +16,9 @@ import json
 import logging
 import os
 import sys
+import threading
+import time
+import traceback
 from typing import Dict
 from typing import List
 from typing import Optional
@@ -71,9 +74,14 @@ def loguru_available() -> bool:
 class _BootstrapLoguruLogger(BaseLogger):
     """Small import-time logger used before the YAML sinks are registered.
 
-    It deliberately uses loguru's built-in stderr sink. The first configured
-    ``LoguruLogger`` removes that sink and replaces it with the managed sinks.
+    Until the ``default`` logger has configured sinks, records are written to
+    stderr in the framework's default console layout without going through
+    loguru, so loguru's built-in sink keeps its usual lifetime. Once those
+    sinks exist, records are routed to them like ``LoguruLogger("default")``
+    does, which keeps references cached before initialization working.
     """
+
+    _write_lock = threading.Lock()
 
     def __init__(self):
         """Initialize the bootstrap logger with the default severity."""
@@ -82,15 +90,60 @@ class _BootstrapLoguruLogger(BaseLogger):
         self.filename = DEFAULT_LOG_NAME
         self.min_level = logging.DEBUG
 
+    @classmethod
+    def _reset_write_lock(cls) -> None:
+        """Recreate the stderr lock in a forked child."""
+        cls._write_lock = threading.Lock()
+
     def _log(self, level_name: str, format_str: str, args, kwargs) -> None:
-        """Forward one bootstrap record to Loguru."""
+        """Write one bootstrap record to stderr or the configured default sinks."""
         if (not _LOGURU_AVAILABLE or LEVEL_NAME_TO_LOGGING_LEVEL[level_name] < self.min_level):
             return
-        logger = (_LOGURU_LOGGER.bind(**self._bound_fields) if self._bound_fields else _LOGURU_LOGGER)
-        logger.opt(depth=2, exception=kwargs.get("exc_info")).log(
+        extra = {**self._bound_fields, **(kwargs.get("extra") or {})}
+        trpc_file = extra.get("filename")
+        trpc_line = extra.get("lineno")
+        if not trpc_file or not trpc_line:
+            caller = sys._getframe(2)  # cSpell:ignore _getframe
+            trpc_file = trpc_file or os.path.basename(caller.f_code.co_filename)
+            trpc_line = trpc_line or caller.f_lineno
+        message = _LogRecordHelper.format_message(format_str, args)
+        exc_info = kwargs.get("exc_info")
+
+        if _LoguruSinkManager.bindings_for(DEFAULT_LOG_NAME):
+            bound = _LOGURU_LOGGER.bind(
+                **_LogRecordHelper.bound_fields(DEFAULT_LOG_NAME, self.filename, extra, trpc_file, trpc_line))
+            bound.opt(depth=2, exception=exc_info).log(LEVEL_NAME_TO_LOGURU_LEVEL_NAME[level_name], message)
+            return
+
+        line = "[%s][%s][%s:%s][%d][%s]%s%s\n" % (
+            time.strftime("%Y-%m-%d %H:%M:%S"),
             LEVEL_NAME_TO_LOGURU_LEVEL_NAME[level_name],
-            _LogRecordHelper.format_message(format_str, args),
+            trpc_file,
+            trpc_line,
+            os.getpid(),
+            message,
+            self._format_exception(exc_info),
+            _LogRecordHelper.context_suffix(extra.get(CTX_FIELDS_IN_EXTRA_KEY) or {}),
         )
+        with self._write_lock:
+            try:
+                sys.stderr.write(line)
+                sys.stderr.flush()
+            except (OSError, ValueError, AttributeError):
+                pass
+
+    @staticmethod
+    def _format_exception(exc_info) -> str:
+        """Render ``exc_info`` like the ``{exception}`` field of the console layout."""
+        if not exc_info:
+            return ""
+        if isinstance(exc_info, BaseException):
+            exc_info = (type(exc_info), exc_info, exc_info.__traceback__)
+        elif not isinstance(exc_info, tuple):
+            exc_info = sys.exc_info()
+        if exc_info[0] is None:
+            return ""
+        return "\n" + "".join(traceback.format_exception(*exc_info)).rstrip("\n")
 
     def trace(self, format_str: str, *args, **kwargs):
         """Log a trace-severity message."""
@@ -165,6 +218,23 @@ class _LogRecordHelper:
             key: value
             for key, value in record.__dict__.items()
             if key not in _LOG_RECORD_RESERVED and key not in _CONSUMED_EXTRA_KEYS
+        }
+
+    @staticmethod
+    def bound_fields(logger_name: str, record_name: str, extra: Dict, trpc_file: str, trpc_line: int) -> Dict:
+        """Return the ``extra`` fields a trpc logger binds to one loguru record."""
+        ctx_fields = extra.get(CTX_FIELDS_IN_EXTRA_KEY) or {}
+        return {
+            "trpc_logger": logger_name,
+            "trpc_file": trpc_file,
+            "trpc_line": trpc_line,
+            RECORD_NAME_KEY: record_name,
+            CTX_FIELDS_IN_EXTRA_KEY: ctx_fields,
+            CTX_SUFFIX_KEY: _LogRecordHelper.context_suffix(ctx_fields),
+            EXTRA_FIELDS_KEY: {
+                k: v
+                for k, v in extra.items() if k not in _CONSUMED_EXTRA_KEYS
+            },
         }
 
     @staticmethod
@@ -476,20 +546,8 @@ class LoguruLogger(BaseLogger):
             caller = sys._getframe(2)  # cSpell:ignore _getframe
             trpc_file = trpc_file or os.path.basename(caller.f_code.co_filename)
             trpc_line = trpc_line or caller.f_lineno
-        ctx_fields = extra.get(CTX_FIELDS_IN_EXTRA_KEY) or {}
         bound = _LOGURU_LOGGER.bind(
-            **{
-                "trpc_logger": self._name,
-                "trpc_file": trpc_file,
-                "trpc_line": trpc_line,
-                RECORD_NAME_KEY: self.filename,
-                CTX_FIELDS_IN_EXTRA_KEY: ctx_fields,
-                CTX_SUFFIX_KEY: _LogRecordHelper.context_suffix(ctx_fields),
-                EXTRA_FIELDS_KEY: {
-                    k: v
-                    for k, v in extra.items() if k not in _CONSUMED_EXTRA_KEYS
-                },
-            })
+            **_LogRecordHelper.bound_fields(self._name, self.filename, extra, trpc_file, trpc_line))
         bound.opt(depth=1, exception=kwargs.get("exc_info")).log(
             LEVEL_NAME_TO_LOGURU_LEVEL_NAME[level_name],
             _LogRecordHelper.format_message(format_str, args),
@@ -722,3 +780,5 @@ def create_loguru_logger(name: str, output_config_list: List[OutputConfig]) -> L
 
 
 atexit.register(_LoguruSinkManager.complete)
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_BootstrapLoguruLogger._reset_write_lock)
