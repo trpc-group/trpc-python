@@ -22,7 +22,7 @@ from typing import Tuple
 from ._cython import BaseClientProtocolParser
 from ._cython import BaseCodec
 from ._cython import BaseServerProtocolParser
-from ._cython import BaseService
+from ._cython import BaseServiceAdapter
 from ._cython import TrpcContext
 from ._plugin import BasePlugin
 
@@ -49,7 +49,7 @@ class BaseServerTransportOption:
     """Describe options used to start a server transport.
 
     Attributes:
-        service: Optional service implementation bound to the transport.
+        service_adapter: Optional service adapter bound to the transport.
         address: Bind endpoint as ``(host, port)``; for a UNIX socket it is
             ``(unix_path, 0)`` and only ``address[0]`` is used.
         port: Bind port number, kept in sync with ``address[1]`` by
@@ -69,13 +69,12 @@ class BaseServerTransportOption:
             :meth:`BaseServerTransport.listen`.
         reuse_port: Not read by the built-in transports: whether a socket
             gets ``SO_REUSEPORT`` depends on the process model, so it comes
-            from :attr:`~trpc_sdk.runtime.ThreadModel.tcp_reuse_port` /
-            ``udp_reuse_port``, which
-            the runtime installs after fork.
+            from :attr:`~trpc_sdk.runtime.ThreadModel.reuse_port`, which the
+            runtime installs after fork.
         is_stream: True when the listener carries tRPC streaming RPCs.
     """
 
-    service: Optional[BaseService] = None
+    service_adapter: Optional[BaseServiceAdapter] = None
     address: AddrType = ("", 0)
     port: int = 8000
     parser: Optional[BaseServerProtocolParser] = None
@@ -102,9 +101,9 @@ class BaseServerTransportOption:
         self.address = (address_info[0], int(address_info[1]))
         self.port = self.address[1]
 
-    def set_service(self, service: Optional[BaseService]) -> None:
-        """Bind the service instance this listener will dispatch into."""
-        self.service = service
+    def set_service_adapter(self, service_adapter: Optional[BaseServiceAdapter]) -> None:
+        """Bind the service adapter this listener will dispatch into."""
+        self.service_adapter = service_adapter
 
     def set_service_name(self, service_name: str) -> None:
         """Set the logical service name exposed by this listener."""
@@ -151,7 +150,7 @@ class BaseServerTransport(BasePlugin):
     """Define server transport lifecycle operations.
 
     The lifecycle is split around the fork. :meth:`bind` runs once in the
-    parent, from ``ServiceAdapter.run``, and only records the options; the engine
+    parent, from ``ServiceAdapter.init_transport``, and only records the options; the engine
     then checks the endpoint with :meth:`check_endpoint` and registers the
     transport so every forked worker inherits it. :meth:`listen` runs after
     fork, in each process that serves the endpoint. :meth:`stop` and

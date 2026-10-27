@@ -48,7 +48,7 @@ from typing import Tuple
 
 from trpc_sdk.log import logger
 
-
+# BaseReactor
 class Reactor(Protocol):
     """One event loop a server transport can serve on; owned by the runtime.
 
@@ -161,9 +161,9 @@ class ThreadModel:
         handler_pool: ``SharedHandlerPool`` of ``io_handle_type: separate``;
             the tRPC connections hand their requests to it. Filled once the
             handle loops run.
-        tcp_reuse_port: ``SO_REUSEPORT`` of stream listen sockets.
-        udp_reuse_port: ``SO_REUSEPORT`` of datagram sockets; forced on by the
-            transport when several reactors bind the same address.
+        reuse_port: ``SO_REUSEPORT`` of stream listen sockets and datagram
+            sockets. Datagram sockets get it anyway when several reactors bind
+            the same address.
         ready_timeout: Seconds a ``submit`` onto a reactor may take; ``None``
             waits forever.
         worker: The serving process, handed to user protocol starters.
@@ -176,8 +176,7 @@ class ThreadModel:
     io: ReactorGroup
     handle: ReactorGroup
     handler_pool: Optional[Any] = None
-    tcp_reuse_port: bool = False
-    udp_reuse_port: bool = False
+    reuse_port: bool = False
     ready_timeout: Optional[float] = None
     worker: Any = None
     view_factory: Optional[Callable[[Any, asyncio.AbstractEventLoop], Any]] = None
@@ -191,22 +190,19 @@ class ThreadModel:
                loop: asyncio.AbstractEventLoop,
                *,
                worker: Any = None,
-               tcp_reuse_port: bool = False,
-               udp_reuse_port: bool = False) -> ThreadModel:
+               reuse_port: bool = False) -> ThreadModel:
         """Serve everything on ``loop``, owned by the calling thread.
 
         Args:
             loop: The calling thread's loop, not running yet.
             worker: The serving process, if any.
-            tcp_reuse_port: ``SO_REUSEPORT`` of stream listen sockets.
-            udp_reuse_port: ``SO_REUSEPORT`` of datagram sockets.
+            reuse_port: ``SO_REUSEPORT`` of stream and datagram sockets.
         """
         reactor = InlineReactor(loop)
         return cls(acceptor=reactor,
                    io=ReactorGroup([reactor]),
                    handle=ReactorGroup([reactor]),
-                   tcp_reuse_port=tcp_reuse_port,
-                   udp_reuse_port=udp_reuse_port,
+                   reuse_port=reuse_port,
                    worker=worker)
 
     def worker_view(self, loop: asyncio.AbstractEventLoop) -> Any:

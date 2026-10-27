@@ -106,10 +106,10 @@ from .._constants import AddressKind
 from .._constants import CHILD_EXIT_GRACE_SECONDS
 from .._constants import SCHEDULE_TARGET_RPC_TASK
 from .._listeners import classify_address
-from .._types import ChildRecord
+from .._types import ChildProcessInfo
 from .._worker import BaseWorker
 from ._rpc_task import RpcTaskProcess
-from ._rpc_task import rpc_task_producer_name
+from ._rpc_task import rpc_task_sender_name
 
 
 @dataclass
@@ -212,7 +212,7 @@ class SeparateWorker(ChildReadiness, BaseWorker):
 
         Args:
             engine: Engine holding ``process_info`` (the per-endpoint tables
-                filled during ``ServiceAdapter.run``) and ``opts``.
+                filled during ``ServiceAdapter.init_transport``) and ``opts``.
             name: Process name shown in logs and process listings.
         """
         super().__init__(name, ProcessType.WORKER)
@@ -240,9 +240,9 @@ class SeparateWorker(ChildReadiness, BaseWorker):
         # be told apart from one meant for a previous owner of the same fd.
         self.session_id: int = 0
 
-        # Child records by role, in fork order.
-        self._task_records: List[ChildRecord] = []
-        self._rpc_records: List[ChildRecord] = []
+        # Children by role, in fork order.
+        self._task_children: List[ChildProcessInfo] = []
+        self._rpc_children: List[ChildProcessInfo] = []
 
     @property
     def exiting(self) -> bool:
@@ -279,19 +279,19 @@ class SeparateWorker(ChildReadiness, BaseWorker):
             logger.error("[separate worker] plugin initialization failed: %s", repr(err), exc_info=True)
             self._exit_now(1)
 
-    def _task_producer_names(self) -> List[str]:
-        """Allocate one infer-task producer identity per rpc task child.
+    def _task_senders(self) -> List[str]:
+        """Allocate one infer-task sender identity per rpc task child.
 
         The worker itself is deliberately absent: handlers run in the
         children, so the children are what talk to infer tasks.
         """
-        return [rpc_task_producer_name(index) for index in range(self.rpc_task_num)]
+        return [rpc_task_sender_name(index) for index in range(self.rpc_task_num)]
 
-    def _owned_producer_names(self) -> List[str]:
+    def _task_pipe_owners(self) -> List[str]:
         """Claim nothing: every infer-task pipe belongs to a child.
 
         Returning an empty list is what makes
-        :meth:`~trpc_sdk.runtime._worker.BaseWorker._close_foreign_pipes` drop all
+        :meth:`~trpc_sdk.runtime._worker.BaseWorker._close_unowned_task_pipes` drop all
         of them here after the forks.
         """
         return []
@@ -306,7 +306,8 @@ class SeparateWorker(ChildReadiness, BaseWorker):
         :meth:`~trpc_sdk.runtime._process._rpc_task.RpcTaskProcess._close_sibling_pipes`.
 
         The task mesh itself is still built before every fork, as it must be:
-        a peer-to-peer task pipe joins two children and neither can create it.
+        each of its pipes joins an rpc task and an infer task, two children,
+        so neither can create it.
 
         Addresses are validated before anything is forked, so a configuration
         error stops startup instead of crashing every rpc task.
@@ -314,15 +315,15 @@ class SeparateWorker(ChildReadiness, BaseWorker):
         self._validate_addresses()
         self._check_before_fork()
         super()._spawn_children()
-        self._task_records = list(self.children)
+        self._task_children = list(self.children)
 
         self._create_rpc_task_pipes()
         for index in range(self.rpc_task_num):
             self._spawn(f"rpc_task-{index}",
-                        partial(RpcTaskProcess, index, self.rpc_task_pipes, self._ready_flags, self.server_engine))
-        self._rpc_records = self.children[len(self._task_records):]
+                        partial(RpcTaskProcess, index, self.rpc_task_pipes, self._ready_flags, self.server_adapter))
+        self._rpc_children = self.children[len(self._task_children):]
 
-    def _before_fork_tasks(self) -> None:
+    def _prepare_tasks_before_fork(self) -> None:
         """Mark every task record as separate mode before it is forked."""
         for task_info in self.task_infos:
             task_info.separate_mode = True
@@ -373,7 +374,7 @@ class SeparateWorker(ChildReadiness, BaseWorker):
         """
         logger.info("[separate worker] SeparateWorker start_worker_process(), rpc tasks: %s", self.rpc_task_num)
         self._connect_rpc_tasks()
-        elapsed = self._wait_children_ready(self._task_records + self._rpc_records)
+        elapsed = self._wait_children_ready(self._task_children + self._rpc_children)
         logger.info("[separate worker] separate: %s rpc tasks bound in %.0f ms", self.rpc_task_num, elapsed * 1000)
         self._listen()
 
@@ -429,9 +430,9 @@ class SeparateWorker(ChildReadiness, BaseWorker):
         Args:
             pid: OS pid reported by ``waitpid``.
         """
-        record = self._children_by_pid.get(pid)
-        if record is not None and record in self._rpc_records:
-            self.mark_rpc_task_dead(self._rpc_records.index(record))
+        child = self._children_by_pid.get(pid)
+        if child is not None and child in self._rpc_children:
+            self.mark_rpc_task_dead(self._rpc_children.index(child))
         super()._replace_child(pid)
 
     def _close_client_connections(self) -> None:
@@ -456,11 +457,11 @@ class SeparateWorker(ChildReadiness, BaseWorker):
         this process.
         """
         self._stop_listening()
-        self._signal(self._rpc_records)
+        self._signal(self._rpc_children)
 
     def _on_drain_cut(self) -> None:
         """Send the rpc tasks another SIGUSR1, so they stop waiting out ``close_wait_time`` too."""
-        self._signal(self._rpc_records)
+        self._signal(self._rpc_children)
 
     async def _wait_handlers(self) -> None:
         """Wait for the rpc tasks to exit, SIGKILL them after ``CHILD_EXIT_GRACE_SECONDS``.
@@ -470,7 +471,7 @@ class SeparateWorker(ChildReadiness, BaseWorker):
         ``on_stop`` and listener cleanup. ``master_exit_callbacks`` run after
         this, so ``master_handle`` always runs after every ``worker_handle``.
         """
-        await self._wait_children(self._rpc_records, CHILD_EXIT_GRACE_SECONDS)
+        await self._wait_children(self._rpc_children, CHILD_EXIT_GRACE_SECONDS)
 
     def _on_drained(self) -> None:
         """Close the client connections; no user worker exit callbacks, handlers run in the rpc tasks.

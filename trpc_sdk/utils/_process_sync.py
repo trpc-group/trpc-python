@@ -13,8 +13,8 @@ never allocate a second copy.
 
 IO-worker startup barrier. After fork, the process that owns the listen
 sockets waits until task processes have called :func:`inc_io_wait_count`
-a configured number of times. ``Server.serve(io_wait_count=N)`` hands
-``N`` to the worker, whose ``_wait_until_tasks_ready`` polls
+a configured number of times. YAML ``server.io_wait_count: N`` reaches
+the worker through ``ServerOption.io_wait_count``, whose ``_wait_until_tasks_ready`` polls
 :func:`io_ready_reached` before that process builds an event loop.
 :func:`wait_notify_in_io` is the plain blocking form of the same wait.
 

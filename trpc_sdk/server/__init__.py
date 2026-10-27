@@ -10,21 +10,21 @@ The application parses the YAML config into a :class:`Server`, which builds
 one :class:`ServiceAdapter` per ``server.service[]`` entry and then hands the process
 over to :mod:`trpc_sdk.runtime`. Everything about processes and threads —
 the worker and its task children, ``merge`` / ``separate`` modes, serving
-loops, signals and heartbeats — lives in :mod:`trpc_sdk.runtime`.
+loops and signals — lives in :mod:`trpc_sdk.runtime`.
 
 The package is split by responsibility:
 
 - :mod:`~trpc_sdk.server._option` — ``ServerOption`` (process model) and
   ``ServiceOption`` (one listen endpoint), both filled from YAML
 - :mod:`~trpc_sdk.server._cython` — ``ServiceAdapter``: method registry, filter chain,
-  the per-request handler path, and :func:`create_service`
-- :mod:`~trpc_sdk.server._registry` — ``ServiceRegistrar`` /
+  the per-request handler path, and :func:`create_service_adapter`
+- :mod:`~trpc_sdk.server._registry` — ``ServiceRegister`` /
   ``start_service_registry``: per-service naming-service register /
   heartbeat / deregister on a ``RegistryThread`` with its own event loop
 - :mod:`~trpc_sdk.server._server` — ``Server``: config, service table,
   :func:`create_server`, and the startup order that forks children before
   creating a loop
-- :mod:`~trpc_sdk.server._engine` — ``TrpcServerEngine`` and its
+- :mod:`~trpc_sdk.server._adapter` — ``TrpcServerAdapter`` and its
   listen-endpoint tables
 - :mod:`~trpc_sdk.server._utils` — the bind-info file written by
   :func:`create_server`
@@ -42,16 +42,15 @@ from trpc_sdk.abc import ServiceDesc
 from trpc_sdk.abc import StreamDesc
 from trpc_sdk.abc import TrpcContext
 from trpc_sdk.runtime import Network
-from trpc_sdk.runtime import register_timeout_callback
 from trpc_sdk.transport import register_protocol_handle
 
-from ._engine import TrpcServerEngine
+from ._adapter import TrpcServerAdapter
 from ._option import ServerOption
 from ._option import ServiceOption
 from ._server import Server
 from ._server import create_server
 from ._cython import ServiceAdapter
-from ._cython import create_service
+from ._cython import create_service_adapter
 
 __all__ = [
     # Entry points
@@ -59,9 +58,9 @@ __all__ = [
     "ServerOption",
     "ServiceAdapter",
     "ServiceOption",
-    "TrpcServerEngine",
+    "TrpcServerAdapter",
     "create_server",
-    "create_service",
+    "create_service_adapter",
     # Handler-facing types, used by generated stub code
     "TrpcContext",
     "Method",
@@ -70,5 +69,4 @@ __all__ = [
     # Server configuration and extension hooks
     "Network",
     "register_protocol_handle",
-    "register_timeout_callback",
 ]

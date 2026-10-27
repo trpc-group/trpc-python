@@ -23,7 +23,7 @@ worker as callbacks: naming registration runs once the worker listens
 (``ready_callbacks``), :meth:`Server._shutdown_services` deregisters first
 on SIGTERM (``exit_callbacks``), and after the drain period
 (``post_drain_callbacks``) the server waits for that deregistration
-(:meth:`TrpcServerEngine.close`, at most 10 seconds per service). The user
+(:meth:`TrpcServerAdapter.close`, at most 10 seconds per service). The user
 server exit callback (``master_handle``) is a ``master_exit_callbacks`` entry:
 merge runs it right before the user worker exit callbacks, separate once every
 rpc task has run its own and exited.
@@ -42,28 +42,26 @@ from typing import Optional
 from trpc_sdk.abc import BaseServer
 from trpc_sdk.abc import ServiceDesc
 from trpc_sdk.common import execute_after_in_parent
-from trpc_sdk.common import execute_before
+from trpc_sdk.common import execute_before_in_parent
 from trpc_sdk.config import SocketType
 from trpc_sdk.config import TrpcConfig
 from trpc_sdk.filters import get_server_filter
 from trpc_sdk.log import logger
 from trpc_sdk.plugin import PluginInitError
-from trpc_sdk.runtime import create_worker
-from trpc_sdk.runtime import freeze_handler_thread_hooks
+from trpc_sdk.runtime import BaseWorker, create_worker
 from trpc_sdk.runtime import run_server_signal_handle
-from trpc_sdk.transport import DefaultServerTransport
-from trpc_sdk.transport import DefaultServerTransportOption
+from trpc_sdk.transport import BaseServerTransportOption
+from trpc_sdk.transport import TrpcServerTransport
 from trpc_sdk.transport import get_server_transport
 from trpc_sdk.utils import find_free_port
 from trpc_sdk.utils import get_async_lib
-from . import _engine as _engine_module
-from ._engine import TrpcServerEngine
+from ._adapter import TrpcServerAdapter
 from ._option import ServerOption
 from ._option import ServiceOption
 from ._option_resolver import apply_process_model
 from ._option_resolver import resolve_server_option
 from ._cython import ServiceAdapter
-from ._cython import create_service
+from ._cython import create_service_adapter
 from ._registry import start_service_registry
 from ._utils import save_bind_info
 
@@ -72,7 +70,7 @@ class Server(BaseServer):
     """The service table of a tRPC server, and its startup sequence.
 
     Holds the services, :class:`ServerOption`, and the
-    :class:`TrpcServerEngine` the listen endpoints are registered on. Does not
+    :class:`TrpcServerAdapter` the listen endpoints are registered on. Does not
     own listen sockets and does not run handlers: :meth:`serve` builds the
     worker for the configured mode and that worker takes the process over.
     """
@@ -84,37 +82,37 @@ class Server(BaseServer):
             server_option: Process-model options, including ``mode``,
                 ``reboot_child`` and ``close_wait_time``.
         """
-        # ``service_name -> ServiceAdapter``, filled by ``create_server`` / ``add_service``.
-        self.services: Dict[str, ServiceAdapter] = {}
+        # ``service_name -> ServiceAdapter``, filled by ``create_server`` / ``add_service_adapter``.
+        self.service_adapters: Dict[str, ServiceAdapter] = {}
         self.opt: ServerOption = server_option
         # True once shutdown started; read by business code that wants to know.
         self.close: bool = False
-        # Listen endpoints registered by ``ServiceAdapter.run``, and the options the
+        # Listen endpoints registered by ``ServiceAdapter.init_transport``, and the options the
         # worker reads. It no longer forks anything.
-        self.server_engine: TrpcServerEngine = TrpcServerEngine(self.opt)
+        self.server_adapter: TrpcServerAdapter = TrpcServerAdapter(self.opt)
         # What this process becomes in ``serve()``; ``None`` until then.
-        self.worker: Optional[Any] = None
+        self.worker: Optional[BaseWorker] = None
 
-    def add_service(self, service_name: str, service: ServiceAdapter) -> None:
+    def add_service_adapter(self, service_name: str, service_adapter: ServiceAdapter) -> None:
         """Attach one listen endpoint's ``ServiceAdapter`` to this server.
 
         Args:
-            service_name: Key in ``self.services``, usually the YAML
+            service_name: Key in ``self.service_adapters``, usually the YAML
                 ``server.service[].name``.
-            service: Service adapter that will ``run()`` during ``serve``.
+            service_adapter: Service adapter that will ``init_transport()`` during ``serve``.
         """
-        self.services[service_name] = service
+        self.service_adapters[service_name] = service_adapter
 
     def get_service(self, service_name: str) -> Optional[ServiceAdapter]:
         """Return the service registered under ``service_name``, if any.
 
         Args:
-            service_name: Key previously passed to ``add_service``.
+            service_name: Key previously passed to ``add_service_adapter``.
 
         Returns:
             The ``ServiceAdapter``, or ``None`` if the name is unknown.
         """
-        return self.services.get(service_name, None)
+        return self.service_adapters.get(service_name, None)
 
     def register(self, service_desc: ServiceDesc, fix_rpc_name: bool = False) -> None:
         """Register the same ``ServiceDesc`` on every attached service.
@@ -137,17 +135,17 @@ class Server(BaseServer):
             if not _is_coroutine_handler(desc.impl_func):
                 logger.warning("handler %s is not 'async def'; it runs as a task on a serving loop "
                                "and the framework keeps no thread pool for blocking handlers", desc.name)
-        for _, service in self.services.items():
-            service.register(service_desc, fix_rpc_name)
+        for service_adapter in self.service_adapters.values():
+            service_adapter.register(service_desc, fix_rpc_name)
 
-    def serve(self, io_wait_count: Optional[int] = None) -> None:
+    def serve(self) -> None:
         """Register listen endpoints, fork the children, then become the worker.
 
         This process does not supervise a tree of servers; it *is* the server.
         The steps are:
 
         1. Force the ``fork`` start method for the whole process.
-        2. ``ServiceAdapter.run`` registers each listen endpoint on the engine. No
+        2. ``ServiceAdapter.init_transport`` registers each listen endpoint on the engine. No
            socket is bound yet, only recorded.
         3. Look up ``server.mode`` and build the worker for it, and hand it
            the lifecycle work that belongs to the server: naming
@@ -166,10 +164,9 @@ class Server(BaseServer):
         already in this process, which is why step 1 forces ``fork``: they
         are started with the global start method.
 
-        Args:
-            io_wait_count: If set, the worker waits for this many
-                ``inc_io_wait_count`` notifications from its tasks before it
-                binds any address.
+        ``ServerOption.io_wait_count`` (YAML ``server.io_wait_count``) makes
+        the worker wait for that many ``inc_io_wait_count`` notifications
+        from its tasks before it binds any address.
         """
         try:
             multiprocessing.set_start_method("fork", force=True)
@@ -177,29 +174,21 @@ class Server(BaseServer):
             logger.error("multiprocessing set_start_method occurs err: %s; current start_method: %s", str(err),
                          multiprocessing.get_start_method(True))
 
-        for s in self.services.values():
-            s.run()
-
-        freeze_handler_thread_hooks()
-        self.worker = create_worker(self.opt.mode, self.server_engine)
-        if io_wait_count:
-            self.worker.io_wait_count = io_wait_count
+        for service_adapter in self.service_adapters.values():
+            service_adapter.init_transport()
+        self.worker = create_worker(self.opt.mode, self.server_adapter)
+        self.worker.io_wait_count = self.opt.io_wait_count
         self.worker.ready_callbacks.append(partial(start_service_registry, self))
         self.worker.exit_callbacks.append(self._shutdown_services)
-        self.worker.post_drain_callbacks.append(self.server_engine.close)
+        self.worker.post_drain_callbacks.append(self.server_adapter.close)
         self.worker.master_exit_callbacks.append(run_server_signal_handle)
         self.worker.drain_seconds = max(0, self.opt.close_wait_time) / 1000.0
-        # Children reach ``worker_process_list`` through this reference, which
-        # they can only inherit if it is set before the first fork.
-        _engine_module.GLOBAL_SERVER_ENGINE = self.server_engine
 
         if TrpcConfig.server_config().admin:
             # Registers AdminPlugin and its after-fork-in-parent hook.
             import trpc_sdk.admin  # noqa: F401  pylint: disable=import-outside-toplevel,unused-import
 
-        # Plugins quiesce anything that must not be duplicated into a child,
-        # and repair it once every child exists.
-        execute_before()
+        execute_before_in_parent()
         self.worker._spawn_children()  # pylint: disable=protected-access
         execute_after_in_parent()
 
@@ -217,8 +206,8 @@ class Server(BaseServer):
         worker exit callbacks.
         """
         self.close = True
-        for service in self.services.values():
-            service.close()
+        for service_adapter in self.service_adapters.values():
+            service_adapter.close()
 
 
 def _is_coroutine_handler(func: Any) -> bool:
@@ -311,6 +300,7 @@ def create_server(conf_path: str,
     server_option.task_consumer_num = server_cfg.task_consumer_num
     server_option.reboot_child = server_cfg.reboot_child
     server_option.close_wait_time = server_cfg.close_wait_time
+    server_option.io_wait_count = server_cfg.io_wait_count
     apply_process_model(server_option, global_cfg.processmodel)
     resolve_server_option(server_option, server_cfg.service)
     server = Server(server_option)
@@ -320,18 +310,15 @@ def create_server(conf_path: str,
             continue
         service_option = ServiceOption()
         service_option.app = server
-        service_option.set_queue_wait_timeout(server_cfg.queue_wait_timeout)
-        service_option.set_queue_wait_policy(server_cfg.queue_wait_policy)
+        service_option.queue_wait_timeout = server_cfg.queue_wait_timeout
+        service_option.queue_wait_policy = server_cfg.queue_wait_policy
 
-        if len(service_conf.registry) > 0:
+        if service_conf.registry:
             service_option.set_registry(service_conf.registry)
 
-        trans = get_server_transport(service_conf.protocol)
-        if trans is None:
-            trans = DefaultServerTransport()
-        service_option.transport = trans
+        service_option.transport = get_server_transport(service_conf.protocol) or TrpcServerTransport()
 
-        trans_option = DefaultServerTransportOption()
+        trans_option = BaseServerTransportOption()
         trans_option.set_worker_num(server_option.worker_num)
         trans_option.set_mode(server_option.mode)
         trans_option.set_tls_key(service_conf.tls_key)
@@ -339,20 +326,19 @@ def create_server(conf_path: str,
         trans_option.set_target(service_conf.target)
         service_option.transport_option = trans_option
 
-        service_option.set_namespace(global_cfg.namespace)
-        service_option.set_env_name(global_cfg.env_name)
+        service_option.namespace = global_cfg.namespace
+        service_option.env_name = global_cfg.env_name
         service_option.set_service_name(service_conf.name)
         service_option.set_protocol(service_conf.protocol)
         service_option.set_network(service_conf.network)
         service_option.set_timeout(int(service_conf.timeout))
-        service_option.set_disable_request_timeout(service_conf.disable_request_timeout)
-        service_option.set_enable_stream_filter(service_conf.enable_stream_filter)
-        service_option.set_server_tls(service_conf.tls_cert, service_conf.tls_key)
-        service_option.set_registry_delay(server_cfg.registry_delay)
-        service_option.set_registry_option(server_cfg.registry_option)
-        service_option.set_max_window_size(int(service_conf.max_window_size))
-        if global_cfg.enable_set == "Y":
-            service_option.set_setname(global_cfg.full_set_name)
+        service_option.disable_request_timeout = service_conf.disable_request_timeout
+        service_option.enable_stream_filter = service_conf.enable_stream_filter
+        service_option.registry_delay = server_cfg.registry_delay
+        service_option.registry_option = server_cfg.registry_option
+        service_option.max_window_size = int(service_conf.max_window_size)
+        if global_cfg.enable_set:
+            service_option.set_name = global_cfg.full_set_name
         service_option.set_socket_type(service_conf.socket_type)
         if service_conf.socket_type == SocketType.UNIX:
             service_option.set_address((service_conf.unix_path, 0))
@@ -366,8 +352,10 @@ def create_server(conf_path: str,
 
         _add_server_filters(service_option, server_cfg.filters)
         _add_server_filters(service_option, service_conf.filters)
+        # A filter listed at both levels keeps its position in the server list.
+        service_option.filters.remove_duplicates()
 
-        service = create_service(service_conf.name, service_option)
-        server.add_service(service_conf.name, service)
+        service_adapter = create_service_adapter(service_conf.name, service_option)
+        server.add_service_adapter(service_conf.name, service_adapter)
 
     return server

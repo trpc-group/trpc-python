@@ -15,7 +15,7 @@ base; the public Python contract is re-exported from ``trpc_sdk.abc._server``.
 from ._context cimport TrpcContext
 
 
-cdef class BaseService:
+cdef class BaseServiceAdapter:
     """Define request handling and service registration."""
 
     async def handle(self, TrpcContext context, bytes request):
@@ -28,7 +28,7 @@ cdef class BaseService:
         Returns:
             Encoded outbound response bytes.
         """
-        raise NotImplementedError("BaseService.handle is not implemented")
+        raise NotImplementedError("BaseServiceAdapter.handle is not implemented")
 
     cpdef void register(self, object service_desc, bint fix_rpc_name):
         """Register unary and streaming handlers for a service.
@@ -37,8 +37,8 @@ cdef class BaseService:
             service_desc: Service methods and streams to publish.
             fix_rpc_name: Whether RPC names should be normalized on register.
         """
-        raise NotImplementedError("BaseService.register is not implemented")
+        raise NotImplementedError("BaseServiceAdapter.register is not implemented")
 
-    cpdef void run(self):
-        """Start serving registered methods."""
-        raise NotImplementedError("BaseService.run is not implemented")
+    cpdef void init_transport(self):
+        """Resolve and bind this service's transport."""
+        raise NotImplementedError("BaseServiceAdapter.init_transport is not implemented")

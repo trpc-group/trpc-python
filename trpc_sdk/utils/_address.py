@@ -141,6 +141,24 @@ def make_addr_info_to_bytes(transport: asyncio.Transport) -> bytes:
     return local_addr.encode() + b"|" + peer_addr.encode()
 
 
+def _addr_from_ipc(text: str) -> AddrType:
+    """Parse one side of a ``local|peer`` blob.
+
+    Inet addresses are ``host:port``, including bracketed IPv6. A Unix
+    ``sockname`` is a filesystem path with no colon and is stored as
+    ``(path, 0)``.
+
+    Args:
+        text: One address from :func:`make_addr_info_to_bytes`.
+
+    Returns:
+        ``(host, port)``. A path's port is ``0``.
+    """
+    if ":" not in text:
+        return (text, 0)
+    return get_address_from_str(text)
+
+
 def parse_addr_info_from_bytes(addr_info: bytes) -> Tuple[AddrType, AddrType]:
     """Decode the ``local|peer`` blob produced by :func:`make_addr_info_to_bytes`.
 
@@ -151,4 +169,4 @@ def parse_addr_info_from_bytes(addr_info: bytes) -> Tuple[AddrType, AddrType]:
         ``(local, peer)`` as :data:`AddrType` tuples.
     """
     local_addr, peer_addr = addr_info.split(b"|")
-    return (get_address_from_str(local_addr.decode()), get_address_from_str(peer_addr.decode()))
+    return (_addr_from_ipc(local_addr.decode()), _addr_from_ipc(peer_addr.decode()))

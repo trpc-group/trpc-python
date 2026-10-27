@@ -14,7 +14,7 @@ breaking, the filter chain, and encoding the response. Errors are written
 into the response frame rather than raised to the transport.
 
 Naming-service registration lives in :mod:`trpc_sdk.server._registry`;
-a :class:`ServiceAdapter` only holds the ``registrar`` it is given there.
+a :class:`ServiceAdapter` only holds the ``service_register`` it is given there.
 """
 
 import threading
@@ -23,7 +23,7 @@ from typing import Callable
 
 from trpc_sdk._inner import trpc_pb2
 from trpc_sdk.abc import StreamDesc
-from trpc_sdk.abc._cython cimport BaseService
+from trpc_sdk.abc._cython cimport BaseServiceAdapter
 from trpc_sdk.abc._cython cimport TrpcContext
 from trpc_sdk.abc._cython cimport TrpcMessage
 from trpc_sdk.abc._cython cimport get_message
@@ -40,8 +40,8 @@ from trpc_sdk.log import logger
 from trpc_sdk.serialization import deserialize
 from trpc_sdk.serialization import serialize
 from trpc_sdk.telemetry import report_attr
-from trpc_sdk.transport import DefaultServerTransport
-from trpc_sdk.transport import DefaultServerTransportOption
+from trpc_sdk.transport import BaseServerTransportOption
+from trpc_sdk.transport import TrpcServerTransport
 from trpc_sdk.transport import resolve_server_transport
 from trpc_sdk.utils import now_ms
 from trpc_sdk.utils cimport current_time_ms
@@ -53,7 +53,7 @@ from .._types import QueueWindow
 cdef int _POLICY_SLIDING_WINDOW = int(QueueWaitPolicy.SLIDING_WINDOW)
 
 
-cdef class ServiceAdapter(BaseService):
+cdef class ServiceAdapter(BaseServiceAdapter):
     """Per-service handler path after the transport has a complete request frame.
 
     One instance per YAML ``server.service[]`` entry. ``opt`` is the
@@ -70,9 +70,9 @@ cdef class ServiceAdapter(BaseService):
         self.unary_handlers = {}
         # Stream RPC name -> ``StreamDesc``. Empty until :meth:`register`.
         self.stream_handlers = {}
-        # ``ServiceRegistrar`` set by ``start_service_registry`` only when
+        # ``ServiceRegister`` set by ``start_service_registry`` only when
         # ``opt.registry`` is configured; stopped by :meth:`close`.
-        self.registrar = None
+        self.service_register = None
         # YAML ``server.queue_cb``; overrides the default interval / ratio /
         # threshold of every ``QueueWindow`` this service builds.
         self._queue_cb_cfg = TrpcConfig.server_config().queue_cb
@@ -467,7 +467,7 @@ cdef class ServiceAdapter(BaseService):
             for stream_handler in service_desc.streams:
                 self.stream_handlers[stream_handler.name] = stream_handler
 
-    cpdef void run(self):
+    cpdef void init_transport(self):
         """Resolve and bind this service's transport, then register it on the engine.
 
         Runs before fork, from ``Server.serve``. The transport is resolved
@@ -479,10 +479,10 @@ cdef class ServiceAdapter(BaseService):
         """
         self.opt.transport = resolve_server_transport(self.opt.protocol, self.opt.transport)
         self.opt.transport.bind(self.opt.transport_option)
-        self.opt.app.server_engine.add_listen_endpoint(self.opt.transport)
+        self.opt.app.server_adapter.add_listen_endpoint(self.opt.transport)
 
     cpdef object close(self):
-        """Stop naming-service registration if this service has a registrar.
+        """Stop naming-service registration if this service has a service_register.
 
         Always returns ``None``. The registry thread still deregisters and
         then releases ``registry_semaphore`` so the engine can wait.
@@ -490,13 +490,12 @@ cdef class ServiceAdapter(BaseService):
         Returns:
             ``None``.
         """
-        if self.registrar is not None:
-            self.registrar.stop()
+        if self.service_register is not None:
+            self.service_register.stop()
 
         return None
 
-
-def create_service(service_name: str, service_option: ServiceOption) -> ServiceAdapter:
+def create_service_adapter(service_name: str, service_option: ServiceOption) -> ServiceAdapter:
     """Build one :class:`ServiceAdapter` for a listen endpoint.
 
     Fills in the default transport and transport option when the caller
@@ -510,24 +509,23 @@ def create_service(service_name: str, service_option: ServiceOption) -> ServiceA
             is constructed when this is ``None``.
 
     Returns:
-        A ``ServiceAdapter`` ready to be passed to :meth:`Server.add_service`.
+        A ``ServiceAdapter`` ready to be passed to :meth:`Server.add_service_adapter`.
     """
     if service_option is None:
         service_option = ServiceOption()
 
     if service_option.transport is None:
-        service_option.transport = DefaultServerTransport
+        service_option.transport = TrpcServerTransport()
 
     if service_option.transport_option is None:
-        service_option.transport_option = DefaultServerTransportOption()
+        service_option.transport_option = BaseServerTransportOption()
 
-    service = ServiceAdapter(service_option=service_option)
+    service_adapter = ServiceAdapter(service_option=service_option)
 
-    if not service.opt.handler_set:
-        service.opt.set_handler(service.handle)
+    if not service_adapter.opt.handler_set:
+        service_adapter.opt.set_handler(service_adapter.handle)
 
-    service.opt.set_service_name(service_name)
+    service_adapter.opt.set_service_name(service_name)
+    service_option.transport_option.set_service_adapter(service_adapter)
 
-    service_option.transport_option.set_service(service)
-
-    return service
+    return service_adapter

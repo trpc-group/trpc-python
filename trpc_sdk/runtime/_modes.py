@@ -14,7 +14,7 @@ values.
 :func:`register_worker_mode` is not part of the public API; tests and private
 forks use it to swap a class in the table.
 
-:meth:`Server.serve` calls :func:`create_worker` after every ``ServiceAdapter.run``
+:meth:`Server.serve` calls :func:`create_worker` after every ``ServiceAdapter.init_transport``
 has registered its listen endpoints on the engine, and before any child is
 forked. The returned worker then owns this process: it forks the children and
 only afterwards creates the event loop. Unknown mode names fail here rather
@@ -106,9 +106,9 @@ def create_worker(mode: str, engine: Any) -> BaseWorker:
 
     Args:
         mode: The ``server.mode`` value, as written in the config.
-        engine: :class:`TrpcServerEngine` holding the listen-endpoint tables
-            filled during ``ServiceAdapter.run``, handed to the worker constructor.
-            Typed as ``Any`` to avoid a cycle with :mod:`._engine`.
+        engine: :class:`TrpcServerAdapter` holding the listen-endpoint tables
+            filled during ``ServiceAdapter.init_transport``, handed to the worker constructor.
+            Typed as ``Any`` to avoid a cycle with :mod:`._adapter`.
 
     Returns:
         A worker that has not forked anything and has no event loop yet.

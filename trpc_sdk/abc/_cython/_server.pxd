@@ -12,6 +12,6 @@
 # is a Python dataclass, not a Cython type identifier.
 
 
-cdef class BaseService:
+cdef class BaseServiceAdapter:
     cpdef void register(self, object service_desc, bint fix_rpc_name)
-    cpdef void run(self)
+    cpdef void init_transport(self)

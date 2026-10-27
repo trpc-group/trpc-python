@@ -61,7 +61,7 @@ from .._constants import PEER_STARTUP_WARNING
 from .._listeners import classify_address
 from .._merge_worker import MergeWorker
 from .._threadmodel import HandlerThreadInfo
-from .._types import ChildRecord
+from .._types import ChildProcessInfo
 
 
 class PeerWorker(MergeWorker):
@@ -78,9 +78,6 @@ class PeerWorker(MergeWorker):
             started.
         worker_num: Number of peer workers, worker-0 included.
     """
-
-    # Every worker binds the same UDP address on its one loop.
-    _single_loop_udp_reuse_port = True
 
     def __init__(self, engine, index: int, worker_num: int, name: str) -> None:
         """Copy the endpoint tables out of the engine; nothing is bound yet.
@@ -99,7 +96,8 @@ class PeerWorker(MergeWorker):
         # Timers run as ``worker:<index>``.
         self.worker_id = index
         self.worker_num: int = worker_num
-        # Whatever ``server.tcp_reuse_port`` says: every worker binds every address.
+        # Whatever ``server.tcp_reuse_port`` says: every worker binds every
+        # address, TCP and UDP alike.
         self.tcp_reuse_port = True
 
     @staticmethod
@@ -176,9 +174,8 @@ class PeerWorkerProcess(PeerWorker, Process):
         """
         try:
             self._install_thread_model()
-            self._bind_task_mesh()
-            self._close_foreign_pipes()
-            self._attach_heartbeats()
+            self._restore_task_mesh_after_fork()
+            self._close_unowned_task_pipes()
             self._connect_tasks()
             if self._early_exit:
                 return
@@ -228,7 +225,7 @@ class PeerMainWorker(ChildReadiness, PeerWorker):
         configured = int(engine.opts.worker_num)
         super().__init__(engine, 0, configured if configured > 0 else default_worker_num(), name)
         # worker-1 .. worker-(N-1), in fork order.
-        self._worker_records: List[ChildRecord] = []
+        self._worker_children: List[ChildProcessInfo] = []
 
     def _spawn_children(self) -> None:
         """Validate, create the ready flags, then fork worker-1 .. worker-(N-1).
@@ -241,8 +238,8 @@ class PeerMainWorker(ChildReadiness, PeerWorker):
         self._create_ready_flags(self.worker_num)
         for index in range(1, self.worker_num):
             self._spawn(f"worker:{index}",
-                        partial(PeerWorkerProcess, self.server_engine, index, self.worker_num, self._ready_flags))
-        self._worker_records = list(self.children)
+                        partial(PeerWorkerProcess, self.server_adapter, index, self.worker_num, self._ready_flags))
+        self._worker_children = list(self.children)
 
     def _check_before_fork(self) -> None:
         """Fail on what peer mode cannot serve, warn about what behaves differently; nothing is forked yet.
@@ -299,7 +296,7 @@ class PeerMainWorker(ChildReadiness, PeerWorker):
         """
         super().start_worker_process()
         self._ready_flags[0] = 1
-        elapsed = self._wait_children_ready(self._worker_records)
+        elapsed = self._wait_children_ready(self._worker_children)
         logger.info("[%s] peer: %s workers bound in %.0f ms", self.name, self.worker_num, elapsed * 1000)
 
     def _stop_accepting(self) -> None:
@@ -309,11 +306,11 @@ class PeerMainWorker(ChildReadiness, PeerWorker):
         ``close_wait_time`` alongside this process.
         """
         super()._stop_accepting()
-        self._signal(self._worker_records)
+        self._signal(self._worker_children)
 
     def _on_drain_cut(self) -> None:
         """Send the other workers another SIGUSR1, so they stop waiting out ``close_wait_time`` too."""
-        self._signal(self._worker_records)
+        self._signal(self._worker_children)
 
     async def _wait_handlers(self) -> None:
         """Wait for the other workers to exit, SIGKILL them after ``CHILD_EXIT_GRACE_SECONDS``.
@@ -324,7 +321,7 @@ class PeerMainWorker(ChildReadiness, PeerWorker):
         runs after every other worker's ``worker_handle``; this worker's own
         runs after ``master_handle``, as in merge mode.
         """
-        await self._wait_children(self._worker_records, CHILD_EXIT_GRACE_SECONDS)
+        await self._wait_children(self._worker_children, CHILD_EXIT_GRACE_SECONDS)
 
     def _on_graceful_exit(self) -> None:
         """Release this worker's listeners, then report the exit so a supervisor can tell it from a crash."""

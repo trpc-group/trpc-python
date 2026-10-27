@@ -58,8 +58,7 @@ mode. Subpackages hold the pieces those workers are built from:
 - :mod:`~trpc_sdk.runtime._listeners` — address classification and the aiohttp
   application every mode serves HTTP with. Sockets and serving are the
   transports' (:mod:`trpc_sdk.transport._server`)
-- :mod:`~trpc_sdk.runtime._common` — heartbeat pipes, SIGTERM callbacks,
-  process metadata and the exit template every mode shares (trpc-cpp
+- :mod:`~trpc_sdk.runtime._common` — SIGTERM callbacks, process metadata and the exit template every mode shares (trpc-cpp
   ``runtime/common``)
 - :mod:`~trpc_sdk.runtime._process` — task children and the pre-fork
   socketpair mesh (trpc-cpp ``runtime/task``), plus the multi-process
@@ -70,15 +69,14 @@ mode. Subpackages hold the pieces those workers are built from:
   records used across processes. The socketpair primitives those records
   hold live in :mod:`trpc_sdk.utils.ipc`
 
-The service layer (``Server``, ``ServiceAdapter`` and the server engine) lives in
+The service layer (``Server``, ``ServiceAdapter`` and the server adapter) lives in
 :mod:`trpc_sdk.server`, which depends on this package and never the other way
 round.
 
 Application code reaches this package for lifecycle hooks such as
 :func:`register_handler_thread_hook` and :func:`set_signal_handle`; serving
 itself starts from :func:`trpc_sdk.server.create_server`, which also
-re-exports :func:`register_protocol_handle` and
-:func:`register_timeout_callback`.
+re-exports :func:`register_protocol_handle`.
 """
 
 from trpc_sdk.protocol import ConnWriter
@@ -86,7 +84,6 @@ from trpc_sdk.transport import register_protocol_handle
 
 from ._common import ProcessInfo
 from ._common import ProcessTaskInfo
-from ._common import register_timeout_callback
 from ._common import set_signal_handle
 from ._constants import IO_HANDLE_TYPE_MERGE
 from ._constants import IO_HANDLE_TYPE_SEPARATE
@@ -118,7 +115,6 @@ from ._threadmodel import use_thread_model
 from ._types import TaskInfo
 from ._types import WorkerInfo
 from ._worker import BaseWorker
-from ._worker import current_worker
 
 # Called by Server.serve. Absent from __all__ on purpose: application code
 # uses set_signal_handle, register_handler_thread_hook, and create_server.
@@ -135,7 +131,6 @@ __all__ = [
     "ProcessTaskInfo",
     "RpcTaskProcess",
     "SeparateWorker",
-    "current_worker",
     "TaskInfo",
     "TaskProcess",
     "WorkerInfo",
@@ -165,7 +160,6 @@ __all__ = [
     "current_handler_thread",
     "register_handler_thread_hook",
     "register_protocol_handle",
-    "register_timeout_callback",
     "set_signal_handle",
     # Runtime feature switches
     "use_c_task",

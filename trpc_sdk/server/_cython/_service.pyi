@@ -9,19 +9,19 @@ from typing import Callable
 from typing import Dict
 from typing import Optional
 
-from trpc_sdk.abc import BaseService
+from trpc_sdk.abc import BaseServiceAdapter
 from .._option import ServiceOption
-from .._registry import ServiceRegistrar
+from .._registry import ServiceRegister
 from .._types import QueueWindow
 
 
-class ServiceAdapter(BaseService):
+class ServiceAdapter(BaseServiceAdapter):
     """Per-service handler path after the transport has a complete request frame."""
 
     opt: ServiceOption
     unary_handlers: Dict[str, Any]  # rpc name -> trpc_sdk.abc.Method
     stream_handlers: Dict[str, Any]  # rpc name -> trpc_sdk.abc.StreamDesc
-    registrar: Optional[ServiceRegistrar]
+    service_register: Optional[ServiceRegister]
 
     @property
     def queue_window(self) -> QueueWindow:
@@ -60,7 +60,7 @@ class ServiceAdapter(BaseService):
         """
         ...
 
-    def run(self) -> None:
+    def init_transport(self) -> None:
         """Resolve and bind this service's transport, then register it on the engine (pre-fork).
 
         A protocol with a starter registered through
@@ -69,11 +69,11 @@ class ServiceAdapter(BaseService):
         ...
 
     def close(self) -> None:
-        """Stop ``registrar`` if one was started; always returns None."""
+        """Stop ``service_register`` if one was started; always returns None."""
         ...
 
 
-def create_service(service_name: str, service_option: ServiceOption) -> ServiceAdapter:
+def create_service_adapter(service_name: str, service_option: ServiceOption) -> ServiceAdapter:
     """Build one :class:`ServiceAdapter` for a listen endpoint.
 
     Fills in the default transport and transport option when the caller

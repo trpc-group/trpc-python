@@ -7,10 +7,10 @@
 """Background naming-service registration for one :class:`~trpc_sdk.server._cython._service.ServiceAdapter`.
 
 :func:`start_service_registry` gives every service with a configured
-registry a :class:`ServiceRegistrar`, which runs register / heartbeat /
+registry a :class:`ServiceRegister`, which runs register / heartbeat /
 deregister on a :class:`RegistryThread` with its own event loop, not the
 worker's. The engine's ``registry_semaphore`` (initialised to
-``service_num``) is the handshake that lets ``TrpcServerEngine.close``
+``service_num``) is the handshake that lets ``TrpcServerAdapter.close``
 wait for deregister before SIGTERM.
 """
 
@@ -45,9 +45,9 @@ class RegistryThread(threading.Thread):
     heartbeat / re-register is driven, not a one-shot register.
 
     ``deregister_done`` is the engine's ``registry_semaphore``, initialised
-    to ``service_num`` (see ``TrpcServerEngine.__init__``). :meth:`run`
+    to ``service_num`` (see ``TrpcServerAdapter.__init__``). :meth:`run`
     ``acquire``s one permit at start and ``release``s it after
-    ``deregister_coro_func`` finishes, so ``TrpcServerEngine.close`` can
+    ``deregister_coro_func`` finishes, so ``TrpcServerAdapter.close`` can
     ``acquire(True, 10)`` once per configured service before SIGTERM.
     A service with no registry never starts this thread and therefore
     never consumes a permit.
@@ -116,7 +116,7 @@ class RegistryThread(threading.Thread):
         self.deregister_done.release()
 
 
-class ServiceRegistrar:
+class ServiceRegister:
     """Naming-service registration for one service endpoint.
 
     Only built for a service whose ``opt.registry`` is set, so a service
@@ -146,7 +146,7 @@ class ServiceRegistrar:
             warm_up()
         self.thread = RegistryThread(self._register,
                                      self._deregister,
-                                     self.opt.app.server_engine.registry_semaphore)
+                                     self.opt.app.server_adapter.registry_semaphore)
         self.thread.start()
 
     def stop(self) -> None:
@@ -185,12 +185,12 @@ def start_service_registry(server: Any) -> None:
     the bind.
 
     Args:
-        server: The :class:`~trpc_sdk.server.Server` whose ``services``
+        server: The :class:`~trpc_sdk.server.Server` whose ``service_adapters``
             map is walked. Untyped to avoid importing ``_server``.
     """
-    for service in server.services.values():
+    for service in server.service_adapters.values():
         if service.opt.registry is None:
             continue
-        registrar = ServiceRegistrar(service.opt)
-        registrar.start()
-        service.registrar = registrar
+        service_register = ServiceRegister(service.opt)
+        service_register.start()
+        service.service_register = service_register

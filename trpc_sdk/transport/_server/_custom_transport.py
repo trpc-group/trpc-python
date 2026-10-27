@@ -8,7 +8,7 @@
 
 A service whose ``protocol`` has a starter registered with
 :func:`register_protocol_handle` is not served by the built-in tcp/udp/http
-transports. ``ServiceAdapter.run`` swaps its transport for a
+transports. ``ServiceAdapter.init_transport`` swaps its transport for a
 :class:`UserProtocolTransport` (see :func:`resolve_server_transport`), whose
 ``listen`` calls the starter once in every process that serves the endpoint;
 the starter binds its own socket.
@@ -104,7 +104,6 @@ class UserProtocolTransport(BaseServerTransport):
         Raises:
             ValueError: The thread model names no worker: the starter needs one.
         """
-        # Local import: trpc_sdk.runtime imports this package at module level.
         from trpc_sdk.runtime import current_thread_model
 
         model = current_thread_model()

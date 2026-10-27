@@ -13,7 +13,7 @@ from ._compatible import TransportSocket
 from ._maxprocs import get_max_procs
 from ._process_hook import register_at_fork
 from ._process_hook import register_child_callback
-from ._process_hook import execute_before
+from ._process_hook import execute_before_in_parent
 from ._process_hook import execute_after_in_parent
 from ._process_hook import execute_after_in_child
 from ._process_hook import execute_before_loop_run_in_child
@@ -36,7 +36,7 @@ __all__ = [
     "get_max_procs",
     "register_at_fork",
     "register_child_callback",
-    "execute_before",
+    "execute_before_in_parent",
     "execute_after_in_parent",
     "execute_after_in_child",
     "execute_before_loop_run_in_child",

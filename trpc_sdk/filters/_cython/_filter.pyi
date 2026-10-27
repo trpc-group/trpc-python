@@ -29,6 +29,8 @@ class FilterChain:
 
     def set_filter(self, filters: List[BaseFilter]) -> None: ...
 
+    def remove_duplicates(self) -> None: ...
+
     async def handle(
         self,
         ctx: TrpcContext,

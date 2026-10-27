@@ -12,19 +12,19 @@
 # Decode/encode, timeout merge, queue-wait, and the filter chain live in the
 # .pyx; this header is the C-level layout and API.
 
-from trpc_sdk.abc._cython cimport BaseService
+from trpc_sdk.abc._cython cimport BaseServiceAdapter
 from trpc_sdk.abc._cython cimport TrpcContext
 from trpc_sdk.filters._cython._filter cimport FilterChain
 
 
-cdef class ServiceAdapter(BaseService):
+cdef class ServiceAdapter(BaseServiceAdapter):
     # Per-service handler path after the transport has a complete request frame.
     # One instance per YAML ``server.service[]`` entry.
     cdef:
         cdef public object opt              # ServiceOption; filled by ``create_server``.
         cdef public dict unary_handlers     # RPC name -> ``Method``; empty until ``register``.
         cdef public dict stream_handlers    # RPC name -> ``StreamDesc``; empty until ``register``.
-        cdef public object registrar        # ``ServiceRegistrar``, or None when ``opt.registry`` is unset.
+        cdef public object service_register # ``ServiceRegister``, or None when ``opt.registry`` is unset.
         cdef object _queue_cb_cfg           # YAML ``server.queue_cb``, or None for the defaults.
         cdef object _queue_windows          # threading.local holding each thread's ``QueueWindow``.
 
@@ -47,5 +47,5 @@ cdef class ServiceAdapter(BaseService):
 
     # Public lifecycle.
     cpdef void register(self, object service_desc, bint fix_rpc_name)
-    cpdef void run(self)
+    cpdef void init_transport(self)
     cpdef object close(self)

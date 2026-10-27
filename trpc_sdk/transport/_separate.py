@@ -38,7 +38,6 @@ import traceback
 from typing import Any
 from typing import List
 from typing import Optional
-from typing import Tuple
 
 from trpc_sdk._inner import trpc_pb2
 from trpc_sdk.abc import STREAM_WRITER_CTX_KEY
@@ -71,6 +70,26 @@ from ._scheduler import select_rpc_task
 from ._types import ClientConnectionInfo
 from ._types import SchedulerParams
 from ._server import IpcStreamWriter
+
+
+def _peer_host(peername: Any) -> Optional[str]:
+    """Return the host or Unix path from an asyncio ``peername``.
+
+    An inet peer is ``(host, port)``. A Unix client that bound its own path
+    reports that path. A Unix client that did not bind reports ``""``, which
+    is not a host.
+
+    Args:
+        peername: ``transport.get_extra_info("peername")``.
+
+    Returns:
+        The host or path, or ``None`` when the peer has none.
+    """
+    if isinstance(peername, str):
+        return peername or None
+    if isinstance(peername, (tuple, list)) and peername:
+        return peername[0]
+    return None
 
 
 class SeparateClientConnection(asyncio.Protocol):
@@ -164,8 +183,10 @@ class SeparateClientConnection(asyncio.Protocol):
             sock: Any = self.aio_connection.get_extra_info("socket")
             self.fd: int = sock.fileno()
             self.addr_info: bytes = make_addr_info_to_bytes(self.aio_connection)
-            peername: Optional[Tuple] = self.aio_connection.get_extra_info("peername")
-            self.remote_ip: Optional[str] = peername[0] if peername is not None else None
+            # Unix clients that do not bind a path report "" here. Indexing
+            # that string closes the connection before any frame is served.
+            peername: Any = self.aio_connection.get_extra_info("peername")
+            self.remote_ip: Optional[str] = _peer_host(peername)
             self.app.session_id = (self.app.session_id + 1) & 0xffffffff
             self.session_id: int = self.app.session_id
             self.app.client_connections[self.fd] = ClientConnectionInfo(self.session_id, self.aio_connection)

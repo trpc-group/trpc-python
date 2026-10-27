@@ -110,10 +110,10 @@ def _execute_process_hook(hook_type: ProcessHookType):
         hook()
 
 
-def execute_before():
-    """Execute process before in parent
-    
-    Must call before process in parent
+def execute_before_in_parent():
+    """Run the before-fork hooks in the parent.
+
+    Must be called in the parent right before the children are forked.
     """
     _execute_process_hook(ProcessHookType.BEFORE_FORK_IN_PARENT)
 

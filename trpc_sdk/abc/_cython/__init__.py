@@ -20,13 +20,13 @@ from ._message_builder import create_frame_head  # pyright: ignore[reportMissing
 from ._message_builder import create_message  # pyright: ignore[reportMissingModuleSource]
 from ._message_builder import get_message  # pyright: ignore[reportMissingModuleSource]
 from ._message_builder import parse_frame_head  # pyright: ignore[reportMissingModuleSource]
-from ._server import BaseService  # pyright: ignore[reportMissingModuleSource]
+from ._server import BaseServiceAdapter  # pyright: ignore[reportMissingModuleSource]
 
 __all__ = [
     "BaseClientProtocolParser",
     "BaseCodec",
     "BaseServerProtocolParser",
-    "BaseService",
+    "BaseServiceAdapter",
     "RpczData",
     "TrpcContext",
     "TrpcFrameHead",

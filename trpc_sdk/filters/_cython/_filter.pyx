@@ -77,6 +77,17 @@ cdef class FilterChain:
         """
         self.filters = filters
 
+    def remove_duplicates(self):
+        """Drop repeated filter instances, keeping each one at its first position."""
+        cdef list kept = []
+        cdef set seen = set()
+        cdef object filter_obj
+        for filter_obj in self.filters:
+            if id(filter_obj) not in seen:
+                seen.add(id(filter_obj))
+                kept.append(filter_obj)
+        self.filters = kept
+
     async def _call_handle(
         self,
         coro: Coroutine[[TrpcContext, Any], Any],

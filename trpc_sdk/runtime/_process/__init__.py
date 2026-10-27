@@ -42,7 +42,7 @@ from ._task_process import TaskProcess
 from ._task_process import build_task_infos
 from ._task_process import set_task_ipc_mesh
 from ._task_process import task_ipc_mesh
-from ._task_process import worker_producer_name
+from ._task_process import worker_sender_name
 
 __all__ = [
     "BaseTaskProcess",
@@ -54,5 +54,5 @@ __all__ = [
     "build_task_infos",
     "set_task_ipc_mesh",
     "task_ipc_mesh",
-    "worker_producer_name",
+    "worker_sender_name",
 ]

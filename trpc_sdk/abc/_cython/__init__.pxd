@@ -15,7 +15,7 @@
 
 from trpc_sdk.abc._cython._codec cimport _Codec
 from trpc_sdk.abc._cython._codec cimport BaseServerProtocolParser
-from trpc_sdk.abc._cython._server cimport BaseService
+from trpc_sdk.abc._cython._server cimport BaseServiceAdapter
 from trpc_sdk.abc._cython._context cimport RpczData
 from trpc_sdk.abc._cython._context cimport TrpcContext
 from trpc_sdk.abc._cython._message cimport TrpcFrameHead
