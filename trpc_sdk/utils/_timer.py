@@ -128,7 +128,8 @@ class TimerTask:
 # child by :meth:`TimerExecutor.add_register_task`.
 _TIMER_TASKS_INFO: List[TimerTaskInfo] = []
 
-
+# TODO：支持一个线程级别的 Timer，也可以写一个进程的Timer
+# TODO：逻辑复用， 用 threadid 和 process id 区分进程线程
 class TimerExecutor:
     """Runs registered timer tasks on one process's event loop.
 

@@ -6,9 +6,9 @@
 
 """Options and listen-endpoint tables the worker reads at startup.
 
-:class:`TrpcServerEngine` lives in the same process as the worker. It does
+:class:`TrpcServerAdapter` lives in the same process as the worker. It does
 not listen for clients, does not run service handlers, and does not fork
-anyone. ``ServiceAdapter.run`` appends listen endpoints onto ``process_info``;
+anyone. ``ServiceAdapter.init_transport`` appends listen endpoints onto ``process_info``;
 :meth:`~trpc_sdk.server.Server.serve` then builds the worker for ``server.mode``
 and that worker binds the addresses itself.
 
@@ -16,17 +16,12 @@ The master / dispatcher / executor topology that used to live here is gone.
 What remains is the data the worker still needs:
 
 * ``opts`` and ``process_info`` — process-model options and the per-endpoint
-  tables filled during ``ServiceAdapter.run``.
+  tables filled during ``ServiceAdapter.init_transport``.
 * ``registry_semaphore`` — one permit per service, so shutdown can wait for
   naming-service logout.
 * ``worker_process_list`` and :meth:`send_msg_to_worker` — the inter-worker
-  message pipe. ``merge`` and ``separate`` leave the list empty;
-  :func:`trpc_sdk.server.send_msg_worker` still works for a custom mode that
-  fills it.
-
-``GLOBAL_SERVER_ENGINE`` is set before any fork so children inherit the
-reference. That is why :func:`trpc_sdk.server.send_msg_worker` can reach
-``worker_process_list`` from inside a worker.
+  message pipe. ``merge`` and ``separate`` leave the list empty; only a
+  custom mode that fills it can send.
 """
 
 from __future__ import annotations
@@ -40,7 +35,7 @@ from typing import Optional
 
 from trpc_sdk.abc import BaseServerTransport
 from trpc_sdk.abc import BaseServerTransportOption
-from trpc_sdk.abc import BaseTrpcServerEngine
+from trpc_sdk.abc import BaseTrpcServerAdapter
 from trpc_sdk.abc import ProcessType
 from trpc_sdk.log import logger
 from trpc_sdk.runtime import ProcessInfo
@@ -50,10 +45,7 @@ if TYPE_CHECKING:
     from trpc_sdk.server import ServerOption
 
 
-GLOBAL_SERVER_ENGINE: Optional[TrpcServerEngine] = None
-
-
-class TrpcServerEngine(BaseTrpcServerEngine):
+class TrpcServerAdapter(BaseTrpcServerAdapter):
     """Options and listen-endpoint tables for the tRPC server process.
 
     Holds ``process_info`` and ``opts`` for the worker to read. Does not own
@@ -75,7 +67,7 @@ class TrpcServerEngine(BaseTrpcServerEngine):
         self.worker_process_list: List[WorkerInfo] = []
 
         # Listen/handler metadata appended by ``add_listen_endpoint`` during
-        # ``ServiceAdapter.run``, before the worker binds anything.
+        # ``ServiceAdapter.init_transport``, before the worker binds anything.
         self.process_info: ProcessInfo = ProcessInfo()
 
         # Each service ``close()`` releases once after deregister.
@@ -83,7 +75,7 @@ class TrpcServerEngine(BaseTrpcServerEngine):
         self.registry_semaphore: threading.Semaphore = threading.Semaphore(self.opts.service_num)
 
     def set_process_info(self, process_type: ProcessType) -> None:
-        """Satisfy :class:`BaseTrpcServerEngine`; merge workers ignore this.
+        """Satisfy :class:`BaseTrpcServerAdapter`; merge workers ignore this.
 
         The master / dispatcher / executor topology that used to stamp a
         process role here is gone. The method stays so the ABC can be
@@ -104,49 +96,42 @@ class TrpcServerEngine(BaseTrpcServerEngine):
     def add_listen_endpoint(self, transport: BaseServerTransport) -> None:
         """Check one listen endpoint, then append it to ``process_info``.
 
-        Called from ``ServiceAdapter.run`` right after ``transport.bind(opts)``, so
-        still before fork. Nothing is bound here; the ``process_info`` lists
-        stay index-aligned so the worker can copy them later. Which addresses
+        Called from ``ServiceAdapter.init_transport`` right after ``transport.bind(opts)``, so
+        still before fork. Nothing is bound here; the opts / transport lists
+        stay index-aligned so the worker can read them later. Which addresses
         are valid is the transport's business: :meth:`~BaseServerTransport.check_endpoint`
         logs the reason, and the process exits with status 1.
 
         Args:
             transport: A transport whose :meth:`~BaseServerTransport.bind`
-                already ran. Every field the ``process_info`` tables need is
-                read off ``transport.opts``.
+                already ran. Every per-endpoint field (address, handler,
+                parser, timeout, ...) lives on ``transport.opts``; the
+                transport itself is kept as well because the opts do not
+                point back to it.
         """
         opts: BaseServerTransportOption = transport.opts
         if not transport.check_endpoint():
-            logger.error("[server engine] cannot serve %s (network %s)", opts.address, opts.network)
+            logger.error("[server adapter] cannot serve %s (network %s)", opts.address, opts.network)
             sys.exit(1)
 
-        self.process_info.add_address(opts.address)
-        self.process_info.add_socket_type(opts.socket_type)
-        self.process_info.add_handler(opts.rpc_handler)
-        self.process_info.add_parser(opts.parser)
-        self.process_info.add_timeout(opts.idle_timeout)
-        self.process_info.add_network(opts.network)
-        self.process_info.add_service(opts.service)
         self.process_info.add_transport_opt(opts)
-        self.process_info.add_target(opts.target)
         self.process_info.add_transport(transport)
 
     def send_msg_to_worker(self, from_id: int, to: int, data: str) -> Optional[bool]:
-        """Send an inter-worker message, or broadcast when ``to`` is negative.
+        """Send an inter-worker message.
 
         Only available when this process actually forked workers, which means
         ``worker_process_list`` is filled: the message pipes it holds are the
         transport. ``merge`` and ``separate`` leave the list empty, so there is
         no peer to address and the call is dropped with a warning.
 
-        Out-of-range unicast (``to`` past the last worker) returns ``False``
-        and sends nothing. A successful unicast or broadcast returns
+        A negative or out-of-range ``to`` returns ``False`` and sends
+        nothing; broadcast is not supported. A successful send returns
         ``None``.
 
         Args:
             from_id: Sending worker id, written into the frame.
-            to: Target worker id, or a negative value to broadcast to every
-                worker except the sender.
+            to: Target worker id, in ``[0, len(worker_process_list))``.
             data: Payload; encoded as UTF-8 on the write end of the
                 target's message pipe.
 
@@ -155,39 +140,14 @@ class TrpcServerEngine(BaseTrpcServerEngine):
             of range; otherwise ``None``.
         """
         if not self.worker_process_list:
-            logger.warning("[server engine] drop worker msg from %s to %s: mode %s forks no worker process", from_id,
+            logger.warning("[server adapter] drop worker msg from %s to %s: mode %s forks no worker process", from_id,
                            to, self.opts.mode if self.opts else "")
             return False
 
-        if len(self.worker_process_list) <= to:
+        if to < 0 or len(self.worker_process_list) <= to:
             return False
 
-        if to < 0:
-            self.broadcast_msg_to_worker(from_id, data)
-        else:
-            self.worker_process_list[to].send_msg(from_id, data)
-
-    def broadcast_msg_to_worker(self, from_id: int, data: str) -> None:
-        """Write ``data`` to every worker except the sender.
-
-        Like :meth:`send_msg_to_worker`, this needs a mode that forked workers;
-        an empty ``worker_process_list`` is reported rather than silently
-        iterating over nothing.
-
-        Args:
-            from_id: Sending worker id; that worker is skipped.
-            data: Payload forwarded through each remaining worker's
-                message pipe.
-        """
-        if not self.worker_process_list:
-            logger.warning("[server engine] drop worker broadcast from %s: mode %s forks no worker process", from_id,
-                           self.opts.mode if self.opts else "")
-            return
-
-        for worker in self.worker_process_list:
-            if worker.id == from_id:
-                continue
-            worker.send_msg(from_id, data)
+        self.worker_process_list[to].send_msg(from_id, data)
 
     def close(self) -> None:
         """Wait for service deregister.

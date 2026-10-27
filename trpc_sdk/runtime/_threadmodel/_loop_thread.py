@@ -268,6 +268,7 @@ class LoopThread:
             TimeoutError: ``func`` did not finish in time; it was cancelled.
             Exception: Whatever ``func`` raised, re-raised in the caller.
         """
+        # TODO:Thread.id 看下是否能避免跨线程
         future = self._schedule(func)
         try:
             return future.result(timeout)
@@ -317,6 +318,7 @@ class LoopThread:
             ssl_context: Server-side ``SSLContext`` for a TLS endpoint, or
                 ``None`` for plaintext.
         """
+        # TODO: _loop ， Thread_id 支持 通过 Thread_id 方式来实现跨
         try:
             self.loop.call_soon_threadsafe(connect_accepted, self.loop, sock, protocol_factory, ssl_context,
                                            self.name)

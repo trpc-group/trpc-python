@@ -60,17 +60,15 @@ from trpc_sdk.utils import PipeConnection
 from trpc_sdk.utils import TimerExecutor
 from trpc_sdk.utils import get_async_lib
 from trpc_sdk.utils import io_ready_reached
-from ._common import ExitTemplate
-from ._common import close_heartbeat_pipes
-from ._common import init_healthy_checker
-from ._common import start_heartbeat_monitor
+from ._common import WorkerExit
 from ._common._shutdown import _run_callbacks
+from ._constants import CHILD_EXIT_POLL_INTERVAL
 from ._constants import IO_WAIT_POLL_INTERVAL
 from ._threadmodel import MainLoopReactor
 from ._threadmodel import ReactorGroup
 from ._threadmodel import ThreadModel
 from ._threadmodel import install_thread_model
-from ._types import ChildRecord
+from ._types import ChildProcessInfo
 from ._types import TaskInfo
 from ._types import WorkerInfo
 
@@ -79,27 +77,13 @@ if TYPE_CHECKING:
     from ._process import TaskIpcMesh
 
 
-_current_worker: Optional[WorkerInfo] = None
-
-
 def _raise_system_exit(signum: int, frame: Any) -> None:
     """SIGTERM handler used before the event loop exists; raises ``SystemExit``."""
     del signum, frame
     raise SystemExit(0)
 
 
-def current_worker() -> Optional[WorkerInfo]:
-    """Return the :class:`WorkerInfo` of this process, or ``None`` outside a forked worker."""
-    return _current_worker
-
-
-def set_current_worker(worker: Optional[WorkerInfo]) -> None:
-    """Mark this process as running for ``worker``; called right after fork."""
-    global _current_worker  # pylint: disable=global-statement
-    _current_worker = worker
-
-
-class BaseWorker(ExitTemplate):
+class BaseWorker(WorkerExit):
     """The process that serves requests: startup sequence plus worker runtime.
 
     Not a ``Process`` subclass: a worker is normally the process it runs in.
@@ -115,8 +99,8 @@ class BaseWorker(ExitTemplate):
       without a ``WorkerInfo`` (tasks, dispatcher).
     * :meth:`_init_plugins` — infrastructure roles narrow it to non-business
       plugins.
-    * :meth:`_before_event_loop`, :meth:`_start_timers`.
-    * The :class:`~trpc_sdk.runtime._common.ExitTemplate` hooks, and
+    * :meth:`_execute_before_event_loop`, :meth:`_start_timers`.
+    * The :class:`~trpc_sdk.runtime._common.WorkerExit` hooks, and
       ``_controlled`` for a child its parent stops with SIGUSR1.
     * :meth:`_on_graceful_exit`, :meth:`_on_unhandled_exception`.
 
@@ -148,7 +132,7 @@ class BaseWorker(ExitTemplate):
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self.block: bool = True
 
-        self.server_engine = None
+        self.server_adapter = None
         # Master-side record this worker was forked from; ``None`` for a
         # worker that is the current process.
         self.worker: Optional[WorkerInfo] = None
@@ -163,8 +147,8 @@ class BaseWorker(ExitTemplate):
         # Every socketpair in the tree; used after the last fork to close the
         # ends this process must not hold.
         self.task_ipc_mesh: Optional[TaskIpcMesh] = None
-        self.children: List[ChildRecord] = []
-        self._children_by_pid: Dict[int, ChildRecord] = {}
+        self.children: List[ChildProcessInfo] = []
+        self._children_by_pid: Dict[int, ChildProcessInfo] = {}
         # Always False, whatever ``server.reboot_child`` says.
         self.reboot_child: bool = False
         # Run when shutdown starts (naming deregistration).
@@ -211,27 +195,30 @@ class BaseWorker(ExitTemplate):
         self.thread_model: Optional[ThreadModel] = None
         self.enable_memory_inspection: bool = False
 
-    def _bind_process_info(self, engine) -> None:
-        """Reference the per-endpoint tables the master filled in ``ServiceAdapter.run``.
+    def _bind_process_info(self, server_adpter) -> None:
+        """Load the per-endpoint tables from what ``ServiceAdapter.init_transport`` registered.
 
-        Entry ``i`` of every list describes the same listen endpoint. They are
-        referenced, not copied, because they are read-only after fork.
+        Entry ``i`` of every list describes the same listen endpoint.
+        ``tran_opts`` and ``transports`` are referenced, not copied; the other
+        lists are built from ``tran_opts`` once here, which is safe because
+        every endpoint is registered before the worker is created and the
+        options are read-only after fork.
 
         Args:
-            engine: Engine holding ``process_info`` and the task list.
+            server_adpter: server_adpter holding ``process_info`` and the task list.
         """
-        self.server_engine = engine
-        process_info = engine.process_info
+        self.server_adapter = server_adpter
+        process_info = server_adpter.process_info
 
-        self.addresses = process_info.addresses
-        self.socket_types = process_info.socket_types
-        self.networks = process_info.networks
-        self.parsers = process_info.parsers
-        self.handlers = process_info.handlers
-        self.timeouts = process_info.timeouts
-        self.services = process_info.services
         self.tran_opts = process_info.transport_opt
         self.transports = process_info.transports
+        self.addresses = [opt.address for opt in self.tran_opts]
+        self.socket_types = [opt.socket_type for opt in self.tran_opts]
+        self.networks = [opt.network for opt in self.tran_opts]
+        self.parsers = [opt.parser for opt in self.tran_opts]
+        self.handlers = [opt.rpc_handler for opt in self.tran_opts]
+        self.timeouts = [opt.idle_timeout for opt in self.tran_opts]
+        self.services = [opt.service_adapter for opt in self.tran_opts]
 
         self.enable_memory_inspection = TrpcConfig.server_config().memory_inspection.enabled
         if self.enable_memory_inspection:
@@ -243,37 +230,49 @@ class BaseWorker(ExitTemplate):
                 TrpcConfig.server_config().memory_inspection.line_limit,
             )
 
-    def _task_producer_names(self) -> List[str]:
-        """Producer names to create task pipes for, including children's.
+    def _task_senders(self) -> List[str]:
+        """Senders the task mesh creates pipes for, children's included.
 
-        Each producer needs its own socketpair per task. A merge worker returns
+        A sender is anyone that sends work to a task, and each one gets its
+        own socketpair per task. A merge worker returns
         one per serving loop; a separate worker one per rpc task process.
 
         Returns:
             Names in response routing order; a superset of
-            :meth:`_owned_producer_names`.
+            :meth:`_task_pipe_owners`.
         """
-        # Local imports from ``._process`` throughout this class: that
-        # package's init imports this module, so it can only be loaded once
-        # this module has finished loading.
-        from ._process import worker_producer_name
-        return [worker_producer_name(0)]
+        from ._process import worker_sender_name
+        # baseworker only have one sender to create pipe
+        # subclass will override this method and 
+        return [worker_sender_name(0)]
 
-    def _owned_producer_names(self) -> List[str]:
-        """Producer names whose pipe ends stay open in this process.
-
-        Everything else :meth:`_task_producer_names` allocated belongs to a
-        child and is closed here right after the forks.
+    def _task_pipe_owners(self) -> List[str]:
+        """Names whose pipe ends stay open in this process.
         """
-        return self._task_producer_names()
+        return self._task_senders()
+
+    def _store_task_mesh(self, mesh: TaskIpcMesh) -> None:
+        """Take the task tables and this process's sender ends from ``mesh``.
+
+        Only the first owned sender's ends land in ``task_pipe_conn``; a
+        worker with several serving loops fetches the others per loop.
+
+        Args:
+            mesh: The mesh built before the first fork.
+        """
+        self.task_ipc_mesh = mesh
+        self.task_infos = mesh.task_infos
+        self.task_name = [task_info.name for task_info in mesh.task_infos]
+        owned = self._task_pipe_owners()
+        self.task_pipe_conn = mesh.sender_pipes(owned[0]) if owned else [None] * len(mesh.task_infos)
 
     def _spawn_children(self) -> None:
-        """Create every IPC pipe in the tree, then fork the children.
+        """Create every task pipe, then fork the tasks.
 
         Must run before :meth:`run` creates the loop: an epoll/kqueue
-        descriptor does not survive fork. All pipes are created before the
-        first fork because a task-to-task pair joins two children, so neither
-        of them can create it.
+        descriptor does not survive fork. With no task registered no mesh is
+        built and no task is forked; subclasses still fork their own children
+        afterwards (rpc tasks in separate mode, ``worker:1..N-1`` in peer mode).
         """
         from ._process import TaskIpcMesh
         from ._process import build_task_infos
@@ -282,25 +281,19 @@ class BaseWorker(ExitTemplate):
         self._warn_unsupported_reboot_child()
         self._warn_threads_before_fork()
 
-        self.task_infos = build_task_infos(getattr(self.server_engine.opts, "task_num", 1))
-        self.task_name = [task_info.name for task_info in self.task_infos]
-
-        # Heartbeat pipes must exist before fork so the children inherit them.
-        init_healthy_checker(self.task_infos)
-
-        mesh = TaskIpcMesh(self.task_infos, self._task_producer_names())
+        task_infos = build_task_infos(getattr(self.server_adapter.opts, "task_num", 1))
+        if not task_infos:
+            return
+        mesh = TaskIpcMesh(task_infos, self._task_senders())
         # Published before fork so children inherit it.
         set_task_ipc_mesh(mesh)
-        self.task_ipc_mesh = mesh
+        self._store_task_mesh(mesh)
 
-        owned = self._owned_producer_names()
-        self.task_pipe_conn = mesh.producer_pipes(owned[0]) if owned else [None] * len(self.task_infos)
-
-        self._before_fork_tasks()
+        self._prepare_tasks_before_fork()
         for task_info in self.task_infos:
-            self._spawn(task_info.name, partial(task_info.handle, task_info, self.server_engine))
+            self._spawn(task_info.name, partial(task_info.handle, task_info, self.server_adapter))
 
-    def _before_fork_tasks(self) -> None:
+    def _prepare_tasks_before_fork(self) -> None:
         """Hook: adjust task records before the tasks are forked. No-op here."""
 
     def _warn_unsupported_reboot_child(self) -> None:
@@ -333,18 +326,18 @@ class BaseWorker(ExitTemplate):
             factory: Builds a fresh process object; a ``Process`` cannot be
                 started twice.
         """
-        record = ChildRecord(name=name, factory=factory)
-        self.children.append(record)
-        self._start_child(record)
+        child = ChildProcessInfo(name=name, factory=factory)
+        self.children.append(child)
+        self._start_child(child)
 
-    def _start_child(self, record: ChildRecord) -> None:
-        """Build and start the process for one child record."""
-        record.process = record.factory()
-        record.process.start()
-        self._children_by_pid[record.process.pid] = record
-        logger.info("[%s] forked child %s as pid %s", self.name, record.name, record.process.pid)
+    def _start_child(self, child: ChildProcessInfo) -> None:
+        """Build and start the process for one child."""
+        child.process = child.factory()
+        child.process.start()
+        self._children_by_pid[child.process.pid] = child
+        logger.info("[%s] forked child %s as pid %s", self.name, child.name, child.process.pid)
 
-    def _bind_task_mesh(self) -> None:
+    def _restore_task_mesh_after_fork(self) -> None:
         """Adopt the pre-fork task mesh in a forked child.
 
         A child inherits the module-level mesh but not the attributes its
@@ -360,31 +353,33 @@ class BaseWorker(ExitTemplate):
         mesh = task_ipc_mesh()
         if mesh is None:
             return
+        self._store_task_mesh(mesh)
 
-        self.task_ipc_mesh = mesh
-        self.task_infos = mesh.task_infos
-        self.task_name = [task_info.name for task_info in mesh.task_infos]
-        owned = self._owned_producer_names()
-        self.task_pipe_conn = (mesh.producer_pipes(owned[0]) if owned else [None] * len(mesh.task_infos))
-
-    def _close_foreign_pipes(self) -> None:
+    def _close_unowned_task_pipes(self) -> None:
         """Close the inherited socketpair ends that belong to other processes.
 
         Holding a child-to-child pipe open here keeps its refcount above zero,
         so its reader would hang instead of seeing EOF when the writer dies.
         """
         if self.task_ipc_mesh is not None:
-            self.task_ipc_mesh.close_pipes_not_owned_by(self._owned_producer_names())
+            self.task_ipc_mesh.close_pipes_not_owned_by(self._task_pipe_owners())
 
     def _watch_children(self) -> None:
         """Install the SIGCHLD handler, only when this worker forked children.
 
         Otherwise a worker forked by someone else would steal ``SIGCHLD`` from
-        its own parent.
+        its own parent. uvloop reserves ``SIGCHLD`` for libuv's own child
+        tracking and refuses the handler; there each child's ``multiprocessing``
+        sentinel is watched instead.
         """
         if not self.children:
             return
-        self.loop.add_signal_handler(signal.SIGCHLD, self._on_child_exit)
+        try:
+            self.loop.add_signal_handler(signal.SIGCHLD, self._on_child_exit)
+        except RuntimeError:
+            for pid, child in self._children_by_pid.items():
+                sentinel = child.process.sentinel
+                self.loop.add_reader(sentinel, self._on_child_sentinel, pid, sentinel)
 
     def _on_child_exit(self) -> None:
         """Reap every exited framework child.
@@ -394,13 +389,51 @@ class BaseWorker(ExitTemplate):
         code (``subprocess``, asyncio subprocesses).
         """
         for pid in list(self._children_by_pid):
-            try:
-                reaped, _ = os.waitpid(pid, os.WNOHANG)
-            except ChildProcessError:
-                # Already collected elsewhere; the child is gone either way.
-                reaped = pid
-            if reaped:
+            if self._reap(pid):
                 self._replace_child(pid)
+
+    def _on_child_sentinel(self, pid: int, sentinel: int) -> None:
+        """Event callback: the sentinel of child ``pid`` became readable.
+
+        Args:
+            pid: OS pid of the child.
+            sentinel: Its ``multiprocessing`` sentinel, watched by the loop.
+        """
+        self.loop.remove_reader(sentinel)
+        self._reap_when_exited(pid)
+
+    def _reap_when_exited(self, pid: int) -> None:
+        """Reap child ``pid``, retrying until ``waitpid`` reports it.
+
+        The sentinel closes while the child is still exiting, so ``waitpid``
+        can briefly see it running.
+
+        Args:
+            pid: OS pid of the child.
+        """
+        if pid not in self._children_by_pid:
+            return
+        if self._reap(pid):
+            self._replace_child(pid)
+            return
+        self.loop.call_later(CHILD_EXIT_POLL_INTERVAL, self._reap_when_exited, pid)
+
+    @staticmethod
+    def _reap(pid: int) -> bool:
+        """Collect the exit status of ``pid`` without blocking.
+
+        Args:
+            pid: OS pid of a framework child.
+
+        Returns:
+            True when the child is gone.
+        """
+        try:
+            reaped, _ = os.waitpid(pid, os.WNOHANG)
+        except ChildProcessError:
+            # Already collected elsewhere; the child is gone either way.
+            return True
+        return bool(reaped)
 
     def _replace_child(self, pid: int) -> None:
         """Take the whole worker down (status 1) when a child dies.
@@ -412,21 +445,21 @@ class BaseWorker(ExitTemplate):
         Args:
             pid: OS pid reported by ``waitpid``.
         """
-        record = self._children_by_pid.pop(pid, None)
-        if record is None:
+        child = self._children_by_pid.pop(pid, None)
+        if child is None:
             return
-        record.exited = True
+        child.exited = True
 
         if self._exiting:
-            logger.info("[%s] child %s (pid %s) exited during shutdown", self.name, record.name, pid)
+            logger.info("[%s] child %s (pid %s) exited during shutdown", self.name, child.name, pid)
             return
 
-        logger.error("[%s] child %s (pid %s) exited unexpectedly", self.name, record.name, pid)
+        logger.error("[%s] child %s (pid %s) exited unexpectedly", self.name, child.name, pid)
         if not self.reboot_child:
             self._exit_code = 1
             self._handle_sigterm()
             return
-        self._start_child(record)
+        self._start_child(child)
 
     def run(self) -> None:
         """Turn this process into a serving one, then serve.
@@ -443,15 +476,14 @@ class BaseWorker(ExitTemplate):
         set_current_process_var("type", self.type)
         self._wait_until_tasks_ready()
 
-        self._before_event_loop()
+        self._execute_before_event_loop()
 
         self.loop = get_async_lib(TrpcConfig.global_config().enable_uvloop).new_event_loop()
         asyncio.set_event_loop(self.loop)
-
-        execute_after_in_child()
         self._init_plugins()
+
         self._prepare_to_serve()
-        execute_before_loop_run_in_child()
+        execute_after_in_child()
 
         self._serve()
 
@@ -474,8 +506,8 @@ class BaseWorker(ExitTemplate):
         previous = signal.signal(signal.SIGTERM, _raise_system_exit) if in_main_thread else None
         try:
             while not io_ready_reached(self.io_wait_count):
-                dead = [record.name for record in self.children
-                        if record.process is not None and not record.process.is_alive()]
+                dead = [child.name for child in self.children
+                        if child.process is not None and not child.process.is_alive()]
                 if dead:
                     logger.error("[%s] child %s exited before the tasks were ready", self.name, dead)
                     self._exit_code = 1
@@ -571,7 +603,7 @@ class BaseWorker(ExitTemplate):
         running serving loop, where ``run_until_complete`` would refuse.
 
         Args:
-            pipe_conn: This worker's ``PipeEnd.RIGHT`` end of the producer <->
+            pipe_conn: This worker's ``PipeEnd.RIGHT`` end of the sender <->
                 task socketpair. Must not be ``None``.
             task_info: The task this pipe talks to.
             loop: Loop that will own the transport, and the only one allowed
@@ -583,7 +615,7 @@ class BaseWorker(ExitTemplate):
         (transport, _) = await coros
         register_task_conn(task_info.name, transport)
 
-    def _before_event_loop(self) -> None:
+    def _execute_before_event_loop(self) -> None:
         """Take over the signals of a controlled child, then start tracemalloc.
 
         A controlled child ignores SIGTERM/SIGINT so a process-group signal
@@ -607,25 +639,25 @@ class BaseWorker(ExitTemplate):
     def _prepare_to_serve(self) -> None:
         """Wire task IPC, the request source, then timers. The order matters.
 
-        1. Publish ``current_worker()`` when forked from a :class:`WorkerInfo`.
+        1. Point ``worker.process_instance`` at this process when forked from a :class:`WorkerInfo`.
         2. Build and install the thread model, before any loop thread starts.
-        3. Drop foreign pipe ends; attach or drop the heartbeat pipes.
+        3. Drop foreign pipe ends.
         4. Connect to each task.
         5. :meth:`start_worker_process` — attach the pipe or bind sockets.
         6. ``ready_callbacks`` — addresses are reachable now, so naming
            registration is truthful from here on.
         7. :meth:`_start_timers`.
         """
-        self._publish_current_worker()
+        self._bind_process_instance()
         self._install_thread_model()
 
-        self._bind_task_mesh()
-        self._close_foreign_pipes()
-        self._attach_heartbeats()
+        self._restore_task_mesh_after_fork()
+        self._close_unowned_task_pipes()
         self._connect_tasks()
 
-        self.start_worker_process()
+        # TODO： 删除
         _run_callbacks(self.name, "ready", self.ready_callbacks)
+        self.start_worker_process()
         self._start_timers()
 
     def _install_thread_model(self) -> None:
@@ -643,23 +675,14 @@ class BaseWorker(ExitTemplate):
         model can name them before they start.
         """
         main = MainLoopReactor(self.loop)
+        # TODO： 多进程单线程的，是否需要起新线程，原因是守护线程退出控制台用户无法感知
+        # TODO： 单进程多线程，不要有任何多进程操作，进程间通信和进程间变量应该尽量减少或者直接不声明
+        # 多进程下没有任何跨线程操作
         return ThreadModel(acceptor=main,
                            io=ReactorGroup([main]),
                            handle=ReactorGroup([main]),
-                           tcp_reuse_port=getattr(self, "tcp_reuse_port", False),
+                           reuse_port=getattr(self, "tcp_reuse_port", False),
                            worker=self)
-
-    def _attach_heartbeats(self) -> None:
-        """Monitor the tasks this process forked, or close pipes it only inherited.
-
-        A non-forking child closes both inherited ends so a dead task's pipe
-        actually reaches EOF. Task processes start their sender from a ``TASK``
-        child callback instead.
-        """
-        if self.children:
-            start_heartbeat_monitor(self.loop)
-        else:
-            close_heartbeat_pipes()
 
     def _start_timers(self) -> None:
         """Start this process's timer executor, labelled ``worker:<id>``.
@@ -670,12 +693,11 @@ class BaseWorker(ExitTemplate):
         self.timer = TimerExecutor(loop=self.loop, name=f"worker:{self.worker_id}")
         self.timer.run()
 
-    def _publish_current_worker(self) -> None:
-        """Make ``current_worker()`` return this worker's record, if it has one."""
+    def _bind_process_instance(self) -> None:
+        """Point this worker's record at the live process, so ``WorkerInfo.pid`` is this pid."""
         if self.worker is None:
             return
         self.worker.process_instance = self
-        set_current_worker(self.worker)
 
     @property
     def task_records(self) -> List[TaskInfo]:
@@ -691,13 +713,13 @@ class BaseWorker(ExitTemplate):
                                 pipe_conns: Optional[List[Optional[PipeConnection]]] = None) -> None:
         """Connect every task from one serving loop.
 
-        ``None`` entries are tasks this producer has no pipe to, which a
-        ``Task(peers=[...])`` declaration can create.
+        ``None`` entries are pipes this process does not own, e.g. every entry
+        in a separate-mode I/O process, whose rpc tasks own them.
 
         Args:
             loop: Loop that will own the transports; handlers may only produce
                 to these tasks from it.
-            pipe_conns: Producer ends to attach. Defaults to
+            pipe_conns: Sender ends to attach. Defaults to
                 ``task_pipe_conn``; a merge worker passes the set for the
                 serving loop being set up.
         """

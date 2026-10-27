@@ -117,7 +117,7 @@ class GlobalConfig:
     env_name: str = ''  # Peer service environment name, production or testing.
     container_name: str = ''  # Peer service container name.
     local_ip: str = ''  # Peer service local IP address.
-    enable_set: str = ''  # Peer service enable set.
+    enable_set: bool = False  # Enable set routing; full_set_name is used when True.
     full_set_name: str = ''  # Peer service full set name.
     enable_uvloop: bool = False  # Use the uvloop event-loop policy when uvloop is installed.
     save_bind_info: Optional[SaveBindInfo] = None  # Save bind information to a file.
@@ -248,6 +248,7 @@ class ServerConfig:
     memory_inspection: Optional[MemoryInspection] = None  # memory inspection config
     heartbeat_interval: int = 0  # process heartbeat interval (s)
     close_wait_time: int = 0  # graceful shutdown wait time (ms)
+    io_wait_count: int = 0  # inc_io_wait_count notifications to wait for before binding; 0 means no wait
 
     def __post_init__(self) -> None:
         if self.service is None:

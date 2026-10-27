@@ -6,8 +6,8 @@
 
 """tRPC server transport: record options before fork, listen after it.
 
-:meth:`TrpcServerTransport.bind` runs in ``ServiceAdapter.run`` and only keeps the
-options; ``ServiceAdapter.run`` then registers the transport on the engine, and every
+:meth:`TrpcServerTransport.bind` runs in ``ServiceAdapter.init_transport`` and only keeps the
+options; ``ServiceAdapter.init_transport`` then registers the transport on the engine, and every
 forked worker inherits it through ``process_info.transports``.
 
 :meth:`TrpcServerTransport.listen` runs in each serving process after fork.
@@ -333,7 +333,7 @@ class TrpcServerTransport(BaseServerTransport):
         Returns:
             The started listener.
         """
-        sock = self.create_socket(model.tcp_reuse_port)
+        sock = self.create_socket(model.reuse_port)
         try:
             listener = serve_stream(model, group, sock, factory_for, self.opts.backlog,
                                     ssl_context=ssl_context, address=self.opts.address)
@@ -356,7 +356,7 @@ class TrpcServerTransport(BaseServerTransport):
         from trpc_sdk.runtime import ResourceKind
 
         reactors = model.io.reactors
-        reuse_port = model.udp_reuse_port or len(reactors) > 1
+        reuse_port = model.reuse_port or len(reactors) > 1
         factory = self.datagram_protocol_factory(model.handler_pool)
         for reactor in reactors:
             sock = self.create_socket(reuse_port, stream=False)

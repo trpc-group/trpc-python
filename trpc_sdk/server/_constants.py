@@ -66,6 +66,8 @@ DEFAULT_TASK_NUM = 1
 DEFAULT_REBOOT_CHILD = False
 # Graceful-shutdown wait on SIGTERM, in milliseconds.
 DEFAULT_CLOSE_WAIT_TIME = 0
+# Task notifications the worker waits for before binding; 0 means no wait.
+DEFAULT_IO_WAIT_COUNT = 0
 
 # ServiceOption defaults (YAML ``server.service[]``, one per listen endpoint).
 
@@ -73,7 +75,7 @@ DEFAULT_CLOSE_WAIT_TIME = 0
 DEFAULT_NAMESPACE = "Development"
 # Naming-service environment name.
 DEFAULT_ENV_NAME = "defaultEnvName"
-# Polaris set name; empty unless global.enable_set is Y.
+# Polaris set name; empty unless global.enable_set is true.
 DEFAULT_SET_NAME = ""
 # RPC service name, e.g. trpc.app.server.Service.
 DEFAULT_SERVICE_NAME = "defaultServiceName"

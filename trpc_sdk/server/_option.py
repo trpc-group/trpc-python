@@ -4,7 +4,7 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
-"""Process-model and per-service options consumed by Server / TrpcServerEngine.
+"""Process-model and per-service options consumed by Server / TrpcServerAdapter.
 
 ``create_server(yaml)`` copies YAML ``server:`` fields onto :class:`ServerOption`
 and each ``server.service[]`` entry onto a :class:`ServiceOption`. The engine
@@ -15,17 +15,24 @@ for listen address, codec, registry, and filters.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from asyncio import AbstractEventLoop
+from dataclasses import dataclass
+from dataclasses import field
 from typing import Any
-from typing import Callable
 from typing import Optional
 
-from trpc_sdk.codec import get_server_parser
+from trpc_sdk.abc import AddrType
+from trpc_sdk.abc import BaseServer
+from trpc_sdk.abc import BaseServerTransport
+from trpc_sdk.abc import BaseServerTransportOption
+from trpc_sdk.abc import BaseServiceRegistry
+from trpc_sdk.codec import TrpcServerCodec
 from trpc_sdk.codec import get_server_codec
+from trpc_sdk.codec import get_server_parser
 from trpc_sdk.filters import FilterChain
-from trpc_sdk.log import logger
 from trpc_sdk.naming import default_registry
 from trpc_sdk.naming import get_registry
+from trpc_sdk.stream import StreamDispatcher
 from trpc_sdk.transport import DefaultServerTransport
 from trpc_sdk.transport import DefaultServerTransportOption
 from ._constants import DEFAULT_ADDRESS
@@ -39,6 +46,7 @@ from ._constants import DEFAULT_HANDLER_MAX_CONCURRENCY
 from ._constants import DEFAULT_HANDLER_QUEUE_SIZE
 from ._constants import DEFAULT_HANDLER_SET
 from ._constants import DEFAULT_IO_HANDLE_TYPE
+from ._constants import DEFAULT_IO_WAIT_COUNT
 from ._constants import DEFAULT_IO_THREAD_NUM
 from ._constants import DEFAULT_MAX_WINDOW_SIZE
 from ._constants import DEFAULT_MODE
@@ -65,18 +73,8 @@ from ._constants import DEFAULT_TIMEOUT
 from ._constants import DEFAULT_TIMER_SPEC
 from ._constants import DEFAULT_WORKER_NUM
 
-if TYPE_CHECKING:
-    from asyncio import AbstractEventLoop
 
-    from trpc_sdk.abc import AddrType
-    from trpc_sdk.abc import BaseServerTransport
-    from trpc_sdk.abc import BaseServerTransportOption
-    from trpc_sdk.abc import BaseServiceRegistry
-    from trpc_sdk.codec import TrpcServerCodec
-    from trpc_sdk.stream import StreamDispatcher
-    from ._server import Server
-
-
+@dataclass
 class ServerOption:
     """Process-wide server options (YAML ``server:``, one per Server).
 
@@ -91,170 +89,144 @@ class ServerOption:
     ``mode="merge"`` and ``io_thread_num=2``.
     """
 
-    def __init__(self) -> None:
-        # Process model: "merge" / "separate" / "peer".
-        self.mode: str = DEFAULT_MODE
-        # Processes of separate mode (rpc tasks) and peer mode (workers,
-        # worker-0 included); merge does not read it. ``0`` means the CPU
-        # count, resolved by ``create_server`` (or by the worker when the
-        # option is built by hand).
-        self.worker_num: int = DEFAULT_WORKER_NUM
-        # Thread model of a merge-mode worker: "merge" or "separate". Left
-        # empty in YAML it is inferred: separate iff ``handle_thread_num > 0``.
-        self.io_handle_type: str = DEFAULT_IO_HANDLE_TYPE
-        # Serving threads. In merge they do both I/O and handlers; 
-        # in separate they are the I/O loops, the main loop
-        # included. 1 in merge stays single-threaded.
-        self.io_thread_num: int = DEFAULT_IO_THREAD_NUM
-        # Handle threads that run user code; only read by the separate thread model.
-        self.handle_thread_num: int = DEFAULT_HANDLE_THREAD_NUM
-        # Unary requests in flight per serving loop; 0 means unlimited.
-        self.handler_max_concurrency: int = DEFAULT_HANDLER_MAX_CONCURRENCY
-        # Per-loop FIFO capacity once the limit is reached; unused when the
-        # limit is 0.
-        self.handler_queue_size: int = DEFAULT_HANDLER_QUEUE_SIZE
-        # Set SO_REUSEPORT on the TCP listen sockets; shared by merge and
-        # separate (merge also applies it to HTTP).
-        self.tcp_reuse_port: bool = DEFAULT_TCP_REUSE_PORT
-        # Milliseconds the serving / I/O threads, or the separate-mode rpc
-        # tasks, get together to finish startup (task pipes, ``on_start``
-        # hooks, self-bound listeners).
-        self.ready_timeout: int = DEFAULT_READY_TIMEOUT_MS
-        # Number of ServiceOption entries; filled as len(server.service).
-        self.service_num: int = DEFAULT_SERVICE_NUM
-        # Task-process batch wait, in milliseconds.
-        self.task_wait_interval: int = DEFAULT_TASK_WAIT_INTERVAL
-        # Max tasks pulled in one task-process batch.
-        self.task_batch_size: int = DEFAULT_TASK_BATCH_SIZE
-        # Task-process inbound queue capacity.
-        self.task_queue_size: int = DEFAULT_TASK_QUEUE_SIZE
-        # Consumer threads inside each task process.
-        self.task_consumer_num: int = DEFAULT_TASK_CONSUMER_NUM
-        # Processes of a task registered without ``task_num``; filled from
-        # YAML ``global.processmodel.task_num``.
-        self.task_num: int = DEFAULT_TASK_NUM
-        # Restart a crashed child instead of exiting. Not supported in this
-        # version: the worker treats it as False and warns when it is set.
-        self.reboot_child: bool = DEFAULT_REBOOT_CHILD
-        # Event loop assigned by the engine. Cython left this as None via
-        # ``cdef public object``; Python must set it explicitly.
-        self.loop: Optional[AbstractEventLoop] = None
-        # Drain period on SIGTERM, in milliseconds: the listen sockets are
-        # closed and in-flight requests get this long to finish before exit.
-        self.close_wait_time: int = DEFAULT_CLOSE_WAIT_TIME
+    # Process model: "merge" / "separate" / "peer".
+    mode: str = DEFAULT_MODE
+    # Processes of separate mode (rpc tasks) and peer mode (workers,
+    # worker-0 included); merge does not read it. ``0`` means the CPU
+    # count, resolved by ``create_server`` (or by the worker when the
+    # option is built by hand).
+    worker_num: int = DEFAULT_WORKER_NUM
+    # Thread model of a merge-mode worker: "merge" or "separate". Left
+    # empty in YAML it is inferred: separate iff ``handle_thread_num > 0``.
+    io_handle_type: str = DEFAULT_IO_HANDLE_TYPE
+    # Serving threads. In merge they do both I/O and handlers;
+    # in separate they are the I/O loops, the main loop
+    # included. 1 in merge stays single-threaded.
+    io_thread_num: int = DEFAULT_IO_THREAD_NUM
+    # Handle threads that run user code; only read by the separate thread model.
+    handle_thread_num: int = DEFAULT_HANDLE_THREAD_NUM
+    # Unary requests in flight per serving loop; 0 means unlimited.
+    handler_max_concurrency: int = DEFAULT_HANDLER_MAX_CONCURRENCY
+    # Per-loop FIFO capacity once the limit is reached; unused when the
+    # limit is 0.
+    handler_queue_size: int = DEFAULT_HANDLER_QUEUE_SIZE
+    # Set SO_REUSEPORT on the TCP listen sockets; shared by merge and
+    # separate (merge also applies it to HTTP).
+    tcp_reuse_port: bool = DEFAULT_TCP_REUSE_PORT
+    # Milliseconds the serving / I/O threads, or the separate-mode rpc
+    # tasks, get together to finish startup (task pipes, ``on_start``
+    # hooks, self-bound listeners).
+    ready_timeout: int = DEFAULT_READY_TIMEOUT_MS
+    # Number of ServiceOption entries; filled as len(server.service).
+    service_num: int = DEFAULT_SERVICE_NUM
+    # Task-process batch wait, in milliseconds.
+    task_wait_interval: int = DEFAULT_TASK_WAIT_INTERVAL
+    # Max tasks pulled in one task-process batch.
+    task_batch_size: int = DEFAULT_TASK_BATCH_SIZE
+    # Task-process inbound queue capacity.
+    task_queue_size: int = DEFAULT_TASK_QUEUE_SIZE
+    # Consumer threads inside each task process.
+    task_consumer_num: int = DEFAULT_TASK_CONSUMER_NUM
+    # Processes of a task registered without ``task_num``; filled from
+    # YAML ``global.processmodel.task_num``.
+    task_num: int = DEFAULT_TASK_NUM
+    # Restart a crashed child instead of exiting. Not supported in this
+    # version: the worker treats it as False and warns when it is set.
+    reboot_child: bool = DEFAULT_REBOOT_CHILD
+    # Event loop assigned by the engine.
+    loop: Optional[AbstractEventLoop] = None
+    # Drain period on SIGTERM, in milliseconds: the listen sockets are
+    # closed and in-flight requests get this long to finish before exit.
+    close_wait_time: int = DEFAULT_CLOSE_WAIT_TIME
+    # ``inc_io_wait_count`` notifications the worker waits for from its tasks
+    # before binding any address; 0 means no wait. Peer mode has no task and
+    # ignores it with a warning.
+    io_wait_count: int = DEFAULT_IO_WAIT_COUNT
 
 
+@dataclass
 class ServiceOption:
     """One listen endpoint / named service (YAML ``server.service[]``).
 
     Holds naming (namespace, env, set, service_name), bind address, protocol
     codec, transport, registry, filters, and stream settings. Setters that
     affect I/O also update ``transport_option`` so the listen path stays in
-    sync.
+    sync; plain fields are assigned directly.
 
     Example: YAML ``name: trpc.test.helloworld.Greeter``, ``ip/port``,
     ``protocol: trpc`` becomes this object; ``set_protocol`` installs the
     server codec and the frame parser used by the dispatcher.
     """
 
-    def __init__(self) -> None:
-        # Owning Server instance; set by create_server().
-        self.app: Optional[Server] = None
+    # Owning Server instance; set by create_server(). ServiceAdapter and the
+    # registry read ``app.server_adapter`` through this field.
+    app: Optional[BaseServer] = None
 
-        # Naming-service namespace: Production vs Development.
-        self.namespace: str = DEFAULT_NAMESPACE
-        # Naming-service environment name.
-        self.env_name: str = DEFAULT_ENV_NAME
-        # Polaris set name; empty unless global.enable_set is Y.
-        self.set_name: str = DEFAULT_SET_NAME
-        # RPC service name, e.g. trpc.app.server.Service.
-        self.service_name: str = DEFAULT_SERVICE_NAME
+    # Naming-service namespace: Production vs Development.
+    namespace: str = DEFAULT_NAMESPACE
+    # Naming-service environment name.
+    env_name: str = DEFAULT_ENV_NAME
+    # Polaris set name; empty unless global.enable_set is true.
+    set_name: str = DEFAULT_SET_NAME
+    # RPC service name, e.g. trpc.app.server.Service.
+    service_name: str = DEFAULT_SERVICE_NAME
 
-        # Cron spec for a timer service; empty means not a timer.
-        # Format: "second minute hour day month weekday", e.g. "0 */5 * * * ?".
-        self.timer_spec: str = DEFAULT_TIMER_SPEC
+    # Cron spec for a timer service; empty means not a timer.
+    # Format: "second minute hour day month weekday", e.g. "0 */5 * * * ?".
+    timer_spec: str = DEFAULT_TIMER_SPEC
 
-        # Bind address as (host, port), or (unix_path, 0) for UNIX sockets.
-        self.address: AddrType = DEFAULT_ADDRESS
-        # Socket family/type from YAML (tcp / unix / ...).
-        self.socket_type: str = DEFAULT_SOCKET_TYPE
-        # Request timeout in milliseconds; also copied to transport idle timeout.
-        self.timeout: int = DEFAULT_TIMEOUT
-        # If True, do not inherit the upstream caller's remaining timeout.
-        self.disable_request_timeout: bool = DEFAULT_DISABLE_REQUEST_TIMEOUT
-        # Queue-wait timeout in milliseconds before a request is dropped.
-        self.queue_wait_timeout: int = DEFAULT_QUEUE_WAIT_TIMEOUT
-        # Queue-wait circuit-breaker policy (0 = off; see YAML queue_wait_policy).
-        self.queue_wait_policy: int = DEFAULT_QUEUE_WAIT_POLICY
+    # Bind address as (host, port), or (unix_path, 0) for UNIX sockets.
+    address: AddrType = DEFAULT_ADDRESS
+    # Socket family/type from YAML (tcp / unix / ...).
+    socket_type: str = DEFAULT_SOCKET_TYPE
+    # Request timeout in milliseconds; also copied to transport idle timeout.
+    timeout: int = DEFAULT_TIMEOUT
+    # If True, do not inherit the upstream caller's remaining timeout.
+    disable_request_timeout: bool = DEFAULT_DISABLE_REQUEST_TIMEOUT
+    # Queue-wait timeout in milliseconds; 0 falls back to the merged handler
+    # timeout, so the check is off only when that is unlimited too.
+    queue_wait_timeout: int = DEFAULT_QUEUE_WAIT_TIMEOUT
+    # Queue-wait circuit-breaker policy (0 = off; see YAML queue_wait_policy).
+    queue_wait_policy: int = DEFAULT_QUEUE_WAIT_POLICY
 
-        # Override serialization; -1 means use the protocol default.
-        self.current_serialization_type: int = DEFAULT_SERIALIZATION_TYPE
-        # Override compression; -1 means use the protocol default.
-        self.current_compress_type: int = DEFAULT_COMPRESS_TYPE
+    # Override serialization; -1 means use the protocol default.
+    current_serialization_type: int = DEFAULT_SERIALIZATION_TYPE
+    # Override compression; -1 means use the protocol default.
+    current_compress_type: int = DEFAULT_COMPRESS_TYPE
 
-        # Wire protocol name: "trpc", "http", ...
-        self.protocol: str = DEFAULT_PROTOCOL
-        # Whether a custom handler is set.
-        self.handler_set: bool = DEFAULT_HANDLER_SET
+    # Wire protocol name: "trpc", "http", ...
+    protocol: str = DEFAULT_PROTOCOL
+    # Whether a custom handler is set.
+    handler_set: bool = DEFAULT_HANDLER_SET
 
-        # Listen/transport knobs (address, network, parser, TLS, mode).
-        # DefaultServerTransportOption is the same class as
-        # BaseServerTransportOption; DefaultServerTransport() is a placeholder
-        # that create_server() replaces with whatever sits in the plugin slot.
-        self.transport_option: BaseServerTransportOption = DefaultServerTransportOption()
-        # Server transport implementation (default or protocol plugin).
-        self.transport: BaseServerTransport = DefaultServerTransport()
+    # Listen/transport knobs (address, network, parser, TLS, mode).
+    # DefaultServerTransportOption is the same class as
+    # BaseServerTransportOption; DefaultServerTransport() is a placeholder
+    # that create_server() replaces with whatever sits in the plugin slot.
+    transport_option: BaseServerTransportOption = field(default_factory=DefaultServerTransportOption)
+    # Server transport implementation (default or protocol plugin).
+    transport: BaseServerTransport = field(default_factory=DefaultServerTransport)
 
-        # Service registry plugin; default_registry is a no-op.
-        self.registry: Optional[BaseServiceRegistry] = default_registry
-        # Delay before registering, in milliseconds.
-        self.registry_delay: int = DEFAULT_REGISTRY_DELAY
-        # Registry control: 0 = off, 1 = on.
-        self.registry_option: int = DEFAULT_REGISTRY_OPTION
-        # Server codec for this protocol; set by set_protocol().
-        self.codec: Optional[TrpcServerCodec] = None
+    # Service registry plugin; default_registry is a shared no-op.
+    registry: Optional[BaseServiceRegistry] = default_registry
+    # Delay before registering, in milliseconds.
+    registry_delay: int = DEFAULT_REGISTRY_DELAY
+    # Registry control: 0 = off, 1 = on.
+    registry_option: int = DEFAULT_REGISTRY_OPTION
+    # Server codec for this protocol; set by set_protocol().
+    codec: Optional[TrpcServerCodec] = None
 
-        # Server filter chain (True = server-side chain).
-        self.filters: FilterChain = FilterChain(True)
+    # Server filter chain (True = server-side chain).
+    filters: FilterChain = field(default_factory=lambda: FilterChain(True))
 
-        # Streaming RPC handler; None if this service is unary-only.
-        self.stream_handle: Optional[StreamDispatcher] = None
-        # Streaming transport; None uses the default stream transport.
-        self.stream_transport: Any = None
-        # Stream flow-control window size; 0 means protocol default.
-        self.max_window_size: int = DEFAULT_MAX_WINDOW_SIZE
-        # If True, run stream filters on this service.
-        self.enable_stream_filter: bool = DEFAULT_ENABLE_STREAM_FILTER
-
-    def set_namespace(self, namespace: str) -> None:
-        """Set the namespace.
-
-        Naming-service namespace: Production vs Development.
-
-        Args:
-            namespace: Namespace string from YAML ``global.namespace``.
-        """
-        self.namespace = namespace
-
-    def set_env_name(self, env_name: str) -> None:
-        """Set the current environment.
-
-        Naming-service environment name from YAML ``global.env_name``.
-
-        Args:
-            env_name: Environment string from YAML ``global.env_name``.
-        """
-        self.env_name = env_name
-
-    def set_setname(self, set_name: str) -> None:
-        """Set the set grouping.
-
-        Polaris set name; typically ``global.full_set_name`` when enable_set is Y.
-
-        Args:
-            set_name: Set name; typically ``global.full_set_name`` when enable_set is Y.
-        """
-        self.set_name = set_name
+    # Streaming RPC handler; None if this service is unary-only.
+    stream_handle: Optional[StreamDispatcher] = None
+    # Streaming transport; None uses the default stream transport.
+    stream_transport: Any = None
+    # Stream flow-control window size; 0 means protocol default.
+    max_window_size: int = DEFAULT_MAX_WINDOW_SIZE
+    # If True, run stream filters on this service.
+    enable_stream_filter: bool = DEFAULT_ENABLE_STREAM_FILTER
 
     def set_service_name(self, service_name: str) -> None:
         """Set the current service's service name.
@@ -305,19 +277,6 @@ class ServiceOption:
         self.transport_option.set_socket_type(socket_type)
         self.socket_type = socket_type
 
-    def set_server_tls(self, cert_file: str, key_file: str) -> None:
-        """Set the server TLS file paths.
-
-        Reserved; currently a no-op. Cert/key are applied on
-        ``transport_option`` in ``create_server()``.
-
-        Args:
-            cert_file: Path to the server certificate.
-            key_file: Path to the private key.
-        """
-        # TODO: self.transport_option.set_server_tls(cert_file, key_file)
-        pass
-
     def set_network(self, network: str) -> None:
         """Set the server listen network (tcp or udp); default is tcp.
 
@@ -340,48 +299,6 @@ class ServiceOption:
         self.transport_option.set_idle_timeout(timeout)
         self.timeout = timeout
 
-    def set_disable_request_timeout(self, disable_request_timeout: bool) -> None:
-        """Choose whether to ignore the upstream remaining timeout.
-
-        Args:
-            disable_request_timeout: True to use only this service's timeout.
-        """
-        self.disable_request_timeout = disable_request_timeout
-
-    def set_enable_stream_filter(self, enable_stream_filter: bool) -> None:
-        """Enable or disable stream filters for this service.
-
-        Args:
-            enable_stream_filter: YAML ``enable_stream_filter``.
-        """
-        self.enable_stream_filter = enable_stream_filter
-
-    def set_queue_wait_timeout(self, queue_wait_timeout: int) -> None:
-        """Set how long a request may wait in the server queue.
-
-        Args:
-            queue_wait_timeout: Timeout in milliseconds; 0 falls back to the
-                merged handler timeout, so the check is off only when that
-                is unlimited too.
-        """
-        self.queue_wait_timeout = queue_wait_timeout
-
-    def set_queue_wait_policy(self, queue_wait_policy: int) -> None:
-        """Set the queue-wait circuit-breaker policy.
-
-        Args:
-            queue_wait_policy: YAML ``queue_wait_policy``; 0 means off.
-        """
-        self.queue_wait_policy = queue_wait_policy
-
-    def set_transport(self, transport: BaseServerTransport) -> None:
-        """Replace the underlying server transport.
-
-        Args:
-            transport: ``BaseServerTransport`` instance (plugin or default).
-        """
-        self.transport = transport
-
     def set_registry(self, registry_name: str) -> None:
         """Set the server service registry; one service supports only one registry.
 
@@ -389,22 +306,6 @@ class ServiceOption:
             registry_name: Plugin name passed to ``get_registry``.
         """
         self.registry = get_registry(registry_name)
-
-    def set_registry_delay(self, registry_delay: int) -> None:
-        """Set how long to wait before registering this service.
-
-        Args:
-            registry_delay: Delay in milliseconds.
-        """
-        self.registry_delay = registry_delay
-
-    def set_registry_option(self, registry_option: int) -> None:
-        """Enable or disable registry for this service.
-
-        Args:
-            registry_option: 0 = off, 1 = on.
-        """
-        self.registry_option = registry_option
 
     def set_protocol(self, protocol: str) -> None:
         """Set the service protocol name, e.g. trpc.
@@ -429,58 +330,3 @@ class ServiceOption:
         """
         self.transport_option.rpc_handler = handler
         self.handler_set = True
-
-    def set_timer(self, spec: str) -> None:
-        """Set timer service start spec: [second minute hour day month weekday].
-
-        Example: ``"0 */5 * * * ?"`` runs every 5 minutes.
-
-        Args:
-            spec: ``second minute hour day month weekday``,
-                e.g. ``"0 */5 * * * ?"`` (every 5 minutes).
-        """
-        self.timer_spec = spec
-
-    def set_stream_handle(self, stream_handle: StreamDispatcher) -> None:
-        """Set the streaming transport handler.
-
-        Args:
-            stream_handle: Stream handler used by the stream transport.
-        """
-        self.stream_handle = stream_handle
-
-    def set_stream_transport(self, stream_transport: Any) -> None:
-        """Set the streaming transport.
-
-        Args:
-            stream_transport: Stream transport instance.
-        """
-        self.stream_transport = stream_transport
-
-    def set_max_window_size(self, window_size: int) -> None:
-        """Set the stream flow-control window size.
-
-        Args:
-            window_size: Window size; 0 means protocol default.
-        """
-        self.max_window_size = window_size
-
-    def set_current_serialization_type(self, current_serialization_type: int) -> None:
-        """Set serialization_type.
-
-        Override the serialization type for this service; -1 means default.
-
-        Args:
-            current_serialization_type: Codec serialization id; -1 = default.
-        """
-        self.current_serialization_type = current_serialization_type
-
-    def set_current_compress_type(self, current_compress_type: int) -> None:
-        """Set compress_type.
-
-        Override the compression type for this service; -1 means default.
-
-        Args:
-            current_compress_type: Codec compression id; -1 = default.
-        """
-        self.current_compress_type = current_compress_type

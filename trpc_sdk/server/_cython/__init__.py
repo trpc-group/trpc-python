@@ -7,9 +7,9 @@
 """Cython per-service handler path and service factory."""
 
 from ._service import ServiceAdapter  # pyright: ignore[reportMissingModuleSource]
-from ._service import create_service  # pyright: ignore[reportMissingModuleSource]
+from ._service import create_service_adapter  # pyright: ignore[reportMissingModuleSource]
 
 __all__ = [
     "ServiceAdapter",
-    "create_service",
+    "create_service_adapter",
 ]

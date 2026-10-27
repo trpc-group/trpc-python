@@ -8,33 +8,33 @@
 
 Every role — the merge worker, the separate-mode I/O process, its rpc tasks,
 and the task processes — leaves through the same coroutine,
-:meth:`ExitTemplate._shutdown`. A role only describes what it has to do on
+:meth:`WorkerExit._shutdown`. A role only describes what it has to do on
 top, through four hooks; signals, re-entrancy, the drain and cutting it short,
 and the parent dying are handled here once.
 
 The sequence, started by the first stop signal:
 
 1. ``exit_callbacks`` (naming deregistration).
-2. :meth:`~ExitTemplate._stop_accepting`: close the listen sockets.
+2. :meth:`~WorkerExit._stop_accepting`: close the listen sockets.
 3. Wait :attr:`drain_seconds` while the loop keeps writing responses, unless
    a second stop signal cuts it short. Each cut also calls
-   :meth:`~ExitTemplate._on_drain_cut`.
-4. ``post_drain_callbacks`` (``server_engine.close``), whether or not the
+   :meth:`~WorkerExit._on_drain_cut`.
+4. ``post_drain_callbacks`` (``server_adapter.close``), whether or not the
    drain was cut short.
-5. :meth:`~ExitTemplate._wait_handlers`: wait for handlers running
+5. :meth:`~WorkerExit._wait_handlers`: wait for handlers running
    elsewhere, i.e. the rpc tasks of a separate-mode I/O process.
 6. ``master_exit_callbacks`` (the user server exit callback).
-7. :meth:`~ExitTemplate._on_drained` (the user worker exit callbacks by
+7. :meth:`~WorkerExit._on_drained` (the user worker exit callbacks by
    default).
 8. Leave the loop with ``SystemExit(_exit_code)``. ``BaseWorker._serve`` then
-   runs ``_on_graceful_exit`` and :meth:`~ExitTemplate._stop_children`.
+   runs ``_on_graceful_exit`` and :meth:`~WorkerExit._stop_children`.
 
 Controlled children. A child whose parent decides when it stops (an rpc task,
 or a task forked by a separate-mode I/O process) sets ``_controlled``. It then
 ignores SIGTERM and SIGINT, so a signal sent to the whole process group only
 reaches its parent, and stops on SIGUSR1 instead. Every other process stops on
 SIGTERM. That one flag is the only difference between the two kinds: the stop
-signal, the parent-death signal and what :meth:`~ExitTemplate._stop_children`
+signal, the parent-death signal and what :meth:`~WorkerExit._stop_children`
 sends all follow from it.
 
 Parent death. A stop signal that arrives after the parent pid changed is the
@@ -63,7 +63,7 @@ from ._signals import run_worker_signal_handle
 from .._constants import CHILD_EXIT_GRACE_SECONDS
 from .._constants import CHILD_EXIT_POLL_INTERVAL
 from .._constants import PARENT_EXIT_GRACE_SECONDS
-from .._types import ChildRecord
+from .._types import ChildProcessInfo
 
 
 def _run_callbacks(owner: str, kind: str, callbacks: List[Callable[[], None]]) -> None:
@@ -84,7 +84,7 @@ def _run_callbacks(owner: str, kind: str, callbacks: List[Callable[[], None]]) -
             logger.error("[%s] %s callback failed: %s", owner, kind, repr(err))
 
 
-class ExitTemplate:
+class WorkerExit:
     """Exit template and child stopping, inherited by ``BaseWorker``.
 
     Relies on attributes ``BaseWorker`` defines: ``name``, ``loop``,
@@ -95,7 +95,7 @@ class ExitTemplate:
     # Declared by ``BaseWorker.__init__``; listed for readers of this class.
     name: str
     loop: Optional[asyncio.AbstractEventLoop]
-    children: List[ChildRecord]
+    children: List[ChildProcessInfo]
     reboot_child: bool
     drain_seconds: float
     exit_callbacks: List[Callable[[], None]]
@@ -144,7 +144,7 @@ class ExitTemplate:
     def _record_early_exit(self, signum: int, frame: Any) -> None:
         """``signal.signal`` handler: remember a stop signal that came before the loop handler.
 
-        Installed by ``_before_event_loop`` on a controlled child, so a stop
+        Installed by ``_execute_before_event_loop`` on a controlled child, so a stop
         signal during startup does not kill it with the default action. Acted
         on once the loop handler is installed.
 
@@ -333,58 +333,58 @@ class ExitTemplate:
         """
         run_worker_signal_handle()
 
-    def _child_alive(self, record: ChildRecord) -> bool:
-        """Whether ``record``'s process still runs; judged by its sentinel, not ``is_alive()``.
+    def _child_alive(self, child: ChildProcessInfo) -> bool:
+        """Whether ``child``'s process still runs; judged by its sentinel, not ``is_alive()``.
 
         Args:
-            record: The child.
+            child: The child.
         """
-        if record.exited or record.process is None:
+        if child.exited or child.process is None:
             return False
-        return not wait_sentinels([record.process.sentinel], 0)
+        return not wait_sentinels([child.process.sentinel], 0)
 
-    def _signal(self, records: List[ChildRecord]) -> None:
-        """Send each live child in ``records`` its own stop signal.
+    def _signal(self, children: List[ChildProcessInfo]) -> None:
+        """Send each live child in ``children`` its own stop signal.
 
         Args:
-            records: Children to signal.
+            children: Children to signal.
         """
-        for record in records:
-            if not self._child_alive(record):
+        for child in children:
+            if not self._child_alive(child):
                 continue
             try:
-                os.kill(record.process.pid, record.process._stop_signal())  # pylint: disable=protected-access
+                os.kill(child.process.pid, child.process._stop_signal())  # pylint: disable=protected-access
             except ProcessLookupError:
                 pass
 
-    def _kill(self, records: List[ChildRecord]) -> None:
-        """SIGKILL every child in ``records``.
+    def _kill(self, children: List[ChildProcessInfo]) -> None:
+        """SIGKILL every child in ``children``.
 
         Args:
-            records: Children that did not exit in time.
+            children: Children that did not exit in time.
         """
-        for record in records:
-            logger.error("[%s] child %s (pid %s) did not exit in time; sending SIGKILL", self.name, record.name,
-                         record.process.pid)
+        for child in children:
+            logger.error("[%s] child %s (pid %s) did not exit in time; sending SIGKILL", self.name, child.name,
+                         child.process.pid)
             try:
-                os.kill(record.process.pid, signal.SIGKILL)
+                os.kill(child.process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
 
-    async def _wait_children(self, records: List[ChildRecord], timeout: float) -> None:
-        """Wait for ``records`` to exit, SIGKILL whoever is left after ``timeout``.
+    async def _wait_children(self, children: List[ChildProcessInfo], timeout: float) -> None:
+        """Wait for ``children`` to exit, SIGKILL whoever is left after ``timeout``.
 
         Polls the sentinels, so the loop keeps forwarding responses meanwhile.
 
         Args:
-            records: Children to wait for.
+            children: Children to wait for.
             timeout: Seconds before the stragglers are killed.
         """
-        pending = [record for record in records if self._child_alive(record)]
+        pending = [child for child in children if self._child_alive(child)]
         deadline = time.monotonic() + timeout
         while pending and time.monotonic() < deadline:
             await asyncio.sleep(CHILD_EXIT_POLL_INTERVAL)
-            pending = [record for record in pending if self._child_alive(record)]
+            pending = [child for child in pending if self._child_alive(child)]
         self._kill(pending)
 
     def _stop_children(self) -> None:
@@ -397,7 +397,7 @@ class ExitTemplate:
         here is expected rather than a fault. A no-op once every child exited.
         """
         self.reboot_child = False
-        alive = [record for record in self.children if self._child_alive(record)]
+        alive = [child for child in self.children if self._child_alive(child)]
         if not alive:
             return
         self._signal(alive)
@@ -408,6 +408,6 @@ class ExitTemplate:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
-            wait_sentinels([record.process.sentinel for record in alive], remaining)
-            alive = [record for record in alive if self._child_alive(record)]
+            wait_sentinels([child.process.sentinel for child in alive], remaining)
+            alive = [child for child in alive if self._child_alive(child)]
         self._kill(alive)

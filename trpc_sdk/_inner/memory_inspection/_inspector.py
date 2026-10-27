@@ -8,7 +8,7 @@
 
 Workers construct :class:`MemoryInspecter` only when
 ``server.memory_inspection.enabled`` is set, start tracing in
-``_before_event_loop`` so loop and plugin setup is included, and bind
+``_execute_before_event_loop`` so loop and plugin setup is included, and bind
 :meth:`MemoryInspecter.dump_to_file` to SIGUSR2. Each dump writes a
 lineno-grouped allocation snapshot under the configured filename prefix.
 """
@@ -58,7 +58,7 @@ class MemoryInspector:
         """Start tracing allocations in this process.
 
         Must run after fork. Workers call this from
-        ``_before_event_loop`` so later loop and plugin allocations are
+        ``_execute_before_event_loop`` so later loop and plugin allocations are
         included. Raises ``RuntimeError`` if tracing is already on.
         """
         tracemalloc.start()

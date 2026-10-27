@@ -98,7 +98,9 @@ class Stream(BaseClientStreamConnection):
         """Select a node, apply the deadline, and open the transport.
 
         Stores ``client_options`` on ``self.opts`` so later send / recv
-        reuse the same transport, codec and call options.
+        reuse the same transport, codec and call options. ``socket_type``
+        is copied onto the transport options here because this method
+        dials; unary ``invoke`` does that copy itself.
 
         Args:
             ctx: Client context whose message is updated with the node.
@@ -113,6 +115,10 @@ class Stream(BaseClientStreamConnection):
         begin = now_ms()
         set_timeout(ctx, msg, client_options, begin)
         node = await select_node(msg, client_options)
+        # Unary invoke copies this immediately before dial. This path dials
+        # inside start_stream, so a unix socket_type never reaches the
+        # transport unless it is copied here too.
+        client_options.call_options.set_socket_type(client_options.socket_type)
         client_options.call_options.set_codec(client_options.codec)
 
         self.opts = client_options

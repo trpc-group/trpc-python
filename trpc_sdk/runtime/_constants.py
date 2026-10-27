@@ -90,21 +90,13 @@ PEER_STARTUP_WARNING = ("peer mode: %s workers, all endpoints use SO_REUSEPORT; 
 ENV_C_TASK = "TRPC_C_TASK"
 ENV_ENABLED = "1"
 
-# Heartbeat IPC between master and child processes.
-# Packed as big-endian: magic (2 bytes) + pid (4) + unix timestamp (4).
-
-# Frame header identifier; distinguishes heartbeat packets from JSON payloads.
-MAGIC_VAL = 0x1234
-# Packed heartbeat frame length in bytes.
-PKG_LEN = 10
-
-# Producer name of the worker process itself when it serves on a single loop.
+# Sender name of the worker process itself when it serves on a single loop.
 # Merge mode with several loop threads numbers them ``worker:0``, ``worker:1``,
 # and so on, because each loop needs its own socketpair to a task: an asyncio
 # transport may only be written from the loop that created it.
-WORKER_PRODUCER_PREFIX = "worker"
-# Producer name prefix of the rpc task processes a separate-mode worker forks.
-RPC_TASK_PRODUCER_PREFIX = "rpc_task"
+WORKER_SENDER_PREFIX = "worker"
+# Sender name prefix of the rpc task processes a separate-mode worker forks.
+RPC_TASK_SENDER_PREFIX = "rpc_task"
 
 # ``SchedulerParams.target`` values of the separate thread model, so one
 # custom selector can tell its three choices apart.

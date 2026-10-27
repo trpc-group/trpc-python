@@ -18,7 +18,7 @@ from ._config import BaseConfigDecoder
 from ._cython import BaseClientProtocolParser  # pyright: ignore[reportMissingModuleSource]
 from ._cython import BaseCodec  # pyright: ignore[reportMissingModuleSource]
 from ._cython import BaseServerProtocolParser  # pyright: ignore[reportMissingModuleSource]
-from ._cython import BaseService  # pyright: ignore[reportMissingModuleSource]
+from ._cython import BaseServiceAdapter  # pyright: ignore[reportMissingModuleSource]
 from ._cython import RpczData  # pyright: ignore[reportMissingModuleSource]
 from ._cython import TrpcContext  # pyright: ignore[reportMissingModuleSource]
 from ._cython import TrpcFrameHead  # pyright: ignore[reportMissingModuleSource]
@@ -66,7 +66,7 @@ from ._selector import ServiceNameExtractor
 from ._serializer import BaseSerializer
 from ._server import BaseServer
 from ._server import BaseServerStream
-from ._server import BaseTrpcServerEngine
+from ._server import BaseTrpcServerAdapter
 from ._server import Method
 from ._server import ProcessType
 from ._server import ServiceDesc
@@ -113,10 +113,10 @@ __all__ = [
     "BaseServerStream",
     "BaseServerTransport",
     "BaseServerTransportOption",
-    "BaseService",
+    "BaseServiceAdapter",
     "BaseServiceRegistry",
     "BaseServiceRouter",
-    "BaseTrpcServerEngine",
+    "BaseTrpcServerAdapter",
     "BaseWriter",
     "CallResult",
     "CustomData",

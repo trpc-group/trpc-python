@@ -141,7 +141,7 @@ class SeparateThread(MergeWorker):
         return ThreadModel(acceptor=main,
                            io=ReactorGroup([main, *self.io_threads], SCHEDULE_TARGET_IO_CONN),
                            handle=ReactorGroup(list(self.loop_threads), SCHEDULE_TARGET_HANDLE_CONN),
-                           tcp_reuse_port=self.tcp_reuse_port,
+                           reuse_port=self.tcp_reuse_port,
                            ready_timeout=self.ready_timeout,
                            worker=self,
                            view_factory=WorkerLoopView)

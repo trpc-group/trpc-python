@@ -89,6 +89,24 @@ class ServiceDesc:
     stream_handler: Any = None
 
 
+class BaseTrpcServerAdapter(ABC):
+    """Define the server adapter lifecycle accepted by transports."""
+
+    @abstractmethod
+    def set_process_info(self, process_type: ProcessType) -> None:
+        """Initialize process-role specific engine state.
+
+        Args:
+            process_type: Role of the current process.
+        """
+        ...
+
+    @abstractmethod
+    def close(self) -> None:
+        """Shut down the engine and release owned resources."""
+        ...
+
+
 class BaseServer(ABC):
     """Define the server interface: start serving and block."""
 
@@ -132,22 +150,4 @@ class BaseServerStream(ABC):
         Returns:
             Decoded application message.
         """
-        ...
-
-
-class BaseTrpcServerEngine(ABC):
-    """Define the server engine lifecycle accepted by transports."""
-
-    @abstractmethod
-    def set_process_info(self, process_type: ProcessType) -> None:
-        """Initialize process-role specific engine state.
-
-        Args:
-            process_type: Role of the current process.
-        """
-        ...
-
-    @abstractmethod
-    def close(self) -> None:
-        """Shut down the engine and release owned resources."""
         ...

@@ -65,11 +65,12 @@ def classify_address(worker: Any, index: int) -> AddressKind:
         return AddressKind.TCP
     if network.find(Network.UDP) != -1:
         return AddressKind.UDP
+    # TODO: 删除HTTP协议， HTTP 不应该在传输层同一层
     if network.find(Network.HTTP) != -1:
         return AddressKind.HTTP
     return AddressKind.UNKNOWN
 
-
+# TODO：考虑删除，只保留 aiohttp，这个是因为之前 Kafka 和 HTTP 有冲突
 def create_http_msg_handle(worker: Any, index: int) -> HttpMessageHandle:
     """Build the aiohttp-to-tRPC bridge for the HTTP address at ``index``.
 

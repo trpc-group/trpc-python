@@ -27,9 +27,8 @@ from typing import Type
 from trpc_sdk.transport import encode_worker_msg_req
 from trpc_sdk.utils import PipeConnection
 
-
 @dataclass
-class ChildRecord:
+class ChildProcessInfo:
     """One child this worker forked, plus how to build a replacement.
 
     A ``multiprocessing.Process`` can only be started once, so restarting a
@@ -72,8 +71,7 @@ class WorkerInfo:
     handle: Optional[Type[Process]] = None
     # Live child after ``start()``. The parent stores the ``Process``
     # here to join / inspect pid; after fork the child overwrites it
-    # with ``self`` so ``current_worker().process_instance`` is this
-    # process.
+    # with ``self`` so ``pid`` is this process.
     process_instance: Optional[Process] = None
     # This worker's end (``PipeEnd.LEFT``) of the req/rsp IPC pipe
     # toward the process that accepts client connections. The acceptor
@@ -136,7 +134,7 @@ class TaskInfo:
     pipes, and C-task flags. After ``start()``, ``process_instance`` holds the
     live child. Copied from the user-facing
     :class:`~trpc_sdk.abc.Task` registration in
-    ``TrpcServerEngine.init_task_process``.
+    ``TrpcServerAdapter.init_task_process``.
     """
 
     # Stable name ``{registered_name}:{index}`` used for IPC lookup.
@@ -148,17 +146,13 @@ class TaskInfo:
     # Live child after ``start()``. The master stores the ``Process``
     # here to join / inspect pid.
     process_instance: Optional[Process] = None
-    # This task's end of each producer <-> task IPC pipe, index-aligned with
-    # ``producer_names``. ``None`` where that producer has no pipe to this
-    # task: a peer task which did not declare this one.
+    # This task's end of each sender <-> task IPC pipe, index-aligned with
+    # ``sender_names``.
     task_pipe_conn: List[Optional[PipeConnection]] = field(default_factory=list)
     # Who may send work to this task, in the order ``task_pipe_conn`` uses.
     # The index into this list is the ``task_conn_index`` a response carries,
     # so it is what routes a result back to the process that asked for it.
-    producer_names: List[str] = field(default_factory=list)
-    # Task names this task declared with ``Task(peers=[...])``. Base names,
-    # without a child index: declaring ``"infer"`` reaches every child of it.
-    peers: List[str] = field(default_factory=list)
+    sender_names: List[str] = field(default_factory=list)
     # Batch size for :class:`~trpc_sdk.task.TaskConsumer`; ``0``
     # means fall back to ``engine.opts.task_batch_size``.
     batch_size: int = 0
@@ -168,8 +162,6 @@ class TaskInfo:
     thread_num: int = 0
     model_info: Any = None
     reactor_num: int = 1
-    use_c_task: bool = True
-    c_task_driver_params: Dict[str, Any] = field(default_factory=dict)
     # Optional callback that replaced ``RegisterTask`` on the native path;
     # likewise unread now.
     on_fork: Optional[Callable[..., Any]] = None

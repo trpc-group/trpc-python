@@ -24,7 +24,7 @@ from trpc_sdk.log import logger
 from trpc_sdk.transport import RpcTaskConnection
 from trpc_sdk.utils import PipeEnd
 from .._constants import AddressKind
-from .._constants import RPC_TASK_PRODUCER_PREFIX
+from .._constants import RPC_TASK_SENDER_PREFIX
 from .._listeners import classify_address
 from .._listeners import create_http_msg_handle
 from .._listeners import http_runner_factory
@@ -41,9 +41,9 @@ if TYPE_CHECKING:
     from ._separate_worker import RpcTaskPipes
 
 
-def rpc_task_producer_name(index: int) -> str:
-    """Return the task-mesh producer name of one rpc task process."""
-    return f"{RPC_TASK_PRODUCER_PREFIX}:{index}"
+def rpc_task_sender_name(index: int) -> str:
+    """Return the task-mesh sender name of one rpc task process."""
+    return f"{RPC_TASK_SENDER_PREFIX}:{index}"
 
 
 class RpcTaskProcess(BaseWorker, Process):
@@ -70,9 +70,9 @@ class RpcTaskProcess(BaseWorker, Process):
         self._user_transports: List[BaseServerTransport] = []
         self._thread_info: Optional[HandlerThreadInfo] = None
 
-    def _owned_producer_names(self) -> List[str]:
-        """Claim this child's producer identity in the task mesh."""
-        return [rpc_task_producer_name(self.index)]
+    def _task_pipe_owners(self) -> List[str]:
+        """Claim this child's sender identity in the task mesh."""
+        return [rpc_task_sender_name(self.index)]
 
     def _init_plugins(self) -> None:
         """Initialize every plugin; exit with status 1 on failure."""
@@ -85,9 +85,8 @@ class RpcTaskProcess(BaseWorker, Process):
         """Wire IPC, run hooks, bind own listeners, and publish readiness."""
         try:
             self._install_thread_model()
-            self._bind_task_mesh()
-            self._close_foreign_pipes()
-            self._attach_heartbeats()
+            self._restore_task_mesh_after_fork()
+            self._close_unowned_task_pipes()
             self._close_sibling_pipes()
             self._connect_tasks()
             self._attach_request_pipes()
@@ -106,8 +105,7 @@ class RpcTaskProcess(BaseWorker, Process):
         return ThreadModel(acceptor=main,
                            io=ReactorGroup([main]),
                            handle=ReactorGroup([main]),
-                           tcp_reuse_port=True,
-                           udp_reuse_port=True,
+                           reuse_port=True,
                            worker=self)
 
     def _fail_startup(self, what: str, err: BaseException) -> None:

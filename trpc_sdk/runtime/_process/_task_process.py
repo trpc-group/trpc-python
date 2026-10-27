@@ -50,18 +50,18 @@ from trpc_sdk.utils import create_pipe
 from trpc_sdk.utils import pause_heartbeat as pause_registry_heartbeat
 from trpc_sdk.utils import resume_heartbeat
 from .._constants import CHILD_EXIT_GRACE_SECONDS
-from .._constants import WORKER_PRODUCER_PREFIX
+from .._constants import WORKER_SENDER_PREFIX
 from .._types import TaskInfo
 from .._worker import BaseWorker
 
 
-def worker_producer_name(index: int) -> str:
-    """Return the producer name of one serving loop in the worker process.
+def worker_sender_name(index: int) -> str:
+    """Return the sender name of one serving loop in the worker process.
 
     Args:
         index: Loop index; ``0`` when the worker serves on its main loop only.
     """
-    return f"{WORKER_PRODUCER_PREFIX}:{index}"
+    return f"{WORKER_SENDER_PREFIX}:{index}"
 
 
 def build_task_infos(default_task_num: int = 1) -> List[TaskInfo]:
@@ -101,7 +101,6 @@ def build_task_infos(default_task_num: int = 1) -> List[TaskInfo]:
             task.c_task_driver_params = task_handler.c_task_driver_params
             task.on_fork = task_handler.on_fork
             task.pause_heartbeat = task_handler.pause_heartbeat
-            task.peers = list(getattr(task_handler, "peers", []) or [])
             if task.pause_heartbeat:
                 pause_registry_heartbeat()
             task_infos.append(task)
@@ -109,114 +108,68 @@ def build_task_infos(default_task_num: int = 1) -> List[TaskInfo]:
 
 
 class TaskIpcMesh:
-    """Every task socketpair in the process tree, created before any fork.
+    """Every sender -> task socketpair in the process tree, created before any fork.
 
-    Two kinds of edge live here and they are built the same way, which is the
-    point: a task talks to another task over exactly the pipe a worker would
-    have used, so :func:`~trpc_sdk.task.send_to_task` behaves identically whether
-    it is called from a worker or from inside a task handler.
+    A sender is one serving loop of the worker or one rpc task process, and
+    every sender reaches every task. Tasks do not talk to each other.
 
-    * producer -> task, where a producer is one serving loop of the worker or
-      one rpc task process. Always created.
-    * task -> task, only for the pairs a ``Task(peers=[...])`` declared. A
-      full mesh would cost ``O(T^2)`` socketpairs for a capability most tasks
-      never use.
-
-    Everything must exist before the **first** fork, not merely before the
-    fork of the two processes an edge connects: a task-to-task pair joins two
-    different children, so neither can create it.
+    Everything must exist before the **first** fork: in separate mode both
+    ends belong to children (an rpc task and a task), so neither can create it.
 
     Attributes:
         task_infos: The tasks, in fork order. Index into this list is the
             column of the mesh.
-        producer_names: Everyone that may send work, in the order
+        sender_names: Everyone that may send work, in the order
             ``TaskInfo.task_pipe_conn`` uses. Index into this list is the
             ``task_conn_index`` carried by a response.
     """
 
-    def __init__(self, task_infos: List[TaskInfo], worker_producers: List[str]) -> None:
-        """Create every socketpair the declared topology needs.
+    def __init__(self, task_infos: List[TaskInfo], senders: List[str]) -> None:
+        """Create one socketpair per ``(sender, task)``.
 
         Args:
             task_infos: Pre-fork task records from :func:`build_task_infos`.
-            worker_producers: Producer names that reach *every* task, i.e. the
-                worker's serving loops and, in separate mode, the rpc task
-                processes.
+            senders: Sender names, i.e. the worker's serving loops or, in
+                separate mode, the rpc task processes.
         """
         self.task_infos: List[TaskInfo] = task_infos
-        self._worker_producers: List[str] = list(worker_producers)
-        # A task that declared peers is a producer too, once per child.
-        peer_producers = [task.name for task in task_infos if task.peers]
-        self.producer_names: List[str] = self._worker_producers + peer_producers
+        self.sender_names: List[str] = list(senders)
 
-        # Producer name -> its end toward each task, index-aligned with
-        # ``task_infos``. ``None`` where that producer has no edge to a task.
-        self._producer_pipes: Dict[str, List[Optional[PipeConnection]]] = {
-            name: [None] * len(task_infos) for name in self.producer_names
+        # Sender name -> its end toward each task, index-aligned with
+        # ``task_infos``.
+        self._sender_pipes: Dict[str, List[Optional[PipeConnection]]] = {
+            name: [None] * len(task_infos) for name in self.sender_names
         }
         self._build()
 
     def _build(self) -> None:
-        """Fill both sides of every declared edge with a fresh socketpair.
+        """Fill both sides of every ``(sender, task)`` pair with a fresh socketpair.
 
-        The task keeps ``PipeEnd.LEFT`` and the producer ``PipeEnd.RIGHT``,
+        The task keeps ``PipeEnd.LEFT`` and the sender ``PipeEnd.RIGHT``,
         matching what the master used to hand out, so the protocols on either
         side are unchanged.
         """
         for column, task in enumerate(self.task_infos):
-            task.producer_names = list(self.producer_names)
-            task.task_pipe_conn = [None] * len(self.producer_names)
-            for row, producer in enumerate(self.producer_names):
-                if not self._has_edge(producer, task):
-                    continue
+            task.sender_names = list(self.sender_names)
+            task.task_pipe_conn = [None] * len(self.sender_names)
+            for row, sender in enumerate(self.sender_names):
                 socket_pair = create_pipe(PipeKind.TCP)
                 socket_pair[0].setblocking(False)
                 socket_pair[1].setblocking(False)
                 task.task_pipe_conn[row] = PipeConnection(socket_pair, PipeEnd.LEFT)
-                self._producer_pipes[producer][column] = PipeConnection(socket_pair, PipeEnd.RIGHT)
+                self._sender_pipes[sender][column] = PipeConnection(socket_pair, PipeEnd.RIGHT)
 
-    def _has_edge(self, producer: str, task: TaskInfo) -> bool:
-        """Report whether ``producer`` is allowed to send work to ``task``.
+    def sender_pipes(self, sender: str) -> List[Optional[PipeConnection]]:
+        """Return one sender's end toward each task.
 
         Args:
-            producer: Producer name from ``producer_names``.
-            task: The task record being considered.
+            sender: Sender name from ``sender_names``.
 
         Returns:
-            True for a worker or rpc task producer, which reach every task.
-            For a peer producer, whether that task declared this one, compared
-            on base names so ``peers=["infer"]`` covers every child of it.
+            A list index-aligned with ``task_infos``; all ``None`` for a name
+            that is not a sender.
         """
-        if producer in self._worker_producers:
-            return True
-        if producer == task.name:
-            # A task does not open a pipe to itself.
-            return False
-        declaring = self._task_by_name(producer)
-        return declaring is not None and task.name.split(":", 1)[0] in declaring.peers
-
-    def _task_by_name(self, name: str) -> Optional[TaskInfo]:
-        """Return the task record with this exact indexed name, if any.
-
-        Args:
-            name: Indexed task name such as ``"infer:1"``.
-        """
-        for task in self.task_infos:
-            if task.name == name:
-                return task
-        return None
-
-    def producer_pipes(self, producer: str) -> List[Optional[PipeConnection]]:
-        """Return one producer's end toward each task.
-
-        Args:
-            producer: Producer name from ``producer_names``.
-
-        Returns:
-            A list index-aligned with ``task_infos``; ``None`` where this
-            producer has no edge to that task.
-        """
-        return self._producer_pipes.get(producer, [None] * len(self.task_infos))
+        return self._sender_pipes.get(sender, [None] * len(self.task_infos))
 
     def close_pipes_not_owned_by(self, owners: Collection[str]) -> None:
         """Drop every socketpair end this process has no business holding.
@@ -231,19 +184,19 @@ class TaskIpcMesh:
 
         Args:
             owners: Names this process answers to: its task name, and/or the
-                producer names of its serving loops. Everything else is closed.
+                sender names of its serving loops. Everything else is closed.
         """
         owned = set(owners)
         for column, task in enumerate(self.task_infos):
-            for row, producer in enumerate(self.producer_names):
+            for row, sender in enumerate(self.sender_names):
                 task_end = task.task_pipe_conn[row]
                 if task_end is None:
                     continue
                 if task.name in owned:
-                    # Keep the task end, drop the producer's.
+                    # Keep the task end, drop the sender's.
                     task_end.close_extra_conn()
-                elif producer in owned:
-                    self._producer_pipes[producer][column].close_extra_conn()
+                elif sender in owned:
+                    self._sender_pipes[sender][column].close_extra_conn()
                 else:
                     # Neither side is ours: this pair belongs to two other
                     # processes entirely.
@@ -253,7 +206,7 @@ class TaskIpcMesh:
 
 _task_ipc_mesh: Optional[TaskIpcMesh] = None
 
-
+# TODO：删除
 def set_task_ipc_mesh(mesh: Optional[TaskIpcMesh]) -> None:
     """Publish the mesh so forked children inherit it.
 
@@ -282,10 +235,8 @@ class BaseTaskProcess(BaseWorker, Process):
     """A task is a worker that always runs in a process of its own.
 
     Both halves are load-bearing. :class:`~trpc_sdk.runtime._worker.BaseWorker`
-    gives a task the same startup sequence and the same IPC bookkeeping every
-    worker has, which is what lets a task talk to other tasks exactly the way
-    a worker talks to a task — same pipes, same helpers, no second mechanism.
-    ``Process`` supplies the process identity, because unlike a worker a task
+    gives a task the same startup sequence, exit template and pipe
+    bookkeeping every worker has. ``Process`` supplies the process identity, because unlike a worker a task
     is never the current process: it is always forked by whoever hands it
     work. ``BaseWorker`` is listed first so its ``run()`` wins over
     ``Process.run()``, which would otherwise try to call a ``target`` that
@@ -333,34 +284,21 @@ class TaskProcess(BaseTaskProcess):
         Args:
             task_info: Master-side task record. ``task_handle`` is
                 ``(initializer, handler)``; ``task_pipe_conn`` is index-aligned
-                with the producer list.
+                with the sender list.
             engine: Master engine. The child inherits this object through fork
                 and reads ``opts.task_*`` defaults from it.
         """
         super().__init__(task_info.name, ProcessType.TASK)
         # Master engine that forked this child; used for task_* option defaults.
-        self.server_engine = engine
+        self.server_adapter = engine
         # Master-side task record this process was spawned for.
         self.task_info: TaskInfo = task_info
-        # Inbound: this task's end of each producer <-> task IPC pipe,
-        # index-aligned with ``task_info.producer_names``. ``None`` for a
-        # peer producer that did not declare this task.
-        #
-        # Distinct from the inherited ``BaseWorker.task_pipe_conn``, which is
-        # the *outbound* direction: this task's producer-side ends toward the
-        # peers it declared. A task is both a consumer and a producer, so it
-        # needs both lists.
-        self.producer_pipe_conn: List[Optional[PipeConnection]] = task_info.task_pipe_conn
-
-        # Outbound: the peers this task declared. ``BaseWorker._connect_tasks``
-        # then wires them exactly as it does for a worker, which is what makes
-        # ``send_to_task`` usable from inside a task handler.
-        mesh = task_ipc_mesh()
-        if mesh is not None:
-            self.task_ipc_mesh = mesh
-            self.task_infos = mesh.task_infos
-            self.task_name = [peer.name for peer in mesh.task_infos]
-            self.task_pipe_conn = mesh.producer_pipes(task_info.name)
+        # This task's end of each sender <-> task IPC pipe, index-aligned
+        # with ``task_info.sender_names``.
+        self.sender_pipe_conn: List[Optional[PipeConnection]] = task_info.task_pipe_conn
+        # Only read by ``_close_unowned_task_pipes``; a task sends to no other task,
+        # so the inherited ``task_pipe_conn`` stays empty.
+        self.task_ipc_mesh = task_ipc_mesh()
 
         # Optional user callback run once after fork, before work is accepted.
         # ``task_handle[0]``; registration and tests may leave this ``None``.
@@ -379,35 +317,27 @@ class TaskProcess(BaseTaskProcess):
         # If True, registry heartbeats were paused at registration and must be
         # resumed in ``_prepare_to_serve`` after the initializer returns.
         self.pause_heartbeat: bool = task_info.pause_heartbeat
-        # Consumer threads started in ``_create_producer_conns``; stopped on exit.
+        # Consumer threads started in ``_create_sender_conns``; stopped on exit.
         self._consumers: List[TaskConsumer] = []
         # Forked by a separate-mode I/O process, which stops it with SIGUSR1.
         self._controlled = task_info.separate_mode
 
-    def _create_producer_conns(self) -> None:
-        """Attach each producer IPC pipe, then start consumers and the rsp pump.
+    def _create_sender_conns(self) -> None:
+        """Attach each sender IPC pipe, then start consumers and the rsp pump.
 
         Named apart from :meth:`~trpc_sdk.runtime._worker.BaseWorker._create_pipe_conn`
-        on purpose: that one opens a single pipe *towards* a task, this one
-        accepts every pipe arriving *at* this task. They are opposite ends of
-        the mesh and a task process does both, so sharing a name would make one
-        of them unreachable.
+        on purpose: that one opens a pipe *towards* a task, this one accepts
+        every pipe arriving *at* this task.
 
-        For every non-``None`` pipe: drop the unused socketpair end inherited
-        across fork, wrap the remaining fd in :class:`TaskConnection`, and
-        register it on the loop. Then start ``consumer_num``
-        :class:`TaskConsumer` threads that pull batches through
-        ``task_handle``, and schedule :func:`consume_response` so completed
-        work is written back to the originating worker.
-
-        ``None`` entries are producers that
-        cannot reach this task, which happens once another task declares
-        ``peers``; they are skipped so ``index`` stays the producer index the
-        response has to be routed back on.
+        For every pipe: drop the unused socketpair end inherited across fork,
+        wrap the remaining fd in :class:`TaskConnection`, and register it on
+        the loop with its sender index, which is what a response is routed
+        back on. Then start ``consumer_num`` :class:`TaskConsumer` threads
+        that pull batches through ``task_handle``, and schedule
+        :func:`consume_response` so completed work is written back to the
+        originating sender.
         """
-        for index, pipe_conn in enumerate(self.producer_pipe_conn):
-            if pipe_conn is None:
-                continue
+        for index, pipe_conn in enumerate(self.sender_pipe_conn):
             pipe_conn.close_extra_conn()
             handle = partial(TaskWorkerConnection, app=self, index=index)
             coros = self.loop.create_connection(handle, sock=pipe_conn.get_socket())
@@ -441,31 +371,29 @@ class TaskProcess(BaseTaskProcess):
 
         If ``pause_heartbeat`` was set at registration, registry heartbeats
         resume after the initializer so the service is not advertised until
-        the task is ready. The task then attaches the producer pipes and
-        starts consumers. Peer connections are opened next, so a task can call
-        :func:`~trpc_sdk.task.send_to_task` from its handler.
+        the task is ready. The task then attaches the sender pipes and
+        starts consumers.
 
         Under separate mode a SIGUSR1 sent while the initializer runs is only
         recorded and acted on once the loop handler is installed; a long initializer is
         cut short by the I/O process's SIGKILL after
         :data:`~trpc_sdk.runtime._constants.CHILD_EXIT_GRACE_SECONDS`.
         """
-        self._close_foreign_pipes()
+        self._close_unowned_task_pipes()
 
         if self.task_initializer is not None:
             self.task_initializer()
         if self.pause_heartbeat:
             resume_heartbeat()
 
-        self._create_producer_conns()
-        self._connect_tasks()
+        self._create_sender_conns()
 
     def _on_graceful_exit(self) -> None:
         """Let each consumer finish its batch, then return so the process exits.
 
         Blocks: the loop has stopped, and nobody needs it to turn any more.
         In separate mode every rpc task has exited before the I/O process
-        signals this one, so no producer waits for a result. Gives up a second
+        signals this one, so no sender waits for a result. Gives up a second
         before the parent's SIGKILL, so the exit is ours rather than the
         kernel's. The consumer list is taken out of ``self`` first, so a
         second call does nothing.
@@ -484,8 +412,8 @@ class TaskProcess(BaseTaskProcess):
                 return
             consumer.join(remaining)
 
-    def _owned_producer_names(self) -> List[str]:
-        """Return this task's own name, which covers both roles it plays."""
+    def _task_pipe_owners(self) -> List[str]:
+        """Return this task's own name, so ``_close_unowned_task_pipes`` keeps its task ends."""
         return [self.task_info.name]
 
     def _on_drained(self) -> None:

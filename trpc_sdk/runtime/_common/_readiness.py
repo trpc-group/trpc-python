@@ -10,7 +10,7 @@ Before forking, the parent creates one shared-memory byte per child
 (``multiprocessing.RawArray``). A child sets its byte once it serves; the
 parent polls the array on its loop, before that loop runs forever, while
 watching every child's sentinel. Startup is aborted with
-:meth:`~trpc_sdk.runtime._common.ExitTemplate._exit_now` when a child exits
+:meth:`~trpc_sdk.runtime._common.WorkerExit._exit_now` when a child exits
 (status 1), when SIGTERM arrives (status 0) or when ``ready_timeout`` passes
 (status 1). Stopping, once serving, is the exit template's job, not this
 module's.
@@ -31,7 +31,7 @@ from typing import Optional
 from trpc_sdk.log import logger
 from trpc_sdk.utils import registered_timer_tasks
 from .._constants import CHILD_EXIT_POLL_INTERVAL
-from .._types import ChildRecord
+from .._types import ChildProcessInfo
 
 
 class _StartupFailure(Exception):
@@ -63,11 +63,11 @@ class ChildReadiness:
     """Parent side of the startup wait: ready flags, sentinels, ``ready_timeout``.
 
     A mixin listed before the worker class. It defines no ``__init__``, so the
-    ``BaseWorker`` / ``ExitTemplate`` constructor chain is untouched; its two
+    ``BaseWorker`` / ``WorkerExit`` constructor chain is untouched; its two
     fields are class-level defaults until assigned.
 
     The host provides ``loop``, ``name`` and ``_exit_now`` (from
-    ``BaseWorker`` / ``ExitTemplate``) and ``ready_timeout`` in seconds,
+    ``BaseWorker`` / ``WorkerExit``) and ``ready_timeout`` in seconds,
     where ``None`` or ``0`` means wait forever.
 
     The child side needs no mixin: it sets ``ready_flags[index] = 1`` once it
@@ -109,17 +109,17 @@ class ChildReadiness:
         if waiter is not None and not waiter.done():
             waiter.set_result(None)
 
-    def _wait_children_ready(self, records: List[ChildRecord]) -> float:
+    def _wait_children_ready(self, children: List[ChildProcessInfo]) -> float:
         """Block until every ready flag is set, or abort startup.
 
         Runs on the parent's loop before it runs forever. Fails on any child
-        in ``records`` exiting, a failed startup included, on SIGTERM, and when
+        in ``children`` exiting, a failed startup included, on SIGTERM, and when
         ``ready_timeout`` passes. SIGCHLD is not watched yet, so a child's
         death is seen through its sentinel. The SIGTERM handler installed here
         is temporary; the real one comes with ``_serve``.
 
         Args:
-            records: Children whose death aborts startup. Usually every child,
+            children: Children whose death aborts startup. Usually every child,
                 including those that set no flag (task processes).
 
         Returns:
@@ -132,9 +132,9 @@ class ChildReadiness:
         waiter = loop.create_future()
         self._startup_waiter = waiter
         sentinels = []
-        for record in records:
-            sentinel = record.process.sentinel
-            loop.add_reader(sentinel, self._on_child_died_during_startup, record)
+        for child in children:
+            sentinel = child.process.sentinel
+            loop.add_reader(sentinel, self._on_child_died_during_startup, child)
             sentinels.append(sentinel)
 
         in_main_thread = threading.current_thread() is threading.main_thread()
@@ -167,17 +167,17 @@ class ChildReadiness:
             self._exit_now(exit_code)
         return time.monotonic() - began
 
-    def _on_child_died_during_startup(self, record: ChildRecord) -> None:
-        """Event callback: ``record``'s sentinel became readable before startup completed.
+    def _on_child_died_during_startup(self, child: ChildProcessInfo) -> None:
+        """Event callback: ``child``'s sentinel became readable before startup completed.
 
         Args:
-            record: The child that exited.
+            child: The child that exited.
         """
-        self.loop.remove_reader(record.process.sentinel)
+        self.loop.remove_reader(child.process.sentinel)
         waiter = self._startup_waiter
         if waiter is not None and not waiter.done():
             waiter.set_exception(
-                _StartupFailure(f"child {record.name} exited during startup (exit code {record.process.exitcode})"))
+                _StartupFailure(f"child {child.name} exited during startup (exit code {child.process.exitcode})"))
 
     def _on_sigterm_during_startup(self) -> None:
         """Event callback: SIGTERM arrived during the startup wait."""

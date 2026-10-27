@@ -7,8 +7,7 @@
 from ._context import TrpcContext
 from .._server import ServiceDesc
 
-
-class BaseService:
+class BaseServiceAdapter:
     """Define request handling and service registration."""
 
     async def handle(self, context: TrpcContext, request: bytes) -> bytes:
@@ -32,6 +31,6 @@ class BaseService:
         """
         ...
 
-    def run(self) -> None:
-        """Start serving registered methods."""
+    def init_transport(self) -> None:
+        """Resolve and bind this service's transport."""
         ...

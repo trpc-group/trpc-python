@@ -14,7 +14,7 @@ connection: :class:`ClientTransport` picks TCP or UDP from
 queue for streaming calls.
 
 The **server half** never accepts connections itself. It tells
-:class:`~trpc_sdk.server.TrpcServerEngine` which children to fork, and the
+:class:`~trpc_sdk.server.TrpcServerAdapter` which children to fork, and the
 asyncio protocols in this package then run *inside* those children:
 
 - separate mode: :class:`SeparateClientConnection` on the I/O process

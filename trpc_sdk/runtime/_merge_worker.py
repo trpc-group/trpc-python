@@ -103,9 +103,6 @@ class MergeWorker(BaseWorker):
     _thread_name_prefix = "trpc-loop"
     # ``SchedulerParams.target`` of the HTTP acceptors.
     _http_schedule_target = ""
-    # ``SO_REUSEPORT`` of a datagram endpoint served on the main loop alone:
-    # one socket on one loop has nothing to share the port with.
-    _single_loop_udp_reuse_port = False
 
     def __init__(self, engine, name: str = "merge_worker") -> None:
         """Copy the endpoint tables out of the engine; nothing is bound yet.
@@ -117,7 +114,7 @@ class MergeWorker(BaseWorker):
 
         Args:
             engine: Engine holding ``process_info`` (the per-endpoint tables
-                filled during ``ServiceAdapter.run``) and ``opts``.
+                filled during ``ServiceAdapter.init_transport``) and ``opts``.
             name: Process name shown in logs and process listings.
         """
         super().__init__(name, ProcessType.WORKER)
@@ -175,15 +172,14 @@ class MergeWorker(BaseWorker):
             return ThreadModel(acceptor=main,
                                io=ReactorGroup([main]),
                                handle=ReactorGroup([main]),
-                               tcp_reuse_port=self.tcp_reuse_port,
-                               udp_reuse_port=self._single_loop_udp_reuse_port,
+                               reuse_port=self.tcp_reuse_port,
                                ready_timeout=self.ready_timeout,
                                worker=self)
         self.loop_threads = [LoopThread(i, name_prefix=self._thread_name_prefix) for i in range(self.thread_num)]
         return ThreadModel(acceptor=main,
                            io=ReactorGroup(list(self.loop_threads)),
                            handle=ReactorGroup(list(self.loop_threads), self._http_schedule_target),
-                           tcp_reuse_port=self.tcp_reuse_port,
+                           reuse_port=self.tcp_reuse_port,
                            ready_timeout=self.ready_timeout,
                            worker=self,
                            view_factory=WorkerLoopView)
@@ -202,7 +198,7 @@ class MergeWorker(BaseWorker):
         """
         logger.info("[merge worker] %s start_worker_process(), serving loops: %s", type(self).__name__,
                     self.thread_num)
-
+        # addresses 用 基类 tran_opts
         for i, _ in enumerate(self.addresses):
             try:
                 kind = classify_address(self, i)
@@ -244,19 +240,19 @@ class MergeWorker(BaseWorker):
         self._stop_serving_threads()
         self._exit_now(1)
 
-    def _task_producer_names(self) -> List[str]:
-        """Return one producer identity per serving loop, so each loop gets its own task pipes.
+    def _task_senders(self) -> List[str]:
+        """Return one sender identity per serving loop, so each loop gets its own task pipes.
 
         An asyncio transport may only be written from the loop that created it.
         Sized from ``thread_num`` because the pipes exist before fork and the
-        threads only after it. Override this rather than ``_owned_producer_names``,
+        threads only after it. Override this rather than ``_task_pipe_owners``,
         which defaults to it.
         """
         # Local import: this package's init loads the peer worker, which
         # imports this module. That only works after this class exists.
-        from ._process import worker_producer_name
+        from ._process import worker_sender_name
 
-        return [worker_producer_name(index) for index in range(self.thread_num)]
+        return [worker_sender_name(index) for index in range(self.thread_num)]
 
     def _connect_tasks(self) -> None:
         """Set up every serving loop, task connections included.
@@ -349,8 +345,8 @@ class MergeWorker(BaseWorker):
         info = HandlerThreadInfo(index=index, count=self.thread_num, loop=loop)
         set_current_handler_thread(info)
         if self.task_ipc_mesh is not None:
-            from ._process import worker_producer_name  # local: see _task_producer_names
-            pipes = self.task_ipc_mesh.producer_pipes(worker_producer_name(index))
+            from ._process import worker_sender_name  # local: see _task_senders
+            pipes = self.task_ipc_mesh.sender_pipes(worker_sender_name(index))
             loop.run_until_complete(self._connect_tasks_on(loop, pipes))
         loop.run_until_complete(run_start_hooks(info))
         self._thread_infos[index] = info
