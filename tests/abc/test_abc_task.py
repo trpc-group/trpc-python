@@ -5,9 +5,8 @@
 # tRPC-Python is licensed under Apache-2.0.
 """Test task abstract module"""
 from typing import List
-from typing import NamedTuple
 
-from trpc_sdk.abc.task import Task
+from trpc_sdk.abc import TaskInfo
 
 
 def handler(reqs: List) -> List:
@@ -15,15 +14,9 @@ def handler(reqs: List) -> List:
     return reqs
 
 
-class MockStreams(NamedTuple):
-    """Mack stream"""
-    client = "client"
-    service = "service"
-
-
 def test_task():
     """Test register task"""
-    task = Task(handler=handler)
+    task = TaskInfo(name="", handler=handler)
     assert task.handler is not None
     assert not task.name
     assert not task.initializer
@@ -32,11 +25,12 @@ def test_task():
     assert not task.model_path
     assert not task.model_info
     assert task.use_c_task is False
+    assert not task.c_task_driver_params
     assert not task.on_fork
     assert not task.pause_heartbeat
-    assert not task.task_stream_handler
-    assert task.task_num == 1
+    assert task.task_num == 0
 
-    task = Task(handler=handler, task_stream_handler=MockStreams())
+    task = TaskInfo(name="worker", handler=handler, task_num=1)
     assert task.use_c_task is False
-    assert task.task_stream_handler is not None
+    assert task.task_num == 1
+    assert task.handler is handler

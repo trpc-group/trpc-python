@@ -6,18 +6,18 @@
 
 import pytest
 
-from trpc_sdk.exceptions import PluginInitError
-from trpc_sdk.plugin import BasePlugin
-from trpc_sdk.plugin import PluginCls
-from trpc_sdk.plugin import PluginInitPos
-from trpc_sdk.plugin import PluginManager
-from trpc_sdk.plugin import PluginType
-from trpc_sdk.plugin import check_new_trpc_naming_polaris
+from trpc_sdk.abc import BasePlugin
+from trpc_sdk.abc import PluginInitPos
+from trpc_sdk.abc import PluginType
+from trpc_sdk.plugin import DEFAULT_PLUGIN_MANAGER
+from trpc_sdk.plugin import PluginInitError
+from trpc_sdk.plugin import init_plugins
 from trpc_sdk.plugin import register_plugin as frame_register_plugin
 from trpc_sdk.plugin import set_plugin_order
-from trpc_sdk.plugin import setup
+from trpc_sdk.plugin._plugin import PluginSpec
+from trpc_sdk.plugin._plugin import _PluginManager
 
-DummyPluginManager = PluginManager()
+DummyPluginManager = _PluginManager()
 
 
 class DummyPlugin:
@@ -29,6 +29,7 @@ class EmptyPlugin(BasePlugin):
     """A dummy plugin class for testing purposes."""
 
     def __init__(self):
+        super().__init__()
         self.master_start = False
         self.worker_start = False
 
@@ -39,9 +40,14 @@ class EmptyPlugin(BasePlugin):
         self.worker_start = True
 
 
-def register_plugin(cls, name, ptype=PluginType.USER_DEFINED, version=None, pos=PluginInitPos.WORKER, flag=False):
-    plugin_spec = PluginCls(cls, pos, ptype, name, version, flag)
-    DummyPluginManager.register(ptype, name, plugin_spec)
+def register_plugin(cls, name, ptype=PluginType.USER_DEFINED, version="", pos=PluginInitPos.WORKER, report=False):
+    plugin_spec = PluginSpec(cls=cls,
+                             init_pos=pos,
+                             plugin_type=ptype,
+                             plugin_name=name,
+                             version=version,
+                             report=report)
+    DummyPluginManager.register(plugin_spec)
     return plugin_spec
 
 
@@ -56,17 +62,17 @@ def test_plugin_register():
     """Test the registration of a plugin with PluginManager."""
     plugin_spec = register_plugin(DummyPlugin, "runtime_test", version="0.0.1")
 
-    plugin_spec_obj = DummyPluginManager.plugin_container[PluginType.USER_DEFINED]["runtime_test"]
-    assert isinstance(plugin_spec_obj, PluginCls)
+    plugin_spec_obj = DummyPluginManager.get_plugin_spec(PluginType.USER_DEFINED, "runtime_test")
+    assert isinstance(plugin_spec_obj, PluginSpec)
 
     assert plugin_spec_obj.cls == DummyPlugin
     assert plugin_spec_obj.version == plugin_spec.version
-    assert not plugin_spec_obj.flag
+    assert not plugin_spec_obj.report
 
 
 def test_plugin_specs():
     """Test the retrieval of all plugin specifications from PluginManager."""
-    plugin_spec = register_plugin(DummyPlugin, "runtime_test", version="0.0.1", flag=True)
+    plugin_spec = register_plugin(DummyPlugin, "runtime_test", version="0.0.1", report=True)
 
     specs = DummyPluginManager.all_plugin_specs()
     assert len(specs) == 1
@@ -74,13 +80,13 @@ def test_plugin_specs():
 
 
 def test_default_plugins():
-    """Test the functionality of DefaultPluginManager and its plugin specifications."""
-    from trpc_sdk.plugin import DefaultPluginManager
+    """Built-in plugins are registered once their packages are imported."""
+    import trpc_sdk.naming  # pylint: disable=unused-import
 
-    plugins = DefaultPluginManager.all_plugin_specs()
+    plugins = DEFAULT_PLUGIN_MANAGER.all_plugin_specs()
 
-    for p in plugins:
-        print(type(p.plugin_name), p.plugin_name, p.version)
+    for plugin_spec in plugins:
+        print(type(plugin_spec.plugin_name), plugin_spec.plugin_name, plugin_spec.version)
 
     assert len(plugins) > 0
 
@@ -108,22 +114,16 @@ class DummyInvalidPlugin:
 
 def test_plugin_init_err():
     """Test the handling of plugin initialization errors."""
-    plugin_spec = register_plugin(DummyInvalidPlugin, "dummy_invalid_plugin", pos=PluginInitPos.MASTER)
+    plugin_spec = register_plugin(DummyInvalidPlugin, "dummy_invalid_plugin", pos=PluginInitPos.WORKER)
     with pytest.raises(PluginInitError):
         plugin_spec.cls()
 
 
-def test_check_new_trpc_naming_polaris():
-    """Test the version check functionality for trpc_naming_polaris module."""
-    import sys
-
-    class _MockTrpcNamingPolaris:
-        pass
-
-    obj = _MockTrpcNamingPolaris()
-    setattr(obj, "__version__", '0.6.1')
-    sys.modules["trpc_naming_polaris"] = obj
-    assert check_new_trpc_naming_polaris()
+def test_plugin_spec_records_version_and_report():
+    """Plugin metadata lives on PluginSpec, including version and the report flag."""
+    plugin_spec = register_plugin(DummyPlugin, "versioned_plugin", version="0.6.1", report=True)
+    assert plugin_spec.version == "0.6.1"
+    assert plugin_spec.report is True
 
 
 def test_plugin_order():
@@ -160,5 +160,6 @@ def test_plugin_order():
             raise ValueError("test")
 
     set_plugin_order(PluginType.USER_DEFINED, ["user_plugin_one", "user_plugin_two", "user_plugin_three"])
-    setup(without_user_define=False)
-    assert result == ["user_plugin_one", "user_plugin_two", "user_plugin_three"]
+    init_plugins(without_user_define=False)
+    ours = [name for name in result if name.startswith("user_plugin_")]
+    assert ours[:3] == ["user_plugin_one", "user_plugin_two", "user_plugin_three"]

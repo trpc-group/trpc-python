@@ -4,8 +4,8 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
-from trpc_sdk.rpcz.span import Span
-from trpc_sdk.rpcz.span import SpanType
+from trpc_sdk.rpcz import Span
+from trpc_sdk.rpcz import SpanType
 
 
 def test_span_to_dict_server_filters_client_fields_and_timeout():

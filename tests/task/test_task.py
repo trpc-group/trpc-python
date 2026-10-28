@@ -3,415 +3,149 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
+"""Worker-side send_to_task and the pipe that carries the reply back."""
 
-import asyncio
-import queue
-import time
+import pytest
 
-from asyncio import Future
-from unittest import mock
-
-from trpc_sdk import context
-from trpc_sdk import task
-from trpc_sdk import utils
+from trpc_sdk.abc import TrpcContext
 from trpc_sdk.exceptions import TaskHandleError
-from trpc_sdk.plugin import PluginType
-from trpc_sdk.plugin import Task
-from trpc_sdk.plugin import register_plugin
-from trpc_sdk.task import task_util
-from trpc_sdk.task import task_util_c
-from trpc_sdk.task.consumer import TaskConsumer
-from trpc_sdk.task.task import TRPC_DEEP_INFER_TASK
-from trpc_sdk.task.task import send_to_task_with_serializer
-from trpc_sdk.transport import server_task
-from trpc_sdk.transport import server_worker
+from trpc_sdk.task import TaskConsumer
+from trpc_sdk.task import TaskRegistry
+from trpc_sdk.task import TaskStatusCode
+from trpc_sdk.task import WorkerTaskConnection
+from trpc_sdk.task import inner_decode_task_req
+from trpc_sdk.task import inner_encode_task_rsp
+from trpc_sdk.task import register_task_conn
+from trpc_sdk.task import register_task_num
+from trpc_sdk.task import send_to_task
+from trpc_sdk.utils import now_ms
 
 
-def handler(reqs):
-    rsps = []
-    for req in reqs:
-        rsps.append("task handle ok-" + str(req))
-    return rsps
-
-
-async def co_handler(reqs):
-    rsps = []
-    for req in reqs:
-        rsps.append("task handle ok-" + str(req))
-    return rsps
-
-
-def handler_not_list(reqs):
-    return "task handle ok-123"
-
-
-def handler_wrong_list(reqs):
-    return []
-
-
-def handler_exception(reqs):
-    raise Exception("test exception")
-
-
-def initializer():
-    pass
-
-
-@register_plugin(plugin_type=PluginType.USER_DEFINED,
-                 plugin_name="task_test",
-                 task=Task(handler, initializer, use_c_task=False))
-def load_task():
-    pass
-
-
-class TestConnection:
-
+class _Conn:
     def __init__(self):
-        self.buf = b''
+        self.buf = b""
+        self.closed = False
 
     def write(self, buf):
-        self.buf = buf
+        self.buf += buf
+
+    def is_closing(self):
+        return self.closed
+
+    def close(self):
+        self.closed = True
 
 
-class TestPipeConnection:
-
-    def __init__(self):
-        self.buf = b''
-
-    def send(self, buf):
-        self.buf = buf
+def _ctx():
+    ctx = TrpcContext()
+    ctx.recv_time = now_ms()
+    ctx.timeout = 30000
+    return ctx
 
 
-async def _wait_consumer_response(consumer, task_conn_obj, timeout=5):
-    """Run consumer until task response bytes are produced."""
-    consumer.start()
-    loop = asyncio.get_event_loop()
-    deadline = loop.time() + timeout
+def test_send_to_task_without_a_connection_fails():
+    with pytest.raises(TaskHandleError, match="task conn cannot find"):
+        send_to_task(_ctx(), "task_missing_name", "123")
+
+
+def test_task_consumer_can_be_stopped_before_start():
+    consumer = TaskConsumer(lambda reqs: reqs, wait_interval=1, batch_size=1, daemon=True)
+    assert consumer.daemon is True
+    consumer.terminate()
+    assert consumer._running is False
+
+
+@pytest.mark.asyncio
+async def test_send_to_task_round_trip():
+    name = "task_round_trip"
+    conn = _Conn()
+    register_task_conn(name, conn)
     try:
-        while not task_conn_obj.buf:
-            task_util_c.consume_batch_rsp()
-            if task_conn_obj.buf:
-                break
-            if loop.time() >= deadline:
-                raise AssertionError("timed out waiting for task response")
-            await asyncio.sleep(0.01)
+        future = send_to_task(_ctx(), name, "123")
+        pkg_id, _recv, _timeout, obj = inner_decode_task_req(conn.buf)
+        assert obj == "123"
+
+        protocol = WorkerTaskConnection()
+        protocol.connection_made(conn)
+        protocol.data_received(inner_encode_task_rsp(pkg_id, TaskStatusCode.SUCCESS, "task handle ok-123"))
+        assert await future == "task handle ok-123"
     finally:
-        consumer.terminate()
-        consumer.join(timeout=timeout)
+        TaskRegistry.conns.pop(name, None)
+        TaskRegistry.pkg_ids.pop(conn, None)
 
 
-@utils.trpc_async_pytest
-async def test_send_to_task():
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("code", "match"),
+    [
+        (TaskStatusCode.TIMEOUT, "task wait timeout"),
+        (TaskStatusCode.QUEUE_FULL, "queue is full"),
+        (TaskStatusCode.RSP_WRONG_TYPE, "non-list type"),
+        (TaskStatusCode.RSP_WRONG_LENGTH, "wrong length"),
+    ],
+)
+async def test_receive_maps_status_codes(code, match):
+    name = f"task_status_{int(code)}"
+    conn = _Conn()
+    register_task_conn(name, conn)
     try:
-        task.send_to_task(context.Context(), "test", None)
-    except TaskHandleError:
-        assert True
-    else:
-        assert False
+        future = send_to_task(_ctx(), name, "123")
+        pkg_id, _recv, _timeout, _obj = inner_decode_task_req(conn.buf)
+        protocol = WorkerTaskConnection()
+        protocol.connection_made(conn)
+        protocol.data_received(inner_encode_task_rsp(pkg_id, code, None))
+        with pytest.raises(TaskHandleError, match=match):
+            await future
+    finally:
+        TaskRegistry.conns.pop(name, None)
+        TaskRegistry.pkg_ids.pop(conn, None)
 
-    def serialize(obj):
-        return b"test_data"
 
-    def deserialize(buf):
-        return None
-
+@pytest.mark.asyncio
+async def test_handler_error_is_reraised():
+    name = "task_handler_error"
+    conn = _Conn()
+    register_task_conn(name, conn)
     try:
-        await send_to_task_with_serializer(context.Context(), 1, "test", None, serialize, deserialize)
-    except TaskHandleError:
-        assert True
-    else:
-        assert False
+        future = send_to_task(_ctx(), name, "123")
+        pkg_id, _recv, _timeout, _obj = inner_decode_task_req(conn.buf)
+        protocol = WorkerTaskConnection()
+        protocol.connection_made(conn)
+        protocol.data_received(inner_encode_task_rsp(pkg_id, TaskStatusCode.SUCCESS, TaskHandleError("test exception")))
+        with pytest.raises(TaskHandleError, match="test exception"):
+            await future
+    finally:
+        TaskRegistry.conns.pop(name, None)
+        TaskRegistry.pkg_ids.pop(conn, None)
 
 
-@utils.trpc_async_pytest
-async def test_send_to_task_with_serialize():
-    conn = TestConnection()
-    task_util.register_task_conn(TRPC_DEEP_INFER_TASK, conn)
-
-    def serialize(obj):
-        return b"test_data"
-
-    def deserialize(buf):
-        return None
-
-    future = Future()
-    future.set_result("test")
-    backup = task_util.send_to_task_c
-    task_util.send_to_task_c = mock.Mock(return_value=future)
+@pytest.mark.asyncio
+async def test_task_num_round_robin_writes_a_child_pipe():
+    name = "task_num_children"
+    child = _Conn()
+    register_task_num(name, 1)
+    register_task_conn(f"{name}:0", child)
     try:
-        await send_to_task_with_serializer(context.Context(), 1, "test", None, serialize, deserialize)
-    except TaskHandleError:
-        assert False
-    else:
-        assert True
-    task_util.send_to_task_c = backup
-
-
-@utils.trpc_async_pytest
-async def test_send_to_task_worker():
-    ctx = context.Context()
-    ctx.recv_time = int(time.time() * 1000)
-    ctx.timeout = 30000
-
-    # init params
-    req = '123'
-    client_conn_obj = TestConnection()
-    task_conn_obj = TestConnection()
-
-    task_util.register_task_conn("task_test", client_conn_obj)
-    task_coro = task.send_to_task(ctx, "task_test", req)
-    assert isinstance(task_coro, Future)
-
-    task_conn = server_task.TaskConnection(None, 1)
-    task_conn.connection_made(task_conn_obj)
-    task_conn.data_received(client_conn_obj.buf)
-
-    consumer = TaskConsumer(handler, 100, 5, True)
-    await _wait_consumer_response(consumer, task_conn_obj)
-
-    worker_task_conn = server_worker.TaskConnection()
-    worker_task_conn.connection_made(client_conn_obj)
-    worker_task_conn.data_received(task_conn_obj.buf)
-
-    # end
-    ret = await asyncio.wait_for(task_coro, timeout=5)
-    assert "task handle ok-" + req == ret
-
-
-@utils.trpc_async_pytest
-async def test_send_to_task_executor():
-    ctx = context.Context()
-    ctx.recv_time = int(time.time() * 1000)
-    ctx.timeout = 30000
-
-    # init params
-    req = '123'
-    client_conn_obj = TestConnection()
-    task_conn_obj = TestConnection()
-
-    task_util.register_task_conn("task_test", client_conn_obj)
-    task_coro = task.send_to_task(ctx, "task_test", req)
-    assert isinstance(task_coro, Future)
-
-    task_conn = server_task.TaskConnection(None, 1)
-    task_conn.connection_made(task_conn_obj)
-    task_conn.data_received(client_conn_obj.buf)
-
-    consumer = TaskConsumer(handler, 100, 5, True)
-    await _wait_consumer_response(consumer, task_conn_obj)
-
-    worker_task_conn = server_worker.TaskConnection()
-    worker_task_conn.connection_made(client_conn_obj)
-    worker_task_conn.data_received(task_conn_obj.buf)
-
-    # end
-    ret = await asyncio.wait_for(task_coro, timeout=5)
-    assert "task handle ok-" + req == ret
-
-
-@utils.trpc_async_pytest
-async def test_task_timeout():
-    ctx = context.Context()
-    ctx.recv_time = (int(time.time() * 1000 - 1000))
-    ctx.timeout = 100
-
-    # init params
-    req = '123'
-    client_conn_obj = TestConnection()
-    task_conn_obj = TestConnection()
-
-    task_util.register_task_conn("task_test", client_conn_obj)
-    task_coro = task.send_to_task(ctx, "task_test", req)
-    assert isinstance(task_coro, Future)
-
-    task_conn = server_task.TaskConnection(None, 1)
-    task_conn.connection_made(task_conn_obj)
-    task_conn.data_received(client_conn_obj.buf)
-
-    consumer = TaskConsumer(handler, 100, 5, True)
-    await _wait_consumer_response(consumer, task_conn_obj)
-
-    worker_task_conn = server_worker.TaskConnection()
-    worker_task_conn.connection_made(client_conn_obj)
-    worker_task_conn.data_received(task_conn_obj.buf)
-
-    # end
-    try:
-        await asyncio.wait_for(task_coro, timeout=5)
-    except TaskHandleError as err:
-        assert err.msg == "error: task wait timeout!"
-    else:
-        assert False
-
-
-@utils.trpc_async_pytest
-async def test_task_rsp_not_list():
-    ctx = context.Context()
-    ctx.recv_time = int(time.time() * 1000)
-    ctx.timeout = 30000
-
-    # init params
-    req = '123'
-    client_conn_obj = TestConnection()
-    task_conn_obj = TestConnection()
-    task_util.TASK_QUEUE = queue.Queue()
-
-    task_util.register_task_conn("task_test", client_conn_obj)
-    task_coro = task.send_to_task(ctx, "task_test", req)
-    assert isinstance(task_coro, Future)
-
-    task_conn = server_task.TaskConnection(None, 1)
-    task_conn.connection_made(task_conn_obj)
-    task_conn.data_received(client_conn_obj.buf)
-
-    consumer = TaskConsumer(handler_not_list, 100, 5, True)
-    await _wait_consumer_response(consumer, task_conn_obj)
-
-    worker_task_conn = server_worker.TaskConnection()
-    worker_task_conn.connection_made(client_conn_obj)
-    worker_task_conn.data_received(task_conn_obj.buf)
-
-    # end
-    try:
-        await asyncio.wait_for(task_coro, timeout=5)
-    except TaskHandleError as err:
-        assert err.msg == "error: get non-list type from function return!"
-    else:
-        assert False
-
-
-@utils.trpc_async_pytest
-async def test_task_rsp_wrong_list():
-    ctx = context.Context()
-    ctx.recv_time = int(time.time() * 1000)
-    ctx.timeout = 30000
-
-    # init params
-    req = '123'
-    client_conn_obj = TestConnection()
-    task_conn_obj = TestConnection()
-    task_util.TASK_QUEUE = queue.Queue()
-
-    task_util.register_task_conn("task_test", client_conn_obj)
-    task_coro = task.send_to_task(ctx, "task_test", req)
-    assert isinstance(task_coro, Future)
-
-    task_conn = server_task.TaskConnection(None, 1)
-    task_conn.connection_made(task_conn_obj)
-    task_conn.data_received(client_conn_obj.buf)
-
-    consumer = TaskConsumer(handler_wrong_list, 100, 5, True)
-    await _wait_consumer_response(consumer, task_conn_obj)
-
-    worker_task_conn = server_worker.TaskConnection()
-    worker_task_conn.connection_made(client_conn_obj)
-    worker_task_conn.data_received(task_conn_obj.buf)
-
-    # end
-    try:
-        await asyncio.wait_for(task_coro, timeout=5)
-    except TaskHandleError as err:
-        assert err.msg == "error: get wrong length from function return!"
-    else:
-        assert False
-
-
-@utils.trpc_async_pytest
-async def test_task_rsp_handle_fail():
-    ctx = context.Context()
-    ctx.recv_time = int(time.time() * 1000)
-    ctx.timeout = 30000
-
-    # init params
-    req = '123'
-    client_conn_obj = TestConnection()
-    task_conn_obj = TestConnection()
-    task_util.TASK_QUEUE = queue.Queue()
-
-    task_util.register_task_conn("task_test", client_conn_obj)
-    task_coro = task.send_to_task(ctx, "task_test", req)
-    assert isinstance(task_coro, Future)
-
-    task_conn = server_task.TaskConnection(None, 1)
-    task_conn.connection_made(task_conn_obj)
-    task_conn.data_received(client_conn_obj.buf)
-
-    consumer = TaskConsumer(handler_exception, 100, 5, True)
-    await _wait_consumer_response(consumer, task_conn_obj)
-
-    worker_task_conn = server_worker.TaskConnection()
-    worker_task_conn.connection_made(client_conn_obj)
-    worker_task_conn.data_received(task_conn_obj.buf)
-
-    # end
-    try:
-        await asyncio.wait_for(task_coro, timeout=5)
-    except TaskHandleError as err:
-        assert "test exception" in err.msg
-    else:
-        assert False
-
-
-@utils.trpc_async_pytest
-async def test_register_ctask():
-    task_name = "t1"
-    assert not task_util.is_ctask(task_name)
-    task_util.register_ctask_name(task_name)
-    assert task_util.is_ctask(task_name)
-
-    ctx = context.Context()
-    ctx.recv_time = int(time.time() * 1000)
-    ctx.timeout = 30000
-    req = "123"
-
-    client_conn_obj = TestConnection()
-    task_util.register_task_conn(task_name, client_conn_obj)
-    task_coro = task.send_to_task(ctx, task_name, req)
-    assert isinstance(task_coro, Future)
-
-
-@utils.trpc_async_pytest
-async def test_task_num():
-    ctx = context.Context()
-    ctx.recv_time = int(time.time() * 1000)
-    ctx.timeout = 30000
-
-    # init params
-    req = '123'
-    client_conn_obj = TestConnection()
-
-    task_util.register_task_num("t2", 1)
-    task_util.register_task_conn("t2:0", client_conn_obj)
-    task_coro = task.send_to_task(ctx, "t2", req)
-    assert isinstance(task_coro, Future)
-
-
-@utils.trpc_async_pytest
-async def test_send_to_task_co_worker():
-    ctx = context.Context()
-    ctx.recv_time = int(time.time() * 1000)
-    ctx.timeout = 30000
-
-    # init params
-    req = '123'
-    client_conn_obj = TestConnection()
-    task_conn_obj = TestConnection()
-
-    task_util.register_task_conn("co_task_test", client_conn_obj)
-    task_coro = task.send_to_task(ctx, "co_task_test", req)
-    assert isinstance(task_coro, Future)
-
-    task_conn = server_task.TaskConnection(None, 1)
-    task_conn.connection_made(task_conn_obj)
-    task_conn.data_received(client_conn_obj.buf)
-
-    consumer = TaskConsumer(co_handler, 100, 5, True)
-    await _wait_consumer_response(consumer, task_conn_obj)
-
-    worker_task_conn = server_worker.TaskConnection()
-    worker_task_conn.connection_made(client_conn_obj)
-    worker_task_conn.data_received(task_conn_obj.buf)
-
-    # end
-    ret = await asyncio.wait_for(task_coro, timeout=5)
-    assert "task handle ok-" + req == ret
+        future = send_to_task(_ctx(), name, "123")
+        assert inner_decode_task_req(child.buf)[-1] == "123"
+        future.cancel()
+    finally:
+        TaskRegistry.nums.pop(name, None)
+        TaskRegistry.cur_select.pop(name, None)
+        TaskRegistry.conns.pop(f"{name}:0", None)
+        TaskRegistry.pkg_ids.pop(child, None)
+        TaskRegistry.rsp_futures.clear()
+
+
+def test_connection_lost_closes_the_pipe():
+    protocol = WorkerTaskConnection()
+    conn = _Conn()
+    protocol.connection_made(conn)
+    protocol.connection_lost(RuntimeError("gone"))
+    assert conn.closed is True
+
+    closed = _Conn()
+    closed.closed = True
+    protocol.connection_made(closed)
+    protocol.connection_lost(None)
+    assert closed.closed is True

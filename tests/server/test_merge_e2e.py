@@ -31,15 +31,15 @@ from tests.server._e2e_support import tcp_calls
 from tests.server._e2e_support import tcp_pipelined
 from tests.server._e2e_support import udp_call
 
-THREADED = "io_thread_num: 3"
+THREADED = "mode: single_process\nio_handle_type: merge\nio_num: 3"
 
 
 @pytest.fixture
 def start_server(tmp_path) -> Iterator:
     servers: List[Server] = []
 
-    def start(ports: Dict[str, int], server_extra: str = "", env: Optional[Dict[str, str]] = None) -> Server:
-        server = Server(tmp_path, ports, server_extra, env)
+    def start(ports: Dict[str, int], processmodel: str = "", env: Optional[Dict[str, str]] = None) -> Server:
+        server = Server(tmp_path, ports, env=env, processmodel=processmodel)
         servers.append(server)
         server.wait_ready()
         return server
@@ -146,7 +146,7 @@ def test_blocking_handler_only_blocks_its_own_thread(start_server):
 
 
 def test_hook_failure_on_one_thread_exits_and_stops_the_others(tmp_path):
-    server = Server(tmp_path, {"tcp": free_port()}, THREADED, env={"FAIL_HOOK": "1"})
+    server = Server(tmp_path, {"tcp": free_port()}, env={"FAIL_HOOK": "1"}, processmodel=THREADED)
     code = server.wait_exit()
     assert code == 1, server.output
     assert "hook failed on purpose" in server.output
@@ -156,7 +156,8 @@ def test_hook_failure_on_one_thread_exits_and_stops_the_others(tmp_path):
 
 
 def test_ready_timeout_exceeded_exits(tmp_path):
-    server = Server(tmp_path, {"tcp": free_port()}, THREADED + "\nready_timeout: 1000", env={"SLOW_HOOK": "2"})
+    server = Server(tmp_path, {"tcp": free_port()}, "ready_timeout: 1000", env={"SLOW_HOOK": "2"},
+                    processmodel=THREADED)
     began = time.monotonic()
     code = server.wait_exit()
     assert code == 1, server.output
@@ -172,6 +173,21 @@ def test_timer_runs_once_on_thread_zero(start_server):
     timer_lines = [line for line in server.output.splitlines() if line.startswith("TIMER ")]
     assert len(timer_lines) == 1, server.output
     assert timer_lines[0].startswith("TIMER info:0:"), timer_lines
+
+
+def test_dead_serving_thread_shuts_the_server_down_with_status_1(start_server):
+    ports = {"tcp": free_port()}
+    server = start_server(ports, THREADED)
+
+    async def run() -> None:
+        try:
+            await asyncio.wait_for(tcp_call(ports["tcp"], 1, "stop_loop"), 2)
+        except (asyncio.TimeoutError, OSError, asyncio.IncompleteReadError):
+            pass
+
+    asyncio.run(run())
+    assert server.wait_exit() == 1, server.output
+    assert "exited unexpectedly" in server.output, server.output
 
 
 def test_threaded_sigterm_with_requests_in_flight_exits_cleanly(start_server):

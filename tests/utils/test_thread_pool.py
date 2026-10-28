@@ -4,16 +4,19 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
-from trpc_sdk import utils
-from trpc_sdk.pool import threadpool
+from trpc_sdk.runtime._threadmodel import LoopThread
 
 
-def test():
+def _work():
     return 1
 
 
-@utils.trpc_async_pytest
-async def test_send_to_task():
-    threadpool.GlobalThreadPool = None
-    ret = await threadpool.submit(test)
-    assert ret == 1
+def test_submit_to_loop_thread():
+    """A loop thread is the executor that replaced the global thread pool."""
+    thread = LoopThread(0)
+    thread.start()
+    thread.wait_ready(3)
+    try:
+        assert thread.submit(_work) == 1
+    finally:
+        assert thread.stop(3) is True

@@ -3,44 +3,47 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-"""Test log module"""
+"""Test event-loop selection helpers."""
 import asyncio
-import os
-
-from importlib import reload
+import sys
 
 import uvloop
 
-from trpc_sdk.utils import loop_lib
+from trpc_sdk.utils import _loop_lib as loop_lib
+from trpc_sdk.utils import get_async_lib
+from trpc_sdk.utils import get_or_create_event_loop
 
 
 def test_uvloop():
-    """Test uvloop"""
-    os.environ['TRPC_UVLOOP'] = '1'
+    """Test uvloop selection."""
+    lib = get_async_lib(True)
+    loop = lib.new_event_loop()
+    try:
+        assert lib is uvloop
+        assert isinstance(loop, uvloop.Loop)
+        assert loop_lib.asynclib is uvloop
+    finally:
+        loop.close()
 
-    reload(loop_lib)
-    loop = loop_lib.asynclib.new_event_loop()
-    assert isinstance(loop, uvloop.Loop)
-    assert loop_lib.use_uvloop is True
-    os.environ['TRPC_UVLOOP'] = '0'
-    loop_lib.use_uvloop = False
-    reload(loop_lib)
-    loop = loop_lib.asynclib.new_event_loop()
-    assert loop_lib.use_uvloop is False
-    assert isinstance(loop, asyncio.AbstractEventLoop)
-    assert loop_lib.asynclib.new_event_loop == asyncio.new_event_loop
+    lib = get_async_lib(False)
+    assert lib is asyncio
+    assert loop_lib.asynclib is asyncio
+    loop = lib.new_event_loop()
+    try:
+        assert isinstance(loop, asyncio.AbstractEventLoop)
+    finally:
+        loop.close()
+        asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
 
 
-class _MockLoop:
-
-    def __init__(self) -> None:
-        raise ImportError
-
-
-def test_uvloop_error(mocker):
+def test_uvloop_error(monkeypatch):
     """Test error import"""
-    os.environ['TRPC_UVLOOP'] = '1'
-    mocker.patch("uvloop.EventLoopPolicy", _MockLoop)
-    reload(loop_lib)
-    assert loop_lib.use_uvloop is False
-    os.environ['TRPC_UVLOOP'] = '0'
+    monkeypatch.setitem(sys.modules, "uvloop", None)
+    lib = get_async_lib(True)
+    assert lib is asyncio
+    assert loop_lib.asynclib is asyncio
+
+
+def test_get_or_create_event_loop():
+    loop = get_or_create_event_loop()
+    assert isinstance(loop, asyncio.AbstractEventLoop)

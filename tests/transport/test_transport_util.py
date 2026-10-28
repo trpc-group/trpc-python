@@ -3,151 +3,47 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-"""Test transport util module"""
+"""Client transport options and the inner IPC frame helpers tests used to import from ``abc.transport``."""
 
-import asyncio
-
-from typing import Callable
-
-from trpc_sdk.abc.transport import BaseClientTransportOptions
-from trpc_sdk.codec import TrpcServerParser
-from trpc_sdk.transport.server_conn_info import Parser
-
-
-class TestParser(Parser):
-    """Test parser"""
-
-    def __init__(self, f: Callable = None):
-        self.f = f or TrpcServerParser
-
-    def create(self):
-        """Create server parser"""
-        return self.f()
-
-    async def read_frame(self, conn) -> bytes:
-        """Read frame"""
-        raise asyncio.TimeoutError('')
+from trpc_sdk.abc import BaseClientTransportOption
+from trpc_sdk.abc import BaseServerTransportOption
+from trpc_sdk.transport import ConnPoolOptions
+from trpc_sdk.transport import RoundTripOptions
+from trpc_sdk.transport._cython import inner_decode_rsp
+from trpc_sdk.transport._cython import inner_encode_rsp
 
 
-class MockSocket:
-    """Mock socket"""
-
-    def fileno(self):
-        """File Descriptor"""
-        return 1
-
-
-class TestClientConn:
-    """Test client conn"""
-
-    def __init__(self):
-        self.buf = b''
-        self.metadata = {"socket": MockSocket(), "peername": ("127.0.0.1", 8080), "sockname": ("127.0.0.1", 8080)}
-        self._extra = {}
-        self.closing = False
-
-    async def read(self, length):
-        """Read data"""
-        return self.buf
-
-    def write(self, buf):
-        """Write data"""
-        self.buf = buf
-
-    def sendto(self, buf, addr):
-        """Sendto data"""
-        self.buf = buf
-
-    def close(self):
-        """Close conn"""
-        self.closing = True
-
-    def get_extra_info(self, key):
-        """Get extra info"""
-        return self.metadata[key]
-
-    def is_closing(self):
-        """Closing"""
-        return self.closing
+def test_client_transport_option_defaults():
+    opt = BaseClientTransportOption()
+    assert opt.address == ("", 0)
+    assert opt.network == "tcp"
+    assert opt.socket_type == "net"
+    assert opt.short_conn is False
+    assert opt.parser is None
 
 
-async def _mock_receive_return():
-    """Mock receive_return"""
-    return b'hi: hello: ', "test"
+def test_round_trip_options_carry_pool_settings():
+    pool = ConnPoolOptions(dial_timeout=100, idle_timeout=1, max_idle=2, max_active=4)
+    options = RoundTripOptions()
+    options.set_network("udp")
+    options.set_pool_options(pool)
+    options.address = ("127.0.0.1", 8000)
+
+    assert options.network == "udp"
+    assert options.pool_opts is pool
+    assert options.pool_opts.max_active == 4
+    assert options.address == ("127.0.0.1", 8000)
+    assert isinstance(options, BaseClientTransportOption)
 
 
-class MockTransport:
-
-    def __init__(self):
-        self._data = {'sockname': ("192.168.1.1", 8080), 'peername': ("10.0.0.1", 9090)}
-
-    @property
-    def transport(self):
-        return self
-
-    def get_extra_info(self, key: str):
-        return self._data[key]
+def test_server_transport_option_address_keeps_port():
+    opt = BaseServerTransportOption()
+    opt.set_address(("127.0.0.1", 9000))
+    opt.set_network("tcp")
+    assert opt.port == 9000
+    assert opt.address == ("127.0.0.1", 9000)
 
 
-# pylint: disable=unnecessary-pass
-class TestConn:
-    """Conn for test"""
-
-    async def read(self, length: int):
-        """Read 'length' data"""
-        if length == 16:
-            return b'\t0\x00\x00\x00\x00\x00\x1f\x00\x02\x00\x00\x00\x00\x00\x00\x18\x01\n\x0bhi: hello: '[:16]
-        return b'\t0\x00\x00\x00\x00\x00\x1f\x00\x02\x00\x00\x00\x00\x00\x00\x18\x01\n\x0bhi: hello: '[16:]
-
-    async def receive(self):
-        """Recv data"""
-        return await _mock_receive_return()
-
-    def write(self, buf):
-        """Write buff"""
-        pass
-
-    def close(self, force: bool = False):
-        """Close conn"""
-        pass
-
-    @property
-    def stream_conn(self):
-        return MockTransport()
-
-
-class TestPool:
-    """Conn pool for test"""
-
-    async def get(self, trans_opt: BaseClientTransportOptions, timeout: float):
-        """Get conn"""
-        return TestConn()
-
-
-class TestPipeSocket:
-    """Test PipeSocket"""
-
-    __pipe_buf = b''
-
-    def __init__(self, id):
-        self.id = id
-
-    @classmethod
-    def get_buf(cls):
-        return cls.__pipe_buf
-
-    @classmethod
-    def set_buf(cls, buf):
-        cls.__pipe_buf = buf
-
-    def sendall(self, buf):
-        self.set_buf(buf)
-
-    def recv(self, length):
-        return self.get_buf()
-
-    def fileno(self):
-        return self.id
-
-    def close(self):
-        pass
+def test_inner_response_frame_round_trip():
+    encoded = inner_encode_rsp(3, 8, 0, b"rsp")
+    assert inner_decode_rsp(encoded) == (3, 8, 0, b"rsp")

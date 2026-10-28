@@ -3,270 +3,234 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-"""Test transport module"""
+"""Separate-mode I/O connections that replaced the Python dispatcher."""
+
 import asyncio
 import time
+from unittest.mock import MagicMock
 
 import pytest
 
-from tests.transport_util import TestParser
-from tests.transport_util import TestClientConn
-from trpc_sdk.server import dispatcher
-from trpc_sdk.server import server_engine
-from trpc_sdk.server.option import ServerOption
-from trpc_sdk.transport import server_dispatcher
-from trpc_sdk.transport.settings import SchedulerParams
-from trpc_sdk.transport.settings import register_dispatcher_worker_func
-from trpc_sdk.utils import get_or_create_event_loop
+from trpc_sdk._inner import trpc_pb2
+from trpc_sdk.codec import get_server_parser
+from trpc_sdk.transport import ClientConnectionInfo
+from trpc_sdk.transport import SchedulerParams
+from trpc_sdk.transport import SeparateClientConnection
+from trpc_sdk.transport import SeparateRpcTaskConnection
+from trpc_sdk.transport import get_next_worker
+from trpc_sdk.transport import register_dispatcher_worker_func
+from trpc_sdk.transport import select_rpc_task
+from trpc_sdk.transport._cython import inner_encode_rsp
+
+from tests.protocol._fakes import FakeTransport
+from tests.protocol._fakes import ParserFactory
+from tests.protocol._fakes import unary_frame
+from trpc_sdk.transport import ConnectionOption
+from trpc_sdk.transport import DefaultIoConnection
 
 
-class _TestDispatcherProcess(dispatcher.DispatcherProcess):
-    """Test dispatcher process"""
+class _App:
+    """I/O-process stand-in: the tables SeparateClientConnection writes."""
 
-    def start_dispatchers(self):
-        pass
+    def __init__(self, loop):
+        self.client_connections = {}
+        self.session_id = 0
+        self.loop = loop
+        self.worker_connections = [None]
+        self.rpc_task_alive = [True]
+        self.rpcz_span_map = {}
+        self.exiting = False
+        self.dead = []
 
-
-@pytest.mark.asyncio
-async def test_conn_idle_check():
-    """Test conn idle check"""
-    engine = server_engine.TrpcServerEngine(ServerOption())
-    engine.process_info.add_address(("127.0.0.1", 8000))
-    engine.process_info.add_socket_type("net")
-    engine.process_info.add_parser(TestParser())
-    dispatcher_obj = dispatcher.Dispatcher()
-    app = _TestDispatcherProcess(dispatcher_obj, engine)
-    app.loop = get_or_create_event_loop()
-
-    dispatcher_conn = server_dispatcher.DispatcherConnection(app, ('127.0.0.1', 8000), TestParser())
-    dispatcher_conn.check_idle_timeout = 50
-    dispatcher_conn.last_recv_time = time.time() - 0.06
-    dispatcher_conn.connection_made(TestClientConn())
-    try:
-        await dispatcher_conn.conn_idle_check()
-        assert not dispatcher_conn.app.client_connections.get(dispatcher_conn.fd, None)
-    except Exception:  # pylint: disable=broad-except
-        assert False
-    assert True
+    def mark_rpc_task_dead(self, index):
+        self.dead.append(index)
+        if 0 <= index < len(self.rpc_task_alive):
+            self.rpc_task_alive[index] = False
 
 
-@pytest.mark.asyncio
-async def test_conn_idle_check_lost():
-    """Test conn idle check lost"""
-    engine = server_engine.TrpcServerEngine(ServerOption())
-    engine.process_info.add_address(("127.0.0.1", 8000))
-    engine.process_info.add_socket_type("net")
-    engine.process_info.add_parser(TestParser())
-    dispatcher_obj = dispatcher.Dispatcher()
-    app = _TestDispatcherProcess(dispatcher_obj, engine)
-    app.loop = get_or_create_event_loop()
-
-    dispatcher_conn = server_dispatcher.DispatcherConnection(app, ('127.0.0.1', 8000), TestParser())
-    dispatcher_conn.check_idle_timeout = 50
-    dispatcher_conn.last_recv_time = time.time() - 0.06
-    dispatcher_conn.connection_made(TestClientConn())
-    dispatcher_conn.connection_lost(None)
-    try:
-        await dispatcher_conn.conn_idle_check()
-        assert not dispatcher_conn.app.client_connections.get(dispatcher_conn.fd, None)
-    except Exception:  # pylint: disable=broad-except
-        assert False
-    assert True
+class _Sock:
+    def fileno(self):
+        return 7
 
 
-def test_server_dispatcher_tcp():
-    """Test dispatcher tcp"""
-    engine = server_engine.TrpcServerEngine(ServerOption())
-    engine.process_info.add_address(("127.0.0.1", 8000))
-    engine.process_info.add_socket_type("net")
-    engine.process_info.add_parser(TestParser())
-    dispatcher_obj = dispatcher.Dispatcher()
-    app = _TestDispatcherProcess(dispatcher_obj, engine)
-
-    dispatcher_conn = server_dispatcher.DispatcherConnection(app, ('127.0.0.1', 8000), TestParser())
-    worker_conn = server_dispatcher.WorkerConnection(app)
-
-    dispatcher_conn.connection_made(TestClientConn())
-    worker_conn.connection_made(TestClientConn())
-
-    assert app.client_connections[1].conn.buf == b''
-
-    app.block = False
-
-    try:
-        app.run()
-    except Exception:  # pylint: disable=broad-except
-        assert False
-
-    try:
-        dispatcher_conn.data_received(
-            b'\t0\x00\x00\x00\x00\x00\x1f\x00\x02\x00\x00\x00\x00\x00\x00\x18\x01\n\x0bhi: hello: ')
-        worker_conn.data_received(app.worker_connections[0].buf)
-
-        dispatcher_conn.connection_lost(None)
-        worker_conn.connection_lost(None)
-    except Exception:  # pylint: disable=broad-except
-        assert False
-
-    # Cover _handle_package write-back path (lines 195-198)
-    from trpc_sdk.transport.c_server_conn_info import inner_encode_rsp
-    from trpc_sdk.transport.server_dispatcher import ClientConnectionInfo
-    client_transport = TestClientConn()
-    app.client_connections[1] = ClientConnectionInfo(session_id=1, conn=client_transport)
-    worker_conn2 = server_dispatcher.WorkerConnection(app)
-    worker_conn2.connection_made(TestClientConn())
-    worker_conn2.data_received(inner_encode_rsp(1, 1, 0, b"rsp"))
-    assert client_transport.buf == b"rsp"
+def _transport():
+    transport = FakeTransport()
+    extra = {
+        "socket": _Sock(),
+        "peername": ("127.0.0.1", 9),
+        "sockname": ("127.0.0.1", 8000),
+    }
+    transport.get_extra_info = lambda key, default=None: extra.get(key, default)
+    return transport
 
 
-def test_get_target_worker():
-    """Test get_target_worker"""
-    data = SchedulerParams(worker_conn_num=1, remote_ip='', session_id=1, stream_id=1)
-    assert 0 == server_dispatcher.get_next_worker(data)
+def _client(loop, parser=None):
+    return SeparateClientConnection(
+        _App(loop),
+        ("127.0.0.1", 8000),
+        parser or get_server_parser("trpc"),
+        index=0,
+    )
 
-    def _dispatcher(index: int):
-        print(f"dispatcher index {index}")
-        return index
 
-    register_dispatcher_worker_func(_dispatcher)
-    data = SchedulerParams(worker_conn_num=1, remote_ip='', session_id=0, stream_id=0)
-    assert 1 == server_dispatcher.get_next_worker(data)
-
-    def _dispatcher1(data: SchedulerParams):
-        return data.worker_conn_num
-
-    register_dispatcher_worker_func(_dispatcher1, True)
-    data = SchedulerParams(worker_conn_num=1, remote_ip='', session_id=0, stream_id=0)
-    assert 1 == server_dispatcher.get_next_worker(data)
-    # 还原
+@pytest.fixture(autouse=True)
+def _clear_scheduler():
+    register_dispatcher_worker_func(None)
+    register_dispatcher_worker_func(None, True)
+    yield
     register_dispatcher_worker_func(None)
     register_dispatcher_worker_func(None, True)
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_connection_made_exception():
-    """Test dispatcher connection_made with exception to cover line 78"""
-    engine = server_engine.TrpcServerEngine(ServerOption())
-    engine.process_info.add_address(("127.0.0.1", 8000))
-    engine.process_info.add_socket_type("net")
-    engine.process_info.add_parser(TestParser())
-    dispatcher_obj = dispatcher.Dispatcher()
-    app = _TestDispatcherProcess(dispatcher_obj, engine)
-    app.loop = get_or_create_event_loop()
+async def test_conn_idle_check():
+    loop = asyncio.get_running_loop()
+    conn = _client(loop)
+    conn.check_idle_timeout = 20
+    transport = _transport()
+    conn.connection_made(transport)
+    conn.last_recv_time = time.time() - 1
 
-    dispatcher_conn = server_dispatcher.DispatcherConnection(app, ('127.0.0.1', 8000), TestParser())
+    await asyncio.sleep(0.08)
 
-    # Create a mock transport that raises exception when getting extra info
-    mock_transport = TestClientConn()
-    original_get_extra_info = mock_transport.get_extra_info
-
-    def mock_get_extra_info(key):
-        if key == "socket":
-            raise RuntimeError("Mock socket error")
-        return original_get_extra_info(key)
-
-    mock_transport.get_extra_info = mock_get_extra_info
-
-    # This should trigger the exception handling at line 78
-    dispatcher_conn.connection_made(mock_transport)
-
-    # Verify the connection was closed due to exception
-    assert dispatcher_conn.fd not in app.client_connections
+    assert conn.fd not in conn.app.client_connections
+    assert transport.closing is True
 
 
-def test_dispatcher_data_received_parser_exception():
-    """Test dispatcher data_received with parser exception to cover line 125"""
-    engine = server_engine.TrpcServerEngine(ServerOption())
-    engine.process_info.add_address(("127.0.0.1", 8000))
-    engine.process_info.add_socket_type("net")
-    engine.process_info.add_parser(TestParser())
-    dispatcher_obj = dispatcher.Dispatcher()
-    app = _TestDispatcherProcess(dispatcher_obj, engine)
-    app.loop = get_or_create_event_loop()
+@pytest.mark.asyncio
+async def test_conn_idle_check_lost():
+    loop = asyncio.get_running_loop()
+    conn = _client(loop)
+    conn.check_idle_timeout = 20
+    transport = _transport()
+    conn.connection_made(transport)
+    conn.connection_lost(None)
 
-    class MockParse():
+    await asyncio.sleep(0.05)
 
-        def read(self):
-            raise RuntimeError("Mock parser fatal error")
-
-        def feeds_data(self, data):
-            pass
-
-        def reset(self):
-            pass
-
-    dispatcher_conn = server_dispatcher.DispatcherConnection(app, ('127.0.0.1', 8000), TestParser(MockParse))
-    dispatcher_conn.connection_made(TestClientConn())
-
-    # Feed some data to trigger the exception at line 125
-    dispatcher_conn.data_received(b'some_data')
-
-    # Verify the connection was closed due to exception
-    assert dispatcher_conn.fd not in app.client_connections
+    assert conn.fd not in conn.app.client_connections
+    assert transport.closing is True
 
 
-def test_dispatcher_data_received_worker_write_exception():
-    """Test dispatcher data_received with worker write exception to cover line 131"""
-    engine = server_engine.TrpcServerEngine(ServerOption())
-    engine.process_info.add_address(("127.0.0.1", 8000))
-    engine.process_info.add_socket_type("net")
-    engine.process_info.add_parser(TestParser())
-    dispatcher_obj = dispatcher.Dispatcher()
-    app = _TestDispatcherProcess(dispatcher_obj, engine)
-    app.loop = get_or_create_event_loop()
+def test_connection_made_exception_does_not_keep_the_client():
+    loop = asyncio.new_event_loop()
+    try:
+        conn = _client(loop)
+        transport = _transport()
 
-    test_data = [
-        b'\\t0\\x00\\x00\\x00\\x00\\x00\\x1f\\x00\\x02\\x00\\x00\\x00\\x00\\x00\\x00\\x18\\x01\\n\\x0bhi: hello: '
-    ]
+        def boom(key, default=None):
+            if key == "socket":
+                raise RuntimeError("mock socket error")
+            return {"peername": ("127.0.0.1", 9), "sockname": ("127.0.0.1", 8000)}.get(key, default)
 
-    class MockParse():
-
-        def read(self):
-            return test_data
-
-        def feeds_data(self, data):
-            pass
-
-        def reset(self):
-            pass
-
-    dispatcher_conn = server_dispatcher.DispatcherConnection(app, ('127.0.0.1', 8000), TestParser(MockParse))
-    worker_conn = server_dispatcher.WorkerConnection(app)
-
-    dispatcher_conn.connection_made(TestClientConn())
-    worker_conn.connection_made(TestClientConn())
-
-    # Mock the _dispatch_to_worker_process to raise exception
-    def mock_dispatch(packages):
-        test_data.clear()
-        raise RuntimeError("Mock worker write error")
-
-    dispatcher_conn._dispatch_to_worker_process = mock_dispatch
-
-    # This should trigger the exception handling at line 131
-    dispatcher_conn.data_received(b'some_data')
-
-    # Verify the connection was closed due to exception
-    assert dispatcher_conn.fd not in app.client_connections
+        transport.get_extra_info = boom
+        conn.connection_made(transport)
+        assert conn.app.client_connections == {}
+    finally:
+        loop.close()
 
 
-def test_dispatcher_connection_lost_with_exception():
-    """Test dispatcher connection_lost with exception to cover line 143"""
-    engine = server_engine.TrpcServerEngine(ServerOption())
-    engine.process_info.add_address(("127.0.0.1", 8000))
-    engine.process_info.add_socket_type("net")
-    engine.process_info.add_parser(TestParser())
-    dispatcher_obj = dispatcher.Dispatcher()
-    app = _TestDispatcherProcess(dispatcher_obj, engine)
-    app.loop = get_or_create_event_loop()
+def test_data_received_parser_exception_closes_client():
+    loop = asyncio.new_event_loop()
+    try:
 
-    dispatcher_conn = server_dispatcher.DispatcherConnection(app, ('127.0.0.1', 8000), TestParser())
-    dispatcher_conn.connection_made(TestClientConn())
+        class _Fatal:
+            def feed_data(self, _data):
+                return None
 
-    # Call connection_lost with an exception to trigger line 143
-    test_exception = RuntimeError("Test connection lost exception")
-    dispatcher_conn.connection_lost(test_exception)
+            def feeds_data(self, _data):
+                return None
 
-    # Verify the connection was properly cleaned up
-    assert dispatcher_conn.fd not in app.client_connections
-    register_dispatcher_worker_func(None, True)
+            def read(self):
+                raise RuntimeError("parser fatal")
+
+            def reset(self):
+                return None
+
+        class _Factory:
+            def create(self):
+                return _Fatal()
+
+        conn = _client(loop, _Factory())
+        transport = _transport()
+        conn.connection_made(transport)
+        conn.data_received(b"some_data")
+        assert conn.fd not in conn.app.client_connections
+        assert transport.closing is True
+    finally:
+        loop.close()
+
+
+def test_data_received_worker_write_exception_closes_client():
+    loop = asyncio.new_event_loop()
+    try:
+        conn = _client(loop, ParserFactory())
+        transport = _transport()
+        conn.connection_made(transport)
+        conn.parser.frames = [unary_frame()]
+
+        def boom(_packages):
+            raise RuntimeError("worker write")
+
+        conn._forward_frames_to_workers = boom
+        conn.data_received(b"frame")
+        assert conn.fd not in conn.app.client_connections
+    finally:
+        loop.close()
+
+
+def test_worker_response_is_written_to_the_matching_client():
+    loop = asyncio.new_event_loop()
+    try:
+        app = _App(loop)
+        client = FakeTransport()
+        app.client_connections[1] = ClientConnectionInfo(session_id=1, conn=client)
+        worker = SeparateRpcTaskConnection(app, 0)
+        pipe = FakeTransport()
+        worker.connection_made(pipe)
+        assert app.worker_connections[0] is pipe
+
+        worker.data_received(inner_encode_rsp(1, 1, 0, b"rsp"))
+        assert client.written == [b"rsp"]
+
+        worker.connection_lost(RuntimeError("gone"))
+        assert app.dead == [0]
+        assert pipe.closing is True
+    finally:
+        loop.close()
+
+
+def test_get_target_worker():
+    unary = SchedulerParams(worker_conn_num=1, remote_ip="", session_id=1, stream_id=1)
+    register_dispatcher_worker_func(lambda worker_conn_num: worker_conn_num)
+    assert get_next_worker(unary) == 1
+
+    register_dispatcher_worker_func(lambda data: data.worker_conn_num, True)
+    assert get_next_worker(unary) == 1
+
+    sticky = SchedulerParams(
+        worker_conn_num=2,
+        remote_ip="",
+        session_id=1,
+        stream_id=1,
+        frame_type=trpc_pb2.TRPC_STREAM_FRAME,
+    )
+    assert get_next_worker(sticky) == 0
+    assert select_rpc_task(sticky, [False, True]) is None
+
+
+@pytest.mark.asyncio
+async def test_default_io_connection_idle_closes():
+    """Merge mode uses DefaultIoConnection for the same idle-close job."""
+
+    async def _noop(_conn, _frame):
+        return None
+
+    conn = DefaultIoConnection(
+        ConnectionOption(parser=ParserFactory(), msg_handler=_noop, connection_idle_timeout_ms=20))
+    transport = FakeTransport()
+    conn.connection_made(transport)
+    conn.last_recv_time = time.monotonic() - 10
+    await asyncio.sleep(0.08)
+    assert conn._is_closed is True
+    assert transport.closing is True

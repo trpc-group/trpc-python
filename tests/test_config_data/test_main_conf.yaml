@@ -8,7 +8,6 @@ server: #服务端配置
   bin_path: /usr/local/trpc/bin/ #二进制可执行文件和框架配置文件所在路径
   conf_path: /usr/local/trpc/conf/ #业务配置文件所在路径
   data_path: /usr/local/trpc/data/ #业务数据文件所在路
-  worker_num: 2
   check_timeout: false
   queue_wait_policy: 1
   queue_wait_timeout: 10

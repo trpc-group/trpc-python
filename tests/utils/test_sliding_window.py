@@ -6,18 +6,19 @@
 
 import time
 
-from trpc_sdk.server.sliding_window import QueueWindow
+from trpc_sdk.server._types import QueueWindow
 
 
 def test_report_queue_time():
     qw = QueueWindow()
-    ret = qw.report_queue_time(int(time.time()), True)
+    now_ms = int(time.time() * 1000)
+    ret = qw.report_queue_time(now_ms, True)
     assert ret is True
 
     assert qw.windows_list[qw.cur % 2].total == 1
     assert qw.windows_list[qw.cur % 2].failed == 0
 
-    qw.report_queue_time(int(time.time()), False)
+    qw.report_queue_time(now_ms, False)
 
     assert qw.windows_list[qw.cur % 2].total == 2
     assert qw.windows_list[qw.cur % 2].failed == 1

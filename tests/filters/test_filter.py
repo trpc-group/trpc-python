@@ -16,16 +16,15 @@ from typing import Any
 
 import pytest
 
-from trpc_sdk import context
 from trpc_sdk import exceptions
 from trpc_sdk import filters as filter
-from trpc_sdk.abc.context import Context
-from trpc_sdk.abc.filter import Filter
-from trpc_sdk.abc.filter import FilterAsyncGenHandleType
-from trpc_sdk.abc.filter import FilterAsyncGenReturnType
-from trpc_sdk.abc.filter import FilterHandleType
-from trpc_sdk.abc.filter import FilterReturnType
-from trpc_sdk.abc.filter import FilterStreamResultType
+from trpc_sdk.abc import BaseFilter
+from trpc_sdk.abc import FilterAsyncGenHandleType
+from trpc_sdk.abc import FilterAsyncGenReturnType
+from trpc_sdk.abc import FilterHandleType
+from trpc_sdk.abc import FilterReturnType
+from trpc_sdk.abc import FilterStreamResultType
+from trpc_sdk.abc import TrpcContext
 from trpc_sdk.utils import get_or_create_event_loop
 
 
@@ -57,11 +56,11 @@ class FakeRequest:
         self.count = count
 
 
-class DefaultFilter(Filter):
+class DefaultFilter(BaseFilter):
     """Default test filter implementation for verifying filter chain behavior."""
 
     # @override # only python3.8 or higher from typing_extensions import override
-    async def run(self, ctx: Context, req: Any, handle: FilterHandleType) -> FilterReturnType:
+    async def run(self, ctx: TrpcContext, req: Any, handle: FilterHandleType) -> FilterReturnType:
         """Process synchronous request through filter chain.
         
         Args:
@@ -79,7 +78,7 @@ class DefaultFilter(Filter):
         return rsp, error
 
     # @override # only python3.8 or higher
-    async def run_stream(self, ctx: Context, req: Any, handle: FilterAsyncGenHandleType) -> FilterAsyncGenReturnType:
+    async def run_stream(self, ctx: TrpcContext, req: Any, handle: FilterAsyncGenHandleType) -> FilterAsyncGenReturnType:
         """Process asynchronous stream request through filter chain.
         
         Args:
@@ -98,7 +97,7 @@ class DefaultFilter(Filter):
         return
 
 
-async def fake_handle(ctx: Context, req: FakeRequest):
+async def fake_handle(ctx: TrpcContext, req: FakeRequest):
     """Mock handler that returns successful response.
     
     Args:
@@ -111,7 +110,7 @@ async def fake_handle(ctx: Context, req: FakeRequest):
     return FakeResponse("rsp+" + req.msg, req.count)
 
 
-async def fake_handle_with_exception(ctx: Context, req: FakeRequest):
+async def fake_handle_with_exception(ctx: TrpcContext, req: FakeRequest):
     """Mock handler that raises generic exception.
     
     Args:
@@ -124,7 +123,7 @@ async def fake_handle_with_exception(ctx: Context, req: FakeRequest):
     raise Exception("exception in handle")
 
 
-async def fake_handle_with_trpc_exception(ctx: Context, req: FakeRequest):
+async def fake_handle_with_trpc_exception(ctx: TrpcContext, req: FakeRequest):
     """Mock handler that raises TRPC-specific exception.
     
     Args:
@@ -137,7 +136,7 @@ async def fake_handle_with_trpc_exception(ctx: Context, req: FakeRequest):
     raise exceptions.ClientConnectionError("exception in handle")
 
 
-async def fake_handle_with_timeout(ctx: Context, req: FakeRequest):
+async def fake_handle_with_timeout(ctx: TrpcContext, req: FakeRequest):
     """Mock handler that simulates timeout by sleeping.
     
     Args:
@@ -152,7 +151,7 @@ def test_filter():
     chain = filter.FilterChain()
     chain.add_filter(DefaultFilter())
     chain.add_filter(DefaultFilter())
-    h = chain.handle(context.Context(), FakeRequest("req", 0), fake_handle)
+    h = chain.handle(TrpcContext(), FakeRequest("req", 0), fake_handle)
     result, error = get_or_create_event_loop().run_until_complete(h)
     assert result.msg == "rsp+req" and result.count == 4
 
@@ -161,7 +160,7 @@ def test_filter_with_timeout():
     """Test filter chain behavior with timeout handler."""
     chain = filter.FilterChain()
     chain.add_filter(DefaultFilter())
-    h = chain.handle(context.Context(), FakeRequest("req", 0), fake_handle_with_timeout, wait_for_time=1)
+    h = chain.handle(TrpcContext(), FakeRequest("req", 0), fake_handle_with_timeout, wait_for_time=1)
     result, error = get_or_create_event_loop().run_until_complete(h)
     assert error is not None
 
@@ -169,7 +168,7 @@ def test_filter_with_timeout():
 def test_filter_with_timeout_and_no_filter():
     """Test timeout behavior without any filters in chain."""
     chain = filter.FilterChain()
-    h = chain.handle(context.Context(), FakeRequest("req", 0), fake_handle_with_timeout, wait_for_time=1)
+    h = chain.handle(TrpcContext(), FakeRequest("req", 0), fake_handle_with_timeout, wait_for_time=1)
     result, error = get_or_create_event_loop().run_until_complete(h)
     assert error is not None
 
@@ -179,7 +178,7 @@ def test_filter_with_exception():
     chain = filter.FilterChain()
     chain.add_filter(DefaultFilter())
     chain.add_filter(DefaultFilter())
-    h = chain.handle(context.Context(), FakeRequest("req", 0), fake_handle_with_exception)
+    h = chain.handle(TrpcContext(), FakeRequest("req", 0), fake_handle_with_exception)
     result, error = get_or_create_event_loop().run_until_complete(h)
     assert error is not None
 
@@ -188,7 +187,7 @@ def test_one_filter():
     """Test filter chain with single filter."""
     chain = filter.FilterChain()
     chain.add_filter(DefaultFilter())
-    h = chain.handle(context.Context(), FakeRequest("req", 0), fake_handle)
+    h = chain.handle(TrpcContext(), FakeRequest("req", 0), fake_handle)
     result, error = get_or_create_event_loop().run_until_complete(h)
     assert result.msg == "rsp+req" and result.count == 2
 
@@ -197,7 +196,7 @@ def test_one_filter_with_exception():
     """Test single filter chain with exception-throwing handler."""
     chain = filter.FilterChain()
     chain.add_filter(DefaultFilter())
-    h = chain.handle(context.Context(), FakeRequest("req", 0), fake_handle_with_exception)
+    h = chain.handle(TrpcContext(), FakeRequest("req", 0), fake_handle_with_exception)
     result, error = get_or_create_event_loop().run_until_complete(h)
     assert error is not None
 
@@ -205,7 +204,7 @@ def test_one_filter_with_exception():
 def test_no_filter():
     """Test filter chain behavior without any filters."""
     chain = filter.FilterChain()
-    h = chain.handle(context.Context(), FakeRequest("req", 0), fake_handle)
+    h = chain.handle(TrpcContext(), FakeRequest("req", 0), fake_handle)
     result, error = get_or_create_event_loop().run_until_complete(h)
     assert result.msg == "rsp+req" and result.count == 0
 
@@ -218,7 +217,7 @@ async def test_stream():
     async def handler():
         yield FilterStreamResultType(rsp=FakeResponse("rsp", 0))
 
-    ctx = context.Context()
+    ctx = TrpcContext()
     async for event in filter.run_stream(ctx, FakeRequest("req", 0), handler):
         result: FilterStreamResultType = event
         print(result)

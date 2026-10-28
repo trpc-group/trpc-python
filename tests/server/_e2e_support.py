@@ -10,7 +10,8 @@ the servicer:
 
 * ``"<seconds>"``: ``await asyncio.sleep``, reply ``ok:<msg>``;
 * ``"info:<seconds>"``: same sleep, reply ``info:<loop index>:<thread id>:<on main thread>``;
-* ``"block:<seconds>"``: ``time.sleep`` (blocks the loop), reply like ``info:``.
+* ``"block:<seconds>"``: ``time.sleep`` (blocks the loop), reply like ``info:``;
+* ``"stop_loop"``: stop the handler's own loop, as stray user code would; no reply.
 
 Environment variables let a test inject failures: ``FAIL_HOOK=<index>`` makes
 that loop's ``on_start`` raise, ``SLOW_HOOK=<index>`` makes it sleep 5 s,
@@ -88,6 +89,9 @@ SERVER_SCRIPT = textwrap.dedent(
             if msg.startswith("block:"):
                 time.sleep(float(msg[6:]))
                 return pb.HelloReply(msg=_info())
+            if msg == "stop_loop":
+                asyncio.get_running_loop().stop()
+                await asyncio.sleep(3600)
             await asyncio.sleep(float(msg))
             return pb.HelloReply(msg="ok:" + request.msg)
 
@@ -139,7 +143,7 @@ def free_port(kind: int = socket.SOCK_STREAM) -> int:
         return sock.getsockname()[1]
 
 
-def make_config(ports: Dict[str, int], server_extra: str = "", service_extra: str = "") -> str:
+def make_config(ports: Dict[str, int], server_extra: str = "", service_extra: str = "", processmodel: str = "") -> str:
     services = []
     for network, protocol in (("tcp", "trpc"), ("udp", "trpc"), ("http", "http")):
         if network not in ports:
@@ -156,10 +160,11 @@ def make_config(ports: Dict[str, int], server_extra: str = "", service_extra: st
 global:
   namespace: Development
   env_name: test
+  processmodel:
+{textwrap.indent(processmodel.strip() or "mode: single_process", "    ")}
 server:
   app: test
   server: Greeter
-  mode: merge
   close_wait_time: 100
 {textwrap.indent(server_extra.strip(), "  ")}
   service:{"".join(services)}
@@ -181,12 +186,13 @@ class Server:
                  env: Optional[Dict[str, str]] = None,
                  script_template: str = SERVER_SCRIPT,
                  service_extra: str = "",
-                 start_new_session: bool = False) -> None:
+                 start_new_session: bool = False,
+                 processmodel: str = "") -> None:
         self.ports = ports
         script = tmp_path / "server_main.py"
         script.write_text(script_template.format(stub=str(STUB_DIR)))
         conf = tmp_path / "trpc_python.yaml"
-        conf.write_text(make_config(ports, server_extra, service_extra))
+        conf.write_text(make_config(ports, server_extra, service_extra, processmodel))
         self.proc = subprocess.Popen(  # pylint: disable=consider-using-with
             [sys.executable, str(script), str(conf)],
             cwd=str(tmp_path),

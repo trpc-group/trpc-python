@@ -3,22 +3,23 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-"""Test config.repair_config and assign_dict_to_object branches."""
+"""Test config repair and dict-to-object assignment."""
 
 import sys
-from typing import List, Optional, Union
+from typing import List
+from typing import Optional
+from typing import Union
 
-from trpc_sdk.config.client_config import BackendConfig, Client
-from trpc_sdk.config.config import (
-    Admin,
-    Config,
-    Global,
-    Service,
-    Server,
-    TRPCConfig,
-    repair_client_config,
-    repair_config,
-)
+from trpc_sdk.config import Admin
+from trpc_sdk.config import ClientConfig
+from trpc_sdk.config import ClientServiceConfig
+from trpc_sdk.config import Config
+from trpc_sdk.config import GlobalConfig
+from trpc_sdk.config import ServerConfig
+from trpc_sdk.config import ServerService
+from trpc_sdk.config import TrpcConfigParser
+from trpc_sdk.config._defaults import _repair_client_config
+from trpc_sdk.config._defaults import repair_config
 
 
 class _Child:
@@ -46,7 +47,7 @@ class _Holder:
 
 def test_assign_dict_optional_and_list_branches():
     holder = _Holder()
-    TRPCConfig.assign_dict_to_object(
+    TrpcConfigParser.populate_from_dict(
         {
             "child": {"name": "a"},
             "mapping": {"k": "v"},
@@ -73,27 +74,28 @@ def test_assign_dict_union_optional_unpack():
             self.value = value
 
     obj = OptHolder()
-    TRPCConfig.assign_dict_to_object({"value": 7}, obj)
+    TrpcConfigParser.populate_from_dict({"value": 7}, obj)
     assert obj.value == 7
 
 
 def test_repair_config_fills_defaults(monkeypatch):
-    cfg_module = sys.modules["trpc_sdk.config.config"]
+    cfg_module = sys.modules["trpc_sdk.config._defaults"]
     monkeypatch.setattr(cfg_module, "get_ip_with_nic", lambda nic: f"10.0.0.{nic or '0'}")
-    svc = Service(ip="", nic="1", port=8080, protocol="", network="", address="")
-    admin = Admin(ip="", nic="2", port=9028)
-    server = Server(service=[svc], admin=admin, protocol="trpc", network="tcp")
-    client = Client(
+    svc = ServerService(ip="", nic="1", port=8080, protocol="", network="", address="")
+    # Admin IP is filled only when nic is empty.
+    admin = Admin(ip="", nic="", port=9028)
+    server = ServerConfig(service=[svc], admin=admin, protocol="trpc", network="tcp")
+    client = ClientConfig(
         namespace="",
         network="tcp",
         protocol="trpc",
         discovery="IPDiscovery",
-        loadbalance="RandomLB",
-        circuitbreaker="NoopCB",
-        filter=["f1"],
+        load_balance="RandomLB",
+        circuit_breaker="NoopCB",
+        filters=["f1"],
         service=[],
     )
-    backend = BackendConfig(
+    backend = ClientServiceConfig(
         callee="",
         service_name="demo",
         namespace="",
@@ -101,13 +103,13 @@ def test_repair_config_fills_defaults(monkeypatch):
         protocol="",
         target="",
         discovery="",
-        loadbalance="",
-        circuitbreaker="",
-        filter=["f0"],
+        load_balance="",
+        circuit_breaker="",
+        filters=["f0"],
     )
     client.service = [backend]
     cfg = Config(
-        global_config=Global(namespace="Production", local_ip=""),
+        global_config=GlobalConfig(namespace="Production", local_ip=""),
         server=server,
         client=client,
     )
@@ -119,19 +121,19 @@ def test_repair_config_fills_defaults(monkeypatch):
     assert svc.ip == "10.0.0.1"
     assert svc.address == "10.0.0.1:8080"
     assert cfg.global_config.local_ip == "10.0.0.1"
-    assert admin.ip == "10.0.0.2"
+    assert admin.ip == "10.0.0.0"
     assert cfg.client.namespace == "Production"
     assert backend.callee == "demo"
     assert backend.namespace == "Production"
     assert backend.network == "tcp"
     assert backend.protocol == "trpc"
     assert backend.discovery == "IPDiscovery"
-    assert backend.loadbalance == "RandomLB"
-    assert backend.circuitbreaker == "NoopCB"
+    assert backend.load_balance == "RandomLB"
+    assert backend.circuit_breaker == "NoopCB"
 
 
 def test_repair_client_config_callee_from_empty_service_name():
-    client = Client(namespace="ns", network="udp", protocol="http")
-    conf = BackendConfig(callee="only-callee", service_name="", namespace="x", target="ip://1")
-    repair_client_config(conf, client)
+    client = ClientConfig(namespace="ns", network="udp", protocol="http")
+    conf = ClientServiceConfig(callee="only-callee", service_name="", namespace="x", target="ip://1")
+    _repair_client_config(conf, client)
     assert conf.service_name == "only-callee"

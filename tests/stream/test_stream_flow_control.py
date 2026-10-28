@@ -9,33 +9,34 @@ import asyncio
 
 import pytest
 
-from trpc_sdk.stream.flow_control import ReceiveControl, SendControl
+from trpc_sdk.stream import ReceiveControl
+from trpc_sdk.stream import SendControl
 
 
 @pytest.mark.asyncio
 async def test_send_control_blocks_then_wakes():
-    ctrl = SendControl(window=0)
+    ctrl = SendControl(init_window=0)
 
     async def grant():
         await asyncio.sleep(0.01)
         ctrl.update_window(10)
 
-    asyncio.get_event_loop().create_task(grant())
-    await ctrl.get_window(3)
-    assert ctrl.window == 7
+    asyncio.get_running_loop().create_task(grant())
+    await ctrl.acquire_window(3)
+    assert ctrl.available_window == 7
 
 
 @pytest.mark.asyncio
 async def test_send_control_close_wakes_and_raises():
-    ctrl = SendControl(window=0)
+    ctrl = SendControl(init_window=0)
 
     async def closer():
         await asyncio.sleep(0.01)
         ctrl.close_control()
 
-    asyncio.get_event_loop().create_task(closer())
+    asyncio.get_running_loop().create_task(closer())
     with pytest.raises(Exception, match="stream is already closed"):
-        await ctrl.get_window(1)
+        await ctrl.acquire_window(1)
     assert ctrl.is_closed is True
 
 
@@ -43,23 +44,23 @@ async def test_send_control_close_wakes_and_raises():
 async def test_receive_control_feedback_at_quarter():
     feedbacks = []
 
-    async def feed_back(increment):
+    async def send_feedback(increment):
         feedbacks.append(increment)
 
-    ctrl = ReceiveControl(buffer=40, feed_back=feed_back)
+    ctrl = ReceiveControl(window_size=40, send_feedback=send_feedback)
     await ctrl.on_recv(5)
     assert feedbacks == []
-    assert ctrl.get_left() == 35
+    assert ctrl.get_remaining_window() == 35
 
     await ctrl.on_recv(5)
     assert feedbacks == [10]
-    assert ctrl.un_updated == 0
-    assert ctrl.get_left() == 40
+    assert ctrl.consumed_since_feedback == 0
+    assert ctrl.get_remaining_window() == 40
 
 
 @pytest.mark.asyncio
 async def test_receive_control_without_feedback():
-    ctrl = ReceiveControl(buffer=8, feed_back=None)
+    ctrl = ReceiveControl(window_size=8, send_feedback=None)
     await ctrl.on_recv(4)
-    assert ctrl.un_updated == 0
-    assert ctrl.get_left() == 8
+    assert ctrl.consumed_since_feedback == 0
+    assert ctrl.get_remaining_window() == 8

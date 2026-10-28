@@ -5,7 +5,7 @@
 # tRPC-Python is licensed under Apache-2.0.
 """Test singleton module"""
 
-from trpc_sdk.utils.singleton import singleton
+from trpc_sdk.utils import singleton
 
 
 @singleton

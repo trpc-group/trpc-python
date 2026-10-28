@@ -13,7 +13,7 @@ import pytest
 
 from trpc_sdk.common import _maxprocs
 from trpc_sdk.common import get_max_procs
-from trpc_sdk.config import ServerConfig
+from trpc_sdk.config import ProcessModel
 
 from _cgroup_cases import HYBRID_CASE
 from _cgroup_cases import V1_CASES
@@ -78,6 +78,6 @@ def test_get_max_procs_reads_fake_proc_end_to_end(monkeypatch, fake_proc) -> Non
     assert get_max_procs() == 2
 
 
-def test_server_config_leaves_worker_num_unset() -> None:
+def test_process_model_leaves_handle_num_unset() -> None:
     # The CPU count is read by the option resolver at startup, not by the YAML schema.
-    assert ServerConfig().worker_num == 0
+    assert ProcessModel().handle_num == 0

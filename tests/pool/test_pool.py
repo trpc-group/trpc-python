@@ -20,24 +20,20 @@ import pytest
 
 from tests.common_util import unused_port
 
-# Import required modules and classes
-from trpc_sdk.abc.transport import BaseClientTransportOptions
+from trpc_sdk.abc import BaseClientTransportOption
 from trpc_sdk.common import create_object_with_loop
-from trpc_sdk.config.config import SocketType
+from trpc_sdk.config import SocketType
 from trpc_sdk.exceptions import ClientPoolClosedError
 from trpc_sdk.exceptions import ClientPoolLimitError
-from trpc_sdk.pool.connpool import Connection
-from trpc_sdk.pool.connpool import ConnectionPool
-from trpc_sdk.pool.connpool import ConnectionPoolManager
-from trpc_sdk.pool.connpool import ConnPoolOptions
-from trpc_sdk.pool.connpool import PoolConn
-from trpc_sdk.pool.connpool import get_pool_connection
-from trpc_sdk.pool.tcpconn import open_connection
-from trpc_sdk.pool.tcpconn import open_unix_connection
-from trpc_sdk.utils.loop_lib import asynclib
-from trpc_sdk.utils.network import TcpState
-from trpc_sdk.utils.network import close_socket
-from trpc_sdk.utils.network import is_valid_socket
+from trpc_sdk.transport import ConnPoolOptions
+from trpc_sdk.transport import ConnectionPoolManager
+from trpc_sdk.transport import PooledConnection
+from trpc_sdk.transport import get_pool_connection
+from trpc_sdk.transport._pool import ConnectionPool
+from trpc_sdk.utils import TcpState
+from trpc_sdk.utils import close_socket
+from trpc_sdk.utils import get_async_lib
+from trpc_sdk.utils import is_valid_socket
 
 # pylint: disable=unused-argument
 # pylint: disable=broad-except
@@ -68,7 +64,26 @@ class ThreadTcpServer:
         self.server_socket = None
         self.__thread = Thread(target=self.run, daemon=False)
         self.connections: Dict[int, socket.socket] = {}
-        self.epoll = None
+        self._poller = None
+        self._in = 0
+        self._out = 0
+        self._hup = 0
+        self._timeout = 0.1
+
+    def _open_poller(self):
+        """Use epoll on Linux and poll everywhere else."""
+        if hasattr(select, "epoll"):
+            self._poller = select.epoll()
+            self._in = select.EPOLLIN
+            self._out = select.EPOLLOUT
+            self._hup = select.EPOLLHUP
+            self._timeout = 0.1
+            return
+        self._poller = select.poll()
+        self._in = select.POLLIN
+        self._out = select.POLLOUT
+        self._hup = select.POLLHUP
+        self._timeout = 100
 
     def handle_accept(self, connection: socket.socket):
         """Handle new connection acceptance
@@ -77,7 +92,7 @@ class ThreadTcpServer:
             connection: New client socket connection
         """
         connection.setblocking(0)
-        self.epoll.register(connection.fileno(), select.EPOLLIN)
+        self._poller.register(connection.fileno(), self._in)
         self.connections[connection.fileno()] = connection
 
     def handle_req(self, fileno: int):
@@ -88,9 +103,9 @@ class ThreadTcpServer:
         """
         data = self.connections[fileno].recv(1024)
         if data:
-            self.epoll.modify(fileno, select.EPOLLOUT)
+            self._poller.modify(fileno, self._out)
         else:
-            self.epoll.modify(fileno, 0)
+            self._poller.modify(fileno, 0)
             self.connections[fileno].shutdown(socket.SHUT_RDWR)
             del self.connections[fileno]
 
@@ -101,7 +116,7 @@ class ThreadTcpServer:
             fileno: File descriptor of client socket
         """
         self.connections[fileno].send('收到数据'.encode(encoding='utf-8'))
-        self.epoll.modify(fileno, select.EPOLLIN)
+        self._poller.modify(fileno, self._in)
 
     def handle_close(self, fileno: int):
         """Handle connection close
@@ -109,7 +124,7 @@ class ThreadTcpServer:
         Args:
             fileno: File descriptor of client socket to close
         """
-        self.epoll.unregister(fileno)
+        self._poller.unregister(fileno)
         if fileno in self.connections:
             self.connections[fileno].close()
             del self.connections[fileno]
@@ -118,25 +133,32 @@ class ThreadTcpServer:
         """Main server loop running in separate thread"""
         try:
             while self.__running:
-                events = self.epoll.poll(0.1)
+                events = self._poller.poll(self._timeout)
                 for fileno, event in events:
                     if fileno == self.server_socket.fileno():
                         connection, address = self.server_socket.accept()
                         if self.handle:
                             self.handle(connection, address)
-                    elif event & select.EPOLLIN:
+                    elif event & self._in:
                         self.handle_req(fileno)
-                    elif event & select.EPOLLOUT:
+                    elif event & self._out:
                         self.handle_rsp(fileno)
-                    elif event & select.EPOLLHUP:
+                    elif event & self._hup:
                         self.handle_close(fileno)
         except Exception as err:
             print(f"ThreadTcpServer run err {err}")
             self.stop()
         finally:
-            self.epoll.unregister(self.server_socket.fileno())
-            self.epoll.close()
-            close_socket(self.server_socket)
+            if self._poller is not None and self.server_socket is not None:
+                try:
+                    self._poller.unregister(self.server_socket.fileno())
+                except Exception:
+                    pass
+                close_poller = getattr(self._poller, "close", None)
+                if close_poller is not None:
+                    close_poller()
+            if self.server_socket is not None:
+                close_socket(self.server_socket)
 
     def create_server(self):
         """Create and configure server socket"""
@@ -151,8 +173,8 @@ class ThreadTcpServer:
             self.server_socket.bind(self.addr)
         self.server_socket.listen(100)
         self.server_socket.setblocking(0)
-        self.epoll = select.epoll()
-        self.epoll.register(self.server_socket.fileno(), select.EPOLLIN)
+        self._open_poller()
+        self._poller.register(self.server_socket.fileno(), self._in)
 
     def start(self):
         """Start the server thread"""
@@ -168,13 +190,13 @@ class ThreadTcpServer:
             os.remove(self.addr[0])
 
 
-def _create_pool_options() -> Tuple[BaseClientTransportOptions, ConnPoolOptions]:
+def _create_pool_options() -> Tuple[BaseClientTransportOption, ConnPoolOptions]:
     """Create default connection pool options for testing
 
     Returns:
         Tuple of (transport options, connection pool options)
     """
-    trans_opt = BaseClientTransportOptions()
+    trans_opt = BaseClientTransportOption()
     trans_opt.network = "tcp"
     trans_opt.socket_type = SocketType.UNIX
     trans_opt.address = ("./trpc_local", 0)
@@ -196,7 +218,7 @@ class TestUnixConnectionPool:
         unix_srv = getattr(self, "unix_srv")
         unix_srv.stop()
 
-    async def dial(self, options: BaseClientTransportOptions, timeout: float, loop: asyncio.BaseEventLoop):
+    async def dial(self, options: BaseClientTransportOption, timeout: float, loop: asyncio.BaseEventLoop):
         """Test dialer function for Unix domain sockets
 
         Args:
@@ -208,10 +230,10 @@ class TestUnixConnectionPool:
         Returns:
             New connection
         """
-        host, port = options.address
-        return await open_unix_connection(host=host)
+        host, _port = options.address
+        return await asyncio.open_unix_connection(host)
 
-    def new_pool(self, trans_opt: BaseClientTransportOptions, options: ConnPoolOptions):
+    def new_pool(self, trans_opt: BaseClientTransportOption, options: ConnPoolOptions):
         """Create new connection pool
 
         Args:
@@ -236,7 +258,7 @@ class TestUnixConnectionPool:
     def test_get_pool_connection(self):
         """Test getting connection with different event loops"""
         # Test with first event loop
-        loop1 = asynclib.new_event_loop()
+        loop1 = get_async_lib().new_event_loop()
 
         async def main1():
             trans_opt, _ = _create_pool_options()
@@ -247,7 +269,7 @@ class TestUnixConnectionPool:
         loop1.run_until_complete(main1())
 
         # Test with second event loop
-        loop2 = asynclib.new_event_loop()
+        loop2 = get_async_lib().new_event_loop()
 
         async def main2():
             trans_opt, _ = _create_pool_options()
@@ -258,7 +280,7 @@ class TestUnixConnectionPool:
         loop2.run_until_complete(main2())
 
         # Test with short connection
-        loop3 = asynclib.new_event_loop()
+        loop3 = get_async_lib().new_event_loop()
 
         async def main3():
             trans_opt, _ = _create_pool_options()
@@ -286,7 +308,7 @@ class TestConnectionPool:
         tcp_srv = getattr(self, "tcp_srv")
         tcp_srv.stop()
 
-    async def dial(self, options: BaseClientTransportOptions, timeout: float, loop: asyncio.BaseEventLoop):
+    async def dial(self, options: BaseClientTransportOption, timeout: float, loop: asyncio.BaseEventLoop):
         """Test dialer function for TCP sockets
 
         Args:
@@ -299,11 +321,11 @@ class TestConnectionPool:
             New connection
         """
         host, port = options.address
-        conn = await open_connection(host, port)
-        assert conn.sock
-        return conn
+        reader, writer = await asyncio.open_connection(host, port)
+        assert writer.get_extra_info("socket") is not None
+        return reader, writer
 
-    def new_pool(self, trans_opt: BaseClientTransportOptions, options: ConnPoolOptions) -> ConnectionPool:
+    def new_pool(self, trans_opt: BaseClientTransportOption, options: ConnPoolOptions) -> ConnectionPool:
         """Create new connection pool
 
         Args:
@@ -332,7 +354,7 @@ class TestConnectionPool:
     @pytest.mark.asyncio
     async def test_pool_get_on_close(self):
         """Test getting connection from closed pool"""
-        asyncio.set_event_loop(asynclib.new_event_loop())
+        asyncio.set_event_loop(get_async_lib().new_event_loop())
         trans_opt, options = _create_pool_options()
         trans_opt.socket_type = SocketType.NET
         port = getattr(self, "port")
@@ -349,7 +371,7 @@ class TestConnectionPool:
         trans_opt.socket_type = SocketType.NET
         port = getattr(self, "port")
         trans_opt.address = ("127.0.0.1", port)
-        options._replace(max_active=10)
+        options.max_active = 10
         pool = self.new_pool(trans_opt, options)
 
         conns = []
@@ -371,7 +393,7 @@ class TestConnectionPool:
         trans_opt.socket_type = SocketType.NET
         port = getattr(self, "port")
         trans_opt.address = ("127.0.0.1", port)
-        options._replace(max_active=10)
+        options.max_active = 10
         pool = self.new_pool(trans_opt, options)
 
         conns = []
@@ -397,7 +419,7 @@ class TestConnectionPool:
         trans_opt.socket_type = SocketType.NET
         port = getattr(self, "port")
         trans_opt.address = ("127.0.0.1", port)
-        options._replace(max_idle=5)
+        options.max_idle = 5
         pool = self.new_pool(trans_opt, options)
         conn = await pool.get(0)
 
@@ -417,7 +439,7 @@ class TestConnectionPool:
         trans_opt.socket_type = SocketType.NET
         port = getattr(self, "port")
         trans_opt.address = ("127.0.0.1", port)
-        options._replace(max_idle=5)
+        options.max_idle = 5
         pool = self.new_pool(trans_opt, options)
         conns = [await pool.get(0) for _ in range(3)]
         assert pool.active_conn_num == 3
@@ -425,15 +447,15 @@ class TestConnectionPool:
 
         for conn in conns:
             conn.close()
-        assert pool.active_conn_num == 2
-        assert pool.idle_conns_num == 2
+        assert pool.active_conn_num == 3
+        assert pool.idle_conns_num == 3
 
         pool.close()
 
     def test_get_pool_connection(self):
         """Test getting connection with different event loops"""
         # Test with first event loop
-        loop1 = asynclib.new_event_loop()
+        loop1 = get_async_lib().new_event_loop()
 
         async def main1():
             trans_opt, _ = _create_pool_options()
@@ -447,7 +469,7 @@ class TestConnectionPool:
         loop1.run_until_complete(main1())
 
         # Test with second event loop
-        loop2 = asynclib.new_event_loop()
+        loop2 = get_async_lib().new_event_loop()
 
         async def main2():
             trans_opt, _ = _create_pool_options()
@@ -469,7 +491,7 @@ class TestConnectionPool:
         trans_opt.socket_type = SocketType.NET
         port = getattr(self, "port")
         trans_opt.address = ("127.0.0.1", port)
-        options._replace(idle_timeout=1)
+        options.idle_timeout = 1
         pool = self.new_pool(trans_opt, options)
         conns = [await pool.get(0) for _ in range(3)]
         for conn in conns:
@@ -479,31 +501,28 @@ class TestConnectionPool:
         pool.close()
 
 
-def create_mock_connection():
-    """Create mock connection for testing
-
-    Returns:
-        Mock connection object
-    """
-    conn = mock.MagicMock(spec=Connection)
-    conn.sock = mock.MagicMock(spec=socket.socket)
-    conn.sock.fileno.return_value = 0  # Set fileno() return value
-    conn.sock.proto = socket.IPPROTO_TCP  # Set protocol
-    conn.sock.getsockopt.return_value = (TcpState.TCP_CLOSE_WAIT, TcpState.TCP_CLOSE_WAIT)
-    conn.exception.return_value = None
-    conn.is_closing.return_value = False
-    conn.at_eof.return_value = False
-    return conn
-
-
-def test_check_remote_error_close_wait():
+def test_check_remote_error_close_wait(monkeypatch):
     """Test check_remote_error with socket in CLOSE_WAIT state"""
-    # Setup mock connection
-    mock_connection = create_mock_connection()
-    mock_pool = mock.MagicMock()
-    pool_conn = PoolConn(conn=mock_connection, pool=mock_pool, address=("127.0.0.1", 8080), is_short=False)
+    monkeypatch.setattr("trpc_sdk.transport._pool._pooled_connection.is_valid_socket", lambda _sock: True)
+    monkeypatch.setattr("trpc_sdk.transport._pool._pooled_connection.is_close_wait", lambda _sock: True)
+    reader = mock.MagicMock()
+    writer = mock.MagicMock()
+    sock = mock.MagicMock(spec=socket.socket)
+    sock.fileno.return_value = 0
+    sock.proto = socket.IPPROTO_TCP
+    sock.getsockopt.return_value = bytes([TcpState.TCP_CLOSE_WAIT]) + bytes(19)
+    writer.get_extra_info.return_value = sock
+    reader.exception.return_value = None
+    writer.is_closing.return_value = False
+    reader.at_eof.return_value = False
+    reader._buffer = b""
+    pool_conn = PooledConnection(reader=reader,
+                                 writer=writer,
+                                 loop=mock.MagicMock(),
+                                 pool=mock.MagicMock(),
+                                 address=("127.0.0.1", 8080),
+                                 is_short=False)
 
-    # Call the method and verify result
     result = pool_conn.check_remote_error()
     assert result is True
 
@@ -544,19 +563,19 @@ class TestConnectionPoolWithSocket:
             unix_sock.connect(unix_socket_path)
 
             # Create transport options with socket
-            trans_opt = BaseClientTransportOptions()
+            trans_opt = BaseClientTransportOption()
             trans_opt.sock = unix_sock
             trans_opt.address = (unix_socket_path, 0)
             trans_opt.socket_type = SocketType.UNIX
 
             # Test dial with Unix socket
             loop = asyncio.get_running_loop()
-            conn = await ConnectionPoolManager.dial(options=trans_opt, timeout=1.0, loop=loop)
+            _reader, writer = await ConnectionPoolManager.dial(options=trans_opt, timeout=1.0, loop=loop)
 
-            assert conn is not None
-            assert conn.sock is not None
+            assert writer is not None
+            assert writer.get_extra_info("socket") is not None
 
-            conn.close()
+            writer.close()
             unix_sock.close()
         finally:
             unix_srv.stop()
@@ -571,19 +590,19 @@ class TestConnectionPoolWithSocket:
         tcp_sock.connect(("127.0.0.1", port))
 
         # Create transport options with socket
-        trans_opt = BaseClientTransportOptions()
+        trans_opt = BaseClientTransportOption()
         trans_opt.sock = tcp_sock
         trans_opt.address = ("127.0.0.1", port)
         trans_opt.socket_type = SocketType.NET
 
         # Test dial with TCP socket
         loop = asyncio.get_running_loop()
-        conn = await ConnectionPoolManager.dial(options=trans_opt, timeout=1.0, loop=loop)
+        _reader, writer = await ConnectionPoolManager.dial(options=trans_opt, timeout=1.0, loop=loop)
 
-        assert conn is not None
-        assert conn.sock is not None
+        assert writer is not None
+        assert writer.get_extra_info("socket") is not None
 
-        conn.close()
+        writer.close()
         tcp_sock.close()
 
     @pytest.mark.asyncio
@@ -596,7 +615,7 @@ class TestConnectionPoolWithSocket:
         tcp_sock.connect(("127.0.0.1", port))
 
         # Create transport options with socket
-        trans_opt = BaseClientTransportOptions()
+        trans_opt = BaseClientTransportOption()
         trans_opt.sock = tcp_sock
         trans_opt.address = ("127.0.0.1", port)
         trans_opt.socket_type = SocketType.NET
@@ -609,7 +628,7 @@ class TestConnectionPoolWithSocket:
         conn = await pool_mgr.get(trans_opt, timeout=1.0)
 
         assert conn is not None
-        assert conn.stream_conn is not None
+        assert conn.transport is not None
 
         # Verify the socket index was created correctly
         local_addr = tcp_sock.getsockname()
@@ -626,7 +645,7 @@ class TestConnectionPoolWithSocket:
         port = getattr(self, "port")
 
         # Create transport options with local_addr
-        trans_opt = BaseClientTransportOptions()
+        trans_opt = BaseClientTransportOption()
         trans_opt.address = ("127.0.0.1", port)
         trans_opt.local_addr = ("127.0.0.1", 0)
         trans_opt.socket_type = SocketType.NET
@@ -652,7 +671,7 @@ class TestConnectionPoolWithSocket:
         port = getattr(self, "port")
 
         # Create transport options without local_addr
-        trans_opt = BaseClientTransportOptions()
+        trans_opt = BaseClientTransportOption()
         trans_opt.address = ("127.0.0.1", port)
         trans_opt.socket_type = SocketType.NET
 
@@ -675,7 +694,7 @@ class TestConnectionPoolWithSocket:
     async def test_dial_with_ipv6_address(self):
         """Test dial method with IPv6 address (lines 367-371)"""
         # Create transport options with IPv6 address
-        trans_opt = BaseClientTransportOptions()
+        trans_opt = BaseClientTransportOption()
         trans_opt.address = ("::1", 8080)
         trans_opt.socket_type = SocketType.NET
 
@@ -683,9 +702,10 @@ class TestConnectionPoolWithSocket:
 
         # This test may fail if IPv6 is not available, so we catch the exception
         try:
-            conn = await ConnectionPoolManager.dial(options=trans_opt, timeout=1.0, loop=loop)
-            assert conn is not None
-            conn.close()
-        except Exception as e:
+            _reader, writer = await ConnectionPoolManager.dial(options=trans_opt, timeout=1.0, loop=loop)
+        except OSError as err:
             # IPv6 may not be available in test environment
-            print(f"IPv6 test skipped: {e}")
+            print(f"IPv6 test skipped: {err}")
+            return
+        assert writer is not None
+        writer.close()

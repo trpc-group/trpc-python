@@ -12,11 +12,13 @@ import pytest
 
 from trpc_sdk.abc import BaseServerTransportOption
 from trpc_sdk.codec import get_server_parser
-from trpc_sdk.server import _engine
-from trpc_sdk.transport import ListenOption
+from trpc_sdk.runtime import ResourceKind
+from trpc_sdk.runtime import ThreadModel
+from trpc_sdk.runtime import current_thread_model
+from trpc_sdk.runtime import use_thread_model
+from trpc_sdk.server import _adapter
 from trpc_sdk.transport import TrpcServerStreamTransport
 from trpc_sdk.transport import TrpcServerTransport
-from trpc_sdk.transport import release_loop_resources
 from trpc_sdk.transport._server import _trpc_transport as server_transport
 
 
@@ -67,17 +69,15 @@ def test_bind_only_records_options():
     assert not _is_listening(port)
 
 
-def test_listen_option_defaults():
-    """An option with only a loop serves on that loop, without SO_REUSEPORT."""
-    opt = ListenOption(loop=None)
-    assert not opt.serving_loops
-    assert opt.reuse_port is False
-    assert opt.shared_pool is None
-    assert opt.protocol_factory is None
-    assert opt.http_runner_factory is None
-    assert opt.schedule_target == ""
-    assert opt.ssl_context is None
-    assert opt.worker is None
+def test_default_thread_model_is_the_current_loop(loop):  # pylint: disable=redefined-outer-name
+    """With no model installed, everything is served on the calling thread's loop, without SO_REUSEPORT."""
+    model = current_thread_model()
+    assert model.acceptor.loop is loop
+    assert list(model.io.reactors) == [model.acceptor]
+    assert list(model.handle.reactors) == [model.acceptor]
+    assert model.reuse_port is False
+    assert model.handler_pool is None
+    assert model.worker is None
 
 
 def test_check_endpoint_probes_by_network(monkeypatch):
@@ -95,13 +95,28 @@ def test_check_endpoint_probes_by_network(monkeypatch):
     assert probed == ["tcp", "udp"]
 
 
+def test_check_endpoint_peer_still_rejects_occupied_port(monkeypatch):
+    """Peer mode still runs the occupancy probe and rejects a taken address."""
+    monkeypatch.setattr(server_transport, "is_tcp_port_available", lambda host, port: False)
+    monkeypatch.setattr(server_transport, "is_udp_port_available", lambda host, port: False)
+    transport = TrpcServerTransport()
+    opts = _make_opts(_free_port())
+    opts.set_mode("peer")
+    transport.bind(opts)
+
+    assert transport.check_endpoint() is False
+    opts.set_network("udp")
+    assert transport.check_endpoint() is False
+
+
 def test_listen_serves_until_stop_and_destroy(loop):  # pylint: disable=redefined-outer-name
-    """listen serves on opt.loop; stop + destroy release the port."""
+    """listen serves on the model's loop; stop + destroy release the port."""
     port = _free_port()
     transport = TrpcServerTransport()
     transport.bind(_make_opts(port))
 
-    assert transport.listen(ListenOption(loop=loop)) is None
+    with use_thread_model(ThreadModel.single(loop)):
+        assert transport.listen() is None
     assert _is_listening(port)
 
     async def _connect_and_close():
@@ -121,7 +136,7 @@ def test_listen_serves_until_stop_and_destroy(loop):  # pylint: disable=redefine
 
 
 def test_listen_without_opt_serves_on_the_current_loop(loop):  # pylint: disable=redefined-outer-name
-    """listen() with no option serves on the calling thread's loop."""
+    """listen() with no model installed serves on the calling thread's loop."""
     port = _free_port()
     transport = TrpcServerTransport()
     transport.bind(_make_opts(port))
@@ -135,17 +150,22 @@ def test_listen_without_opt_serves_on_the_current_loop(loop):  # pylint: disable
 
 
 def test_listen_uses_the_protocol_factory_override(loop):  # pylint: disable=redefined-outer-name
-    """opt.protocol_factory replaces the transport's own connection class."""
+    """A subclass overriding protocol_factory replaces the transport's own connection class."""
     port = _free_port()
-    transport = TrpcServerTransport()
-    transport.bind(_make_opts(port))
     made = []
 
-    def _factory():
-        made.append(True)
-        return asyncio.Protocol()
+    class _Transport(TrpcServerTransport):
+        def protocol_factory(self, shared_pool=None):
+            def _factory():
+                made.append(True)
+                return asyncio.Protocol()
+            return _factory
 
-    transport.listen(ListenOption(loop=loop, protocol_factory=_factory))
+    transport = _Transport()
+    transport.bind(_make_opts(port))
+
+    with use_thread_model(ThreadModel.single(loop)):
+        transport.listen()
 
     async def _connect():
         _, writer = await asyncio.open_connection("127.0.0.1", port)
@@ -159,19 +179,23 @@ def test_listen_uses_the_protocol_factory_override(loop):  # pylint: disable=red
 
 
 def test_datagram_listen_keeps_the_endpoint_to_close(loop):  # pylint: disable=redefined-outer-name
-    """A udp endpoint is bound on opt.loop and kept under the main-loop key."""
+    """A udp endpoint is bound on the model's loop and kept on the model for its reactor."""
     opts = _make_opts(_free_port())
     opts.set_network("udp")
     transport = TrpcServerTransport()
     transport.bind(opts)
+    model = ThreadModel.single(loop, worker=SimpleNamespace())
 
-    transport.listen(ListenOption(loop=loop, worker=SimpleNamespace()))
+    with use_thread_model(model):
+        transport.listen()
 
-    assert transport.pop_loop_resources(1) == []
-    (endpoint,) = transport.pop_loop_resources(None)
-    assert transport.pop_loop_resources(None) == []
+    reactor = model.acceptor
+    assert model.pop_resources(reactor, ResourceKind.RUNNER) == []
+    (endpoint,) = model.pop_resources(reactor)
+    assert model.pop_resources(reactor) == []
     assert isinstance(endpoint, asyncio.DatagramTransport)
-    loop.run_until_complete(release_loop_resources([endpoint]))
+    model.keep_resource(reactor, endpoint, ResourceKind.ENDPOINT)
+    loop.run_until_complete(model.release_resources(reactor))
     assert endpoint.is_closing()
 
 
@@ -198,7 +222,7 @@ def test_stream_transport_bind_marks_is_stream():
 def test_engine_registers_bound_transport(monkeypatch):
     """add_listen_endpoint reads every table entry off transport.opts."""
     monkeypatch.setattr(server_transport, "is_tcp_port_available", lambda host, port: True)
-    engine = _engine.TrpcServerEngine(SimpleNamespace(service_num=1))
+    engine = _adapter.TrpcServerAdapter(SimpleNamespace(service_num=1))
     opts = _make_opts(20000)
     transport = TrpcServerTransport()
     transport.bind(opts)
@@ -206,9 +230,10 @@ def test_engine_registers_bound_transport(monkeypatch):
     engine.add_listen_endpoint(transport)
 
     info = engine.process_info
-    assert info.addresses == [("127.0.0.1", 20000)]
-    assert info.networks == ["tcp"]
-    assert info.parsers == [opts.parser]
-    assert info.handlers == [_handler]
+    registered = info.transport_opt[0]
     assert info.transport_opt == [opts]
     assert info.transports == [transport]
+    assert registered.address == ("127.0.0.1", 20000)
+    assert registered.network == "tcp"
+    assert registered.parser is opts.parser
+    assert registered.rpc_handler is _handler

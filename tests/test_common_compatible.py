@@ -9,7 +9,7 @@ import sys
 
 import pytest
 
-from trpc_sdk.common import compatible
+from trpc_sdk.common import _compatible as compatible
 
 
 @pytest.mark.asyncio

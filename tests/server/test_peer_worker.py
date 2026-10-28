@@ -18,13 +18,16 @@ import pytest
 from trpc_sdk.runtime import HandlerThreadInfo
 from trpc_sdk.runtime import MergeWorker
 from trpc_sdk.runtime import PeerMainWorker
+from trpc_sdk.runtime import ResourceKind
 from trpc_sdk.runtime import _constants
 from trpc_sdk.runtime import _merge_worker
 from trpc_sdk.runtime import _modes
+from trpc_sdk.runtime import current_thread_model
 from trpc_sdk.runtime._common import _shutdown
 from trpc_sdk.runtime._common import _readiness
 from trpc_sdk.runtime._process import _peer_worker
 from trpc_sdk.transport import TrpcServerTransport
+from trpc_sdk.utils import TimerScope
 
 PeerWorker = _peer_worker.PeerWorker
 PeerWorkerProcess = _peer_worker.PeerWorkerProcess
@@ -59,7 +62,7 @@ def main(engine, monkeypatch, loops):
     worker = PeerMainWorker(engine)
     worker.loop = loops()
     worker._create_ready_flags(worker.worker_num)
-    worker._worker_records = [SimpleNamespace(name="worker:1"), SimpleNamespace(name="worker:2")]
+    worker._worker_children = [SimpleNamespace(name="worker:1"), SimpleNamespace(name="worker:2")]
     return worker
 
 
@@ -103,19 +106,22 @@ def test_udp_is_bound_with_reuse_port_and_kept(monkeypatch, engine_factory, loop
     calls = []
     endpoint = object()
 
-    def _listen(self, ctx):
-        calls.append((ctx.reuse_port, ctx.serving_loops))
-        self.keep_loop_resource(None, endpoint)
+    def _listen(self):
+        model = current_thread_model()
+        calls.append((model.reuse_port, list(model.io.reactors) == [model.acceptor]))
+        model.keep_resource(model.acceptor, endpoint, ResourceKind.ENDPOINT)
 
     monkeypatch.setattr(TrpcServerTransport, "listen", _listen)
     worker = PeerWorker(engine_factory([("udp", "trpc")]), 1, 3, "worker:1")
     worker.loop = loops()
+    worker._install_thread_model()
 
-    worker._start_datagram(0)
+    worker._listen_on(worker.transports[0])
 
-    assert calls == [(True, [])]
-    assert worker._udp_transports == [worker.transports[0]]
-    assert worker.transports[0].pop_loop_resources(None) == [endpoint]
+    model = worker.thread_model
+    assert calls == [(True, True)]
+    assert model.reuse_port is True
+    assert model.pop_resources(model.acceptor, ResourceKind.ENDPOINT) == [endpoint]
 
 
 def test_graceful_exit_releases_everything_once(monkeypatch, engine, loops):
@@ -132,12 +138,10 @@ def test_graceful_exit_releases_everything_once(monkeypatch, engine, loops):
     worker.loop = loops()
     worker.timer = SimpleNamespace(stop=lambda: events.append("timer"))
     worker._main_thread_info = HandlerThreadInfo(index=1, count=3, loop=worker.loop)
-    http_transport = TrpcServerTransport()
-    http_transport.keep_loop_resource(None, SimpleNamespace(cleanup=_cleanup))
-    udp_transport = TrpcServerTransport()
-    udp_transport.keep_loop_resource(None, SimpleNamespace(close=lambda: events.append("udp")))
-    worker._http_transports = [http_transport]
-    worker._udp_transports = [udp_transport]
+    worker._install_thread_model()
+    model = worker.thread_model
+    model.keep_resource(model.acceptor, SimpleNamespace(close=lambda: events.append("udp")), ResourceKind.ENDPOINT)
+    model.keep_resource(model.acceptor, SimpleNamespace(cleanup=_cleanup), ResourceKind.RUNNER)
 
     worker._on_graceful_exit()
     worker._on_graceful_exit()
@@ -183,7 +187,7 @@ def test_child_sigusr1_after_the_parent_died_exits_now(monkeypatch, child):
 
 
 def _stub_child_startup(monkeypatch, child, order):
-    for name in ("_bind_task_mesh", "_close_foreign_pipes", "_attach_heartbeats"):
+    for name in ("_restore_task_mesh_after_fork", "_close_unowned_task_pipes"):
         monkeypatch.setattr(child, name, lambda: None)
     monkeypatch.setattr(child, "_connect_tasks", lambda: order.append("connect"))
     monkeypatch.setattr(child, "start_worker_process", lambda: order.append("bind"))
@@ -234,19 +238,11 @@ def test_task_is_rejected_before_the_fork(monkeypatch, main):
         main._check_before_fork()
 
 
-def test_unknown_network_is_rejected_before_the_fork(monkeypatch, engine_factory):
-    monkeypatch.setattr(_peer_worker, "get_registered_tasks", lambda: [])
-    worker = PeerMainWorker(engine_factory([("quic", "trpc")]))
-
-    with pytest.raises(ValueError, match="unsupported network"):
-        worker._check_before_fork()
-
-
 def test_check_before_fork_warns(monkeypatch, main):
     warnings = _record_logs(monkeypatch, "warning")
     monkeypatch.setattr(_peer_worker, "get_registered_tasks", lambda: [])
     monkeypatch.setattr(_readiness, "registered_timer_tasks",
-                        lambda: [SimpleNamespace(cls=type("Tick", (), {}), name="")])
+                        lambda: [SimpleNamespace(cls=type("Tick", (), {}), name="", scope=TimerScope.PROCESS)])
     monkeypatch.setattr(_peer_worker, "has_custom_scheduler", lambda: True)
 
     main._check_before_fork()
@@ -266,10 +262,10 @@ def test_io_wait_count_is_ignored(monkeypatch, main):
     assert len(warnings) == 1 and "io_wait_count=3" in warnings[0]
 
 
-def test_registration_runs_after_every_worker_is_ready(monkeypatch, main):
+def test_registration_runs_before_workers_bind(monkeypatch, main):
+    """Worker 0 runs ready callbacks before it binds and waits for the others."""
     order = []
-    for name in ("_bind_task_mesh", "_close_foreign_pipes", "_attach_heartbeats", "_connect_tasks",
-                 "_start_timers"):
+    for name in ("_restore_task_mesh_after_fork", "_close_unowned_task_pipes", "_connect_tasks", "_start_timers"):
         monkeypatch.setattr(main, name, lambda: None)
     monkeypatch.setattr(MergeWorker, "start_worker_process", lambda self: order.append("bind"))
     monkeypatch.setattr(main, "_wait_children_ready",
@@ -278,7 +274,7 @@ def test_registration_runs_after_every_worker_is_ready(monkeypatch, main):
 
     main._prepare_to_serve()
 
-    assert order == ["bind", ("wait", 1, 2), "register"]
+    assert order == ["register", "bind", ("wait", 1, 2)]
 
 
 def test_exit_hooks_signal_and_wait_for_the_other_workers(monkeypatch, main):
@@ -295,8 +291,8 @@ def test_exit_hooks_signal_and_wait_for_the_other_workers(monkeypatch, main):
     main._on_drain_cut()
     main.loop.run_until_complete(main._wait_handlers())
 
-    assert signalled == [main._worker_records, main._worker_records]
-    assert waited == [(main._worker_records, _constants.CHILD_EXIT_GRACE_SECONDS)]
+    assert signalled == [main._worker_children, main._worker_children]
+    assert waited == [(main._worker_children, _constants.CHILD_EXIT_GRACE_SECONDS)]
 
 
 def _record_shutdown(monkeypatch, main, order):

@@ -25,13 +25,17 @@ from typing import Optional
 import pytest
 
 from trpc_sdk.runtime import MergeWorker
+from trpc_sdk.runtime import ThreadModel
 from trpc_sdk.runtime import _merge_worker
+from trpc_sdk.runtime import current_thread_model
 from trpc_sdk.runtime._process import _peer_worker
 from trpc_sdk.runtime._process import _rpc_task
 from trpc_sdk.runtime._process._rpc_task import RpcTaskProcess
+from trpc_sdk.runtime._process._separate_worker import SeparateForwardTransport
 from trpc_sdk.runtime._process._separate_worker import SeparateWorker
+from trpc_sdk.runtime._threadmodel import WorkerLoopView
 from trpc_sdk.runtime._threadmodel._thread_hooks import set_current_handler_thread
-from trpc_sdk.transport import ListenOption
+from trpc_sdk.transport import TrpcServerTransport
 from trpc_sdk.transport import UserProtocolTransport
 
 
@@ -41,18 +45,19 @@ class FakePullTransport(UserProtocolTransport):
     def __init__(self, events: List) -> None:
         super().__init__(self._start)
         self.events = events
-        self.opt: Optional[ListenOption] = None
+        self.model: Optional[ThreadModel] = None
         self.worker: Any = None
+        self.index: Optional[int] = None
         self.pulled: List[str] = []
         self._stopped = False
         self._task: Optional[asyncio.Task] = None
 
-    def listen(self, opt: Optional[ListenOption] = None) -> None:
-        self.opt = opt
-        super().listen(opt)
+    def listen(self) -> None:
+        self.model = current_thread_model()
+        super().listen()
 
     def _start(self, worker: Any, index: int) -> None:
-        del index
+        self.index = index
         self.worker = worker
         self.events.append(("listen", threading.current_thread().name))
         self._task = worker.loop.create_task(self._pull())
@@ -77,6 +82,14 @@ def reset_main_thread_identity():
     """Serving on the main loop marks this thread as a serving loop; undo it."""
     yield
     set_current_handler_thread(None)
+    asyncio.set_event_loop(None)
+
+
+def _new_main_loop() -> asyncio.AbstractEventLoop:
+    """A loop installed as the current one, as ``BaseWorker.run`` does after fork."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    return loop
 
 
 @pytest.fixture
@@ -110,7 +123,7 @@ def record_stop_hooks(monkeypatch, events):
 @pytest.fixture
 def no_stream(monkeypatch):
     """Keep the tRPC endpoint from binding a real port."""
-    monkeypatch.setattr(MergeWorker, "_start_stream", lambda self, index: None)
+    monkeypatch.setattr(TrpcServerTransport, "listen", lambda self: None)
 
 
 def _run(loop: asyncio.AbstractEventLoop, seconds: float = 0.05) -> None:
@@ -125,15 +138,17 @@ def _main() -> str:
 def test_merge_single_loop_serves_user_protocol_on_the_main_loop(pull_engine, events):
     engine, transport = pull_engine()
     worker = MergeWorker(engine)
-    worker.loop = asyncio.new_event_loop()
+    worker.loop = _new_main_loop()
     try:
+        worker._install_thread_model()
         worker._init_main_serving_loop()
         worker.start_worker_process()
         _run(worker.loop)
 
-        assert transport.opt.loop is worker.loop
-        assert transport.opt.worker is worker
-        assert transport.opt.index == 1
+        assert transport.model is worker.thread_model
+        assert transport.model.acceptor.loop is worker.loop
+        assert transport.worker is worker
+        assert transport.index == 1
         assert set(transport.pulled) == {_main()}
 
         worker._stop_accepting()
@@ -149,15 +164,17 @@ def test_merge_single_loop_serves_user_protocol_on_the_main_loop(pull_engine, ev
 def test_merge_threads_serve_user_protocol_on_serving_thread_zero(pull_engine, events):
     engine, transport = pull_engine(io_thread_num=2)
     worker = MergeWorker(engine)
-    worker.loop = asyncio.new_event_loop()
+    worker.loop = _new_main_loop()
     try:
+        worker._install_thread_model()
         worker._start_loop_threads()
         worker.start_worker_process()
         thread0 = worker.loop_threads[0]
         _run(worker.loop)
 
-        assert transport.opt.loop is thread0.loop
-        assert isinstance(transport.worker, _merge_worker._LoopView)
+        assert transport.model is worker.thread_model
+        assert transport.index == 1
+        assert isinstance(transport.worker, WorkerLoopView)
         assert transport.worker.loop is thread0.loop
         assert transport.worker.addresses is worker.addresses
         assert set(transport.pulled) == {thread0.name}
@@ -178,13 +195,15 @@ def test_merge_threads_serve_user_protocol_on_serving_thread_zero(pull_engine, e
 def test_peer_worker_serves_user_protocol_on_its_loop(pull_engine, events):
     engine, transport = pull_engine()
     worker = _peer_worker.PeerWorker(engine, 1, 2, "worker:1")
-    worker.loop = asyncio.new_event_loop()
+    worker.loop = _new_main_loop()
     try:
+        worker._install_thread_model()
         worker._init_main_serving_loop()
         worker.start_worker_process()
         _run(worker.loop)
 
-        assert transport.opt.worker is worker
+        assert transport.worker is worker
+        assert worker.thread_model.reuse_port is True
         assert transport.pulled
 
         worker._stop_accepting()
@@ -200,13 +219,14 @@ def test_separate_leaves_user_protocols_to_the_rpc_tasks(monkeypatch, pull_engin
     worker = SeparateWorker(engine)
     worker._validate_addresses()
     listened = []
-    monkeypatch.setattr(type(worker.transports[0]), "listen", lambda self, opt: listened.append(self))
+    monkeypatch.setattr(type(worker.transports[0]), "listen", lambda self: listened.append(self))
     worker.loop = object()
 
     worker._listen()
 
     assert listened == [worker.transports[0]]
-    assert transport.opt is None
+    assert isinstance(worker.transports[0], SeparateForwardTransport)
+    assert transport.model is None
 
 
 def test_rpc_task_serves_user_protocol_and_destroys_it_after_on_stop(monkeypatch, pull_engine, events):
@@ -219,14 +239,15 @@ def test_rpc_task_serves_user_protocol_and_destroys_it_after_on_stop(monkeypatch
         events.append(("on_stop", _main()))
 
     monkeypatch.setattr(_rpc_task, "run_stop_hooks", _stop_hooks)
-    task.loop = asyncio.new_event_loop()
+    task.loop = _new_main_loop()
     task._thread_info = object()
     try:
+        task._install_thread_model()
         task._start_own_listeners()
         _run(task.loop)
 
-        assert transport.opt.worker is task
-        assert transport.opt.reuse_port is True
+        assert transport.worker is task
+        assert transport.model.reuse_port is True
         assert transport.pulled
 
         task._stop_accepting()

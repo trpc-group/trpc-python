@@ -8,10 +8,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from trpc_sdk.rpcz.filter.server_filter import RPCZ_SERVER_SPAN_CTX_KEY
-from trpc_sdk.rpcz.filter.server_filter import RpczServerFilter
-from trpc_sdk.rpcz.filter.server_filter import SpanIdGenerator
-from trpc_sdk.rpcz.span import SpanType
+from trpc_sdk.rpcz import RPCZ_SERVER_SPAN_CTX_KEY
+from trpc_sdk.rpcz import RpczServerFilter
+from trpc_sdk.rpcz import SpanIdGenerator
+from trpc_sdk.rpcz import SpanType
+from trpc_sdk.rpcz.filter import _server_filter as filter_mod
 
 
 class _Ctx:
@@ -29,7 +30,7 @@ class _Ctx:
 def test_build_server_span_uses_message_fields(monkeypatch):
     ctx = _Ctx()
     monkeypatch.setattr(
-        "trpc_sdk.rpcz.filter.server_filter.get_message",
+        filter_mod, "get_message",
         lambda _: SimpleNamespace(
             server_rpc_name="/pkg.Service/Method",
             caller_service_name="caller",
@@ -47,26 +48,23 @@ def test_build_server_span_uses_message_fields(monkeypatch):
     assert span.server_pre_sched_recv_msg_us == 1500
 
 
+def _set_config(monkeypatch, **rpcz_values):
+    rpcz = SimpleNamespace(**rpcz_values)
+    monkeypatch.setattr(filter_mod.TrpcConfig, "global_config", staticmethod(lambda: SimpleNamespace(rpcz=rpcz)))
+
+
 def test_should_sample_respects_whitelist(monkeypatch):
     ctx = _Ctx()
     monkeypatch.setattr(
-        "trpc_sdk.rpcz.filter.server_filter.get_message",
+        filter_mod, "get_message",
         lambda _: SimpleNamespace(callee_service_name="svc.a"),
     )
-    monkeypatch.setattr(
-        "trpc_sdk.rpcz.filter.server_filter.config",
-        SimpleNamespace(
-            global_config_obj=SimpleNamespace(
-                global_config=SimpleNamespace(
-                    rpcz=SimpleNamespace(
-                        service_whitelist=["svc.b"],
-                        sample_rate=1,
-                        lower_water_level=0,
-                        high_water_level=100,
-                    ),
-                ),
-            ),
-        ),
+    _set_config(
+        monkeypatch,
+        service_whitelist=["svc.b"],
+        sample_rate=1,
+        lower_water_level=0,
+        high_water_level=100,
     )
     flt = RpczServerFilter()
     assert flt._should_sample(ctx, 1) is False  # pylint: disable=protected-access
@@ -76,7 +74,7 @@ def test_should_sample_respects_whitelist(monkeypatch):
 async def test_run_sampled_writes_span(monkeypatch):
     ctx = _Ctx()
     monkeypatch.setattr(
-        "trpc_sdk.rpcz.filter.server_filter.get_message",
+        filter_mod, "get_message",
         lambda _: SimpleNamespace(
             server_rpc_name="/pkg.Service/Method",
             caller_service_name="caller",
@@ -84,20 +82,12 @@ async def test_run_sampled_writes_span(monkeypatch):
             callee_service_name="svc.a",
         ),
     )
-    monkeypatch.setattr(
-        "trpc_sdk.rpcz.filter.server_filter.config",
-        SimpleNamespace(
-            global_config_obj=SimpleNamespace(
-                global_config=SimpleNamespace(
-                    rpcz=SimpleNamespace(
-                        service_whitelist=[],
-                        sample_rate=1,
-                        lower_water_level=0,
-                        high_water_level=1000,
-                    ),
-                ),
-            ),
-        ),
+    _set_config(
+        monkeypatch,
+        service_whitelist=[],
+        sample_rate=1,
+        lower_water_level=0,
+        high_water_level=1000,
     )
     flt = RpczServerFilter()
     flt._id_generator = SpanIdGenerator()  # pylint: disable=protected-access
@@ -105,7 +95,7 @@ async def test_run_sampled_writes_span(monkeypatch):
     async def _handle():
         return "rsp", None
 
-    rsp, err = await flt.run(ctx, req={"k": "v"}, handle=_handle)
+    rsp, err = await flt.run(ctx, {"k": "v"}, _handle)
     assert err is None
     assert rsp == "rsp"
     span = ctx.get_meta_data(RPCZ_SERVER_SPAN_CTX_KEY)

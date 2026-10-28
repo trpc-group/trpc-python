@@ -9,28 +9,34 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from trpc_sdk.context import TrpcContext
+from tests import helloworld_pb2
+from trpc_sdk.abc import TrpcContext
 from trpc_sdk.exceptions import ServerDecodeError
-from trpc_sdk.http import _api
-from trpc_sdk.http._http_response import HttpClientRspHeader, TrpcHttpResponse
-from trpc_sdk.http.dict_pb_convertor import dict_to_protobuf
-from trpc_sdk.http.http_ctx_manager import _BaseRequestContextManager, _RequestContextManager
-from trpc_sdk.http.serialization_form import FormSerializer
-
-from . import helloworld_pb2
+from trpc_sdk.http import BaseRequestContextManager
+from trpc_sdk.http import FormSerializer
+from trpc_sdk.http import HttpClientRspHeader
+from trpc_sdk.http import RequestContextManager
+from trpc_sdk.http import TrpcHttpResponse
+from trpc_sdk.http import get_http_ok_codes
+from trpc_sdk.http import get_http_rsp_header
+from trpc_sdk.http import pop_http_ok_codes
+from trpc_sdk.http import pop_http_rsp_header
+from trpc_sdk.http import set_http_ok_codes
+from trpc_sdk.http import set_http_rsp_header
+from trpc_sdk.utils import dict_to_protobuf
 
 
 def test_api_header_and_ok_code_roundtrip():
     ctx = TrpcContext()
-    _api.set_http_rsp_header(ctx, {"X-A": "1"})
-    assert _api.get_http_rsp_header(ctx) == {"X-A": "1"}
-    assert _api.pop_http_rsp_header(ctx) == {"X-A": "1"}
-    assert _api.pop_http_rsp_header(ctx) == {}
+    set_http_rsp_header(ctx, {"X-A": "1"})
+    assert get_http_rsp_header(ctx) == {"X-A": "1"}
+    assert pop_http_rsp_header(ctx) == {"X-A": "1"}
+    assert pop_http_rsp_header(ctx) == {}
 
-    _api.set_http_ok_codes(ctx, {200, 201})
-    assert _api.get_http_ok_codes(ctx) == {200, 201}
-    assert _api.pop_http_ok_codes(ctx) == {200, 201}
-    assert _api.pop_http_ok_codes(ctx) == set()
+    set_http_ok_codes(ctx, {200, 201})
+    assert get_http_ok_codes(ctx) == {200, 201}
+    assert pop_http_ok_codes(ctx) == {200, 201}
+    assert pop_http_ok_codes(ctx) == set()
 
 
 def test_http_client_rsp_header_str_and_body_paths():
@@ -75,7 +81,7 @@ async def test_request_context_manager_coro_protocol():
         resp.release = MagicMock()
         return resp
 
-    mgr = _RequestContextManager(make_resp())
+    mgr = RequestContextManager(make_resp())
     async with mgr as resp:
         assert resp is not None
     resp.release.assert_called_once()
@@ -83,17 +89,17 @@ async def test_request_context_manager_coro_protocol():
     async def simple():
         return 42
 
-    base = _BaseRequestContextManager(simple())
+    base = BaseRequestContextManager(simple())
     assert await base == 42
 
-    base2 = _BaseRequestContextManager(simple())
+    base2 = BaseRequestContextManager(simple())
     base2.close()
 
-    base3 = _BaseRequestContextManager(simple())
+    base3 = BaseRequestContextManager(simple())
     with pytest.raises(ValueError):
         base3.throw(ValueError("x"))
 
-    base4 = _BaseRequestContextManager(simple())
+    base4 = BaseRequestContextManager(simple())
     it = base4.__iter__()
     with pytest.raises(StopIteration) as exc:
         while True:

@@ -3,190 +3,169 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
+"""Server stream send/recv and the dispatcher frame switch."""
+
+from unittest.mock import MagicMock
 
 import pytest
 
-from trpc_sdk.trpcpb import TrpcStreamCloseMeta
-from trpc_sdk.trpcpb import TrpcStreamFeedBackMeta
-from trpc_sdk.trpcpb import TrpcStreamInitMeta
-from trpc_sdk import server
-from trpc_sdk import stream
-from trpc_sdk.codec import FrameHead
-from trpc_sdk.codec import Message
-from trpc_sdk.codec import ServerCodec
-from trpc_sdk.codec.message import get_message  # pylint: disable=no-name-in-module
-from trpc_sdk.context import TrpcContext
+from trpc_sdk._inner import trpc_pb2
+from trpc_sdk.abc import TrpcContext
+from trpc_sdk.abc import get_message
+from trpc_sdk.exceptions import ServerSystemError
+from trpc_sdk.serialization import Body
+from trpc_sdk.serialization import SerializationType
 from trpc_sdk.server import ServiceOption
-from trpc_sdk.stream.server import ServerStream
-from trpc_sdk.stream.server import StreamDispatcher
-from trpc_sdk.stream.server import new_stream_dispatcher
-from trpc_sdk.transport.server_transport_stream import TrpcServerStreamTransport
-
-stream_spec = server.StreamDesc("test", None, True)
-stream_dispatcher = stream.new_stream_dispatcher()
+from trpc_sdk.stream import ServerStream
+from trpc_sdk.stream import StreamDispatcher
+from trpc_sdk.stream import create_stream_dispatcher
+from trpc_sdk.transport import TrpcServerStreamTransport
 
 
-class MockStreamTransport(TrpcServerStreamTransport):
-    """Mock stream transport"""
-
-    def send(self, ctx: TrpcContext, req_data: bytes, stream_id: int):
-        return
-
-    def close(self, ctx: TrpcContext):
-        return
-
-
-def new_test_server_stream() -> ServerStream:
-    """Create test server stream"""
+def _options():
     opts = ServiceOption()
-    opts.codec = ServerCodec()
-    opts.stream_transport = MockStreamTransport()
-    msg = Message()
-    msg.stream_id = 100
-    ctx = TrpcContext()
-    ctx.msg = msg
+    opts.set_protocol("trpc")
+    opts.current_serialization_type = SerializationType.Noop
+    opts.stream_transport = MagicMock()
+    return opts
 
-    return ServerStream(ctx, 1, opts)
+
+def _stream():
+    ctx = TrpcContext()
+    msg = get_message(ctx)
+    msg.stream_id = 100
+    return ServerStream(ctx, 1, _options()), ctx
 
 
 @pytest.mark.asyncio
 async def test_server_stream():
-    """Test server stream"""
-    server_stream = new_test_server_stream()
+    server_stream, ctx = _stream()
+    msg = get_message(ctx)
     await server_stream.feedback(10)
+    server_stream.opts.stream_transport.send.assert_called()
 
-    msg = server_stream.context().msg
-    msg.stream_frame = TrpcStreamInitMeta()
-    msg.stream_frame.init_window_size = 0
-    server_stream.set_send_control(msg)
-    msg.stream_frame.init_window_size = 100
-    server_stream.set_send_control(msg)
+    init = trpc_pb2.TrpcStreamInitMeta()
+    init.init_window_size = 0
+    msg.stream_frame = init
+    assert server_stream.set_send_control(msg) == 0
+    assert server_stream.s_control is None
+
+    init.init_window_size = 100
+    msg.stream_frame = init
+    assert server_stream.set_send_control(msg) == 100
+    assert server_stream.s_control.available_window == 100
 
     msg.stream_frame = None
-    try:
+    with pytest.raises(ServerSystemError, match="TrpcStreamInitMeta"):
         server_stream.set_send_control(msg)
-    except Exception as err:  # pylint: disable=broad-except
-        assert str(err) == 'stream frame assert failed: TrpcStreamInitMeta'
 
-    await server_stream.send_msg(None)
+    body = Body(data=b"hi")
+    await server_stream.send_msg(body)
+    server_stream.close_send(trpc_pb2.TRPC_STREAM_CLOSE, 0, "test msg")
 
-    server_stream.close_send(0, 0, 'test msg')
+    incoming = Body()
+    server_stream.recv_queue.push((b"payload", None))
+    await server_stream.recv_msg(incoming)
+    assert incoming.data == b"payload"
 
-    server_stream.recv_queue.push((b'\n\x0ctrpc-go_4075', None))
-    message = None
-    await server_stream.recv_msg(message)
+    server_stream.recv_queue.push((b"", EOFError))
+    with pytest.raises(EOFError):
+        await server_stream.recv_msg(Body())
 
-    server_stream.recv_queue.push((b'', EOFError))
-    message = None
-    try:
-        await server_stream.recv_msg(message)
-    except EOFError:  # pylint: disable=broad-except
-        assert True
-    except Exception:  # pylint: disable=broad-except
-        assert False
+    server_stream.recv_queue.push((b"", Exception("test exception")))
+    with pytest.raises(ServerSystemError, match="stream is already closed"):
+        await server_stream.recv_msg(Body())
 
-    server_stream.recv_queue.push((b'', Exception('test exception')))
-    message = None
-    try:
-        await server_stream.recv_msg(message)
-    except Exception as err:  # pylint: disable=broad-except
-        assert str(err) == 'stream is already closed'
+    assert server_stream.context() is ctx
 
-    assert server_stream.context() is not None
+
+def test_stream_dispatcher_requires_a_stream_transport():
+    dispatcher = create_stream_dispatcher()
+    opts = ServiceOption()
+    opts.transport = TrpcServerStreamTransport()
+    dispatcher.init(opts)
+    assert opts.stream_transport is opts.transport
+
+    opts.transport = None
+    with pytest.raises(TypeError, match="server StreamTransport is not implemented"):
+        dispatcher.init(opts)
+
+    ctx = TrpcContext()
+    dispatcher.handle_error(ctx, None)
+    msg = get_message(ctx)
+    # A fresh message carries a success error, so a missing head is a connection-level no-op.
+    msg.frame_head = None
+    assert dispatcher.stream_handle_func(ctx, None, None) is None
+
+    msg.set_server_rsp_err(None)
+    with pytest.raises(ServerSystemError, match="frameHead is not contained in msg"):
+        dispatcher.stream_handle_func(ctx, None, None)
 
 
 @pytest.mark.asyncio
-async def test_stream_dispatcher():
-    """Test stream dispatcher"""
-    server_dispatcher = new_stream_dispatcher()
-    opts = ServiceOption()
+async def test_unknown_frame_and_bad_feedback():
+    dispatcher = StreamDispatcher()
+    opts = _options()
     opts.transport = TrpcServerStreamTransport()
-    server_dispatcher.init(opts)
+    dispatcher.init(opts)
 
-    try:
-        opts.transport = None
-        server_dispatcher.init(opts)
-    except Exception as err:  # pylint: disable=broad-except
-        assert str(err) == 'server StreamTransport is not implemented'
-
-    server_dispatcher.handle_error(None, None)
-
-    # server_stream = new_test_server_stream()
     ctx = TrpcContext()
     msg = get_message(ctx)
-    msg.stream_id = 100
-    ctx.with_meta_data("session_id", 1)
-    server_dispatcher.stream_handle_func(ctx, None, None)
+    msg.frame_head.frame_state = 0
+    msg.stream_id = 1
+    msg.session_id = 1
+    with pytest.raises(ValueError, match="unknown stream frame type 0"):
+        await dispatcher.handle_by_stream_frame_type(ctx, None, b"")
 
-    try:
-        msg.frame_head = None
-        server_dispatcher.stream_handle_func(ctx, None, None)
-    except Exception as err:  # pylint: disable=broad-except
-        assert str(err) == 'frameHead is not contained in msg'
-
-    opts = ServiceOption()
-    opts.codec = ServerCodec()
-    opts.stream_transport = MockStreamTransport()
-    server_dispatcher.opts = opts
-    msg.stream_frame = TrpcStreamInitMeta()
-    msg.frame_head = FrameHead()
-    msg.frame_head.frame_state = 1
-    await server_dispatcher.handle_by_stream_frame_type(ctx, None, b'')
-
-    msg.frame_head.frame_state = 2
-    await server_dispatcher.handle_by_stream_frame_type(ctx, None, b'')
-
-    msg.stream_frame = TrpcStreamFeedBackMeta()
-    msg.frame_head.frame_state = 3
-    await server_dispatcher.handle_by_stream_frame_type(ctx, None, b'')
-
-    msg.stream_frame = TrpcStreamCloseMeta()
-    msg.frame_head.frame_state = 4
-    await server_dispatcher.handle_by_stream_frame_type(ctx, None, b'')
-
-    try:
-        msg.frame_head.frame_state = 0
-        await server_dispatcher.handle_by_stream_frame_type(ctx, None, b'')
-    except Exception as err:  # pylint: disable=broad-except
-        assert str(err) == 'unknown stream frame type 0'
+    msg.frame_head.frame_state = trpc_pb2.TRPC_STREAM_FRAME_FEEDBACK
+    msg.stream_frame = object()
+    with pytest.raises(ServerSystemError, match="feedback fields"):
+        await dispatcher.handle_by_stream_frame_type(ctx, None, b"")
 
 
-def test_stream_transport_send():
-    """Test stream transport send"""
+def test_stream_transport_send_without_a_stored_handle():
     stream_transport = TrpcServerStreamTransport()
     ctx = TrpcContext()
-    ctx.with_meta_data("session_id", 1)
-    ctx.with_meta_data("fd", 1)
-    with pytest.raises(ValueError):
-        stream_transport.send(ctx, b'', 1)
+    msg = get_message(ctx)
+    msg.session_id = 1
+    msg.stream_id = 1
+    with pytest.raises(ValueError, match="does not exist"):
+        stream_transport.send(ctx, b"", 1)
 
 
 class _MockServerStream(ServerStream):
-    """Mock ServerStream"""
-
-    def close_send(self, code: int, reason: int, msg: str):
-        return
-
-    def close_control(self):
-        return
-
-    def close_send(self, code: int, reason: int, msg: str):
-        return
+    def close_send(self, close_type, ret_code, ret_msg):
+        self.closed = (close_type, ret_code, ret_msg)
 
 
 @pytest.mark.asyncio
 async def test_filter_stream():
-    """Test filter stream"""
-    mock_dispatcher = StreamDispatcher()
+    dispatcher = StreamDispatcher()
+    opts = _options()
+    opts.enable_stream_filter = False
+    dispatcher.opts = opts
 
-    async def _stream_handle(server_stream):
+    async def _stream_handle(_server_stream):
         return
 
     ctx = TrpcContext()
     get_message(ctx)
-
-    opts = ServiceOption()
     mock_stream = _MockServerStream(ctx, 1, opts)
-    await mock_dispatcher.start_stream_handler(ctx, mock_stream, _stream_handle)
+    await dispatcher.start_stream_handler(ctx, mock_stream, _stream_handle)
+    assert mock_stream.handler_done is True
+    assert mock_stream.closed[0] == trpc_pb2.TRPC_STREAM_CLOSE
+
+    async def _fail(_server_stream):
+        raise RuntimeError("stream failed")
+
+    failing = _MockServerStream(ctx, 2, opts)
+    await dispatcher.start_stream_handler(ctx, failing, _fail)
+    assert failing.closed[0] == trpc_pb2.TRPC_STREAM_RESET
+    assert "stream failed" in failing.closed[2]
+
+    # The filter chain logs the handler error and does not re-raise, so the
+    # dispatcher still closes the stream as a normal CLOSE.
     opts.enable_stream_filter = True
-    await mock_dispatcher.start_stream_handler(ctx, mock_stream, _stream_handle)
+    swallowed = _MockServerStream(ctx, 3, opts)
+    await dispatcher.start_stream_handler(ctx, swallowed, _fail)
+    assert swallowed.closed[0] == trpc_pb2.TRPC_STREAM_CLOSE

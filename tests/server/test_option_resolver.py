@@ -12,10 +12,13 @@ from typing import List
 
 import pytest
 
+from trpc_sdk.config import GlobalConfig
+from trpc_sdk.config import ProcessModel
 from trpc_sdk.config import ServerConfig
 from trpc_sdk.config._parser import TrpcConfigParser
 from trpc_sdk.server import ServerOption
 from trpc_sdk.server import _option_resolver
+from trpc_sdk.server._option_resolver import apply_process_model
 from trpc_sdk.server._option_resolver import resolve_server_option
 
 
@@ -34,18 +37,12 @@ def warnings(monkeypatch) -> List[str]:
 
 
 def _raw_option(mode: str = "merge", **fields) -> ServerOption:
-    """Build a ServerOption holding raw YAML values, the way create_server does."""
-    cfg = ServerConfig(mode=mode, **fields)
+    """Build a ServerOption holding unresolved values, as if filled by hand."""
     option = ServerOption()
-    option.mode = cfg.mode
-    option.worker_num = cfg.worker_num
-    option.io_handle_type = cfg.io_handle_type
-    option.io_thread_num = cfg.io_thread_num
-    option.handle_thread_num = cfg.handle_thread_num
-    option.handler_max_concurrency = cfg.handler_max_concurrency
-    option.handler_queue_size = cfg.handler_queue_size
-    option.tcp_reuse_port = cfg.tcp_reuse_port
-    option.ready_timeout = cfg.ready_timeout
+    option.mode = mode
+    for name, value in fields.items():
+        assert hasattr(option, name), name
+        setattr(option, name, value)
     return option
 
 
@@ -191,17 +188,12 @@ def test_peer_mode_negative_ready_timeout_falls_back(warnings):
     assert len(warnings) == 1 and "negative" in warnings[0]
 
 
-def test_removed_worker_thread_num_is_skipped_by_the_parser(warnings):
+def test_process_fields_under_server_are_not_parsed():
+    removed = ("worker_thread_num", "mode", "worker_num", "io_handle_type", "io_thread_num", "handle_thread_num")
     cfg = ServerConfig()
-    TrpcConfigParser.populate_from_dict({"worker_thread_num": 4, "mode": "merge"}, cfg)
-    assert not hasattr(cfg, "worker_thread_num")
-    assert cfg.io_thread_num == 0
-
-
-def test_config_keeps_the_raw_yaml_values():
-    cfg = ServerConfig()
-    TrpcConfigParser.populate_from_dict({"io_thread_num": 0, "worker_num": 0, "ready_timeout": 0}, cfg)
-    assert (cfg.io_thread_num, cfg.worker_num, cfg.ready_timeout) == (0, 0, 0)
+    TrpcConfigParser.populate_from_dict({**{name: 2 for name in removed}, "ready_timeout": 0}, cfg)
+    assert not any(hasattr(cfg, name) for name in removed)
+    assert cfg.ready_timeout == 0
 
 
 # Process model.
@@ -286,3 +278,102 @@ def test_peer_on_macos_warns_about_balancing(monkeypatch, warnings):
 def test_peer_ignores_reuse_port_silently(warnings):
     _apply(mode="peer", worker_num=2, tcp_reuse_port=True)
     assert warnings == []
+
+
+# global.processmodel.
+
+def _apply_model(option_fields=None, **model_fields) -> ServerOption:
+    """Apply a ``global.processmodel`` block onto a ServerOption, then resolve."""
+    option = _raw_option(**(option_fields or {}))
+    apply_process_model(option, ProcessModel(**model_fields))
+    resolve_server_option(option, [])
+    return option
+
+
+def test_processmodel_parses_under_global():
+    cfg = GlobalConfig()
+    TrpcConfigParser.populate_from_dict(
+        {"processmodel": {"mode": "multi_process", "io_handle_type": "peer", "handle_num": 3, "task_num": 2}}, cfg)
+    assert (cfg.processmodel.mode, cfg.processmodel.io_handle_type) == ("multi_process", "peer")
+    assert (cfg.processmodel.handle_num, cfg.processmodel.task_num) == (3, 2)
+
+
+def test_empty_processmodel_leaves_a_hand_built_option_alone(warnings):
+    opt = _apply_model({"mode": "peer", "worker_num": 2})
+    assert (opt.mode, opt.worker_num, opt.task_num) == ("peer", 2, 1)
+    assert warnings == []
+
+
+@pytest.mark.parametrize("io_num,handle_num,threads", [(2, 2, 2), (3, 0, 3), (0, 3, 3), (0, 0, 1)])
+def test_single_process_merge_uses_one_thread_count(warnings, io_num, handle_num, threads):
+    opt = _apply_model(mode="single_process", io_handle_type="merge", io_num=io_num, handle_num=handle_num)
+    assert (opt.mode, opt.io_handle_type) == ("merge", "merge")
+    assert (opt.io_thread_num, opt.handle_thread_num) == (threads, 0)
+    assert warnings == []
+
+
+def test_single_process_merge_with_unequal_counts_uses_handle_num(warnings):
+    opt = _apply_model(mode="single_process", io_num=2, handle_num=3)
+    assert (opt.io_handle_type, opt.io_thread_num, opt.handle_thread_num) == ("merge", 3, 0)
+    assert len(warnings) == 1 and "must be equal" in warnings[0]
+
+
+def test_single_process_separate_maps_to_handle_threads(warnings):
+    opt = _apply_model(mode="single_process", io_handle_type="seperate", io_num=2, handle_num=4)
+    assert (opt.mode, opt.io_handle_type, opt.io_thread_num, opt.handle_thread_num) == ("merge", "separate", 2, 4)
+    assert warnings == []
+
+
+def test_single_process_separate_needs_handle_num(warnings):
+    with pytest.raises(ValueError, match="handle_num > 0"):
+        _apply_model(mode="single_process", io_handle_type="separate", io_num=2)
+
+
+def test_multi_process_defaults_to_separate(warnings):
+    opt = _apply_model(mode="multi_process", handle_num=3)
+    assert (opt.mode, opt.worker_num, opt.io_thread_num, opt.handle_thread_num) == ("separate", 3, 1, 0)
+    assert warnings == []
+
+
+def test_multi_process_separate_forces_one_io_process(warnings):
+    opt = _apply_model(mode="multi_process", io_handle_type="separate", io_num=2, handle_num=2)
+    assert (opt.mode, opt.io_thread_num) == ("separate", 1)
+    assert len(warnings) == 1 and "single I/O process" in warnings[0]
+
+
+@pytest.mark.parametrize("io_handle_type", ["merge", "peer"])
+def test_multi_process_merge_is_peer(warnings, io_handle_type):
+    opt = _apply_model(mode="multi_process", io_handle_type=io_handle_type, handle_num=2)
+    assert (opt.mode, opt.worker_num) == ("peer", 2)
+    assert warnings == []
+
+
+def test_multi_process_peer_ignores_io_num(warnings):
+    _apply_model(mode="multi_process", io_handle_type="merge", io_num=2, handle_num=2)
+    assert len(warnings) == 1 and "no effect" in warnings[0]
+
+
+def test_multi_process_zero_handle_num_means_cpu_count(warnings):
+    assert _apply_model(mode="multi_process", io_handle_type="peer").worker_num == 4
+
+
+@pytest.mark.parametrize("fields,match", [
+    ({"mode": "multi"}, "processmodel.mode"),
+    ({"mode": "single_process", "io_handle_type": "peer"}, "io_handle_type"),
+    ({"mode": "multi_process", "io_handle_type": "x"}, "io_handle_type"),
+])
+def test_processmodel_rejects_unknown_names(warnings, fields, match):
+    with pytest.raises(ValueError, match=match):
+        _apply_model(**fields)
+
+
+def test_processmodel_replaces_a_hand_built_option(warnings):
+    opt = _apply_model({"mode": "peer", "worker_num": 8}, mode="single_process", io_num=2, handle_num=2)
+    assert (opt.mode, opt.worker_num, opt.io_thread_num) == ("merge", 0, 2)
+    assert warnings == []
+
+
+@pytest.mark.parametrize("value,expected,warned", [(0, 1, False), (3, 3, False), (-1, 1, True)])
+def test_processmodel_task_num(warnings, value, expected, warned):
+    assert _apply_model(task_num=value).task_num == expected
+    assert bool(warnings) is warned

@@ -5,12 +5,10 @@
 # tRPC-Python is licensed under Apache-2.0.
 """Test config exception types."""
 
-from trpc_sdk.config.exception import (
-    DataSourceError,
-    DataSourceNotExist,
-    DecodeError,
-    GetConfigKeyError,
-)
+from trpc_sdk.config import ConfigDecoderError
+from trpc_sdk.config import GetConfigKeyError
+from trpc_sdk.config import ProviderError
+from trpc_sdk.config import ProviderNotExist
 
 
 def test_get_config_key_error_fields():
@@ -20,17 +18,17 @@ def test_get_config_key_error_fields():
 
 
 def test_decode_error_repr():
-    err = DecodeError("yaml", "bad indent")
+    err = ConfigDecoderError("yaml", "bad indent")
     assert repr(err) == "Decoder yaml decode error: bad indent"
 
 
-def test_data_source_error_repr():
-    err = DataSourceError("file", "not readable")
+def test_provider_error_repr():
+    err = ProviderError("file", "not readable")
     assert repr(err) == "not readable"
 
 
-def test_data_source_not_exist_fields_and_repr():
-    err = DataSourceNotExist("file:///tmp/x", "gone")
-    assert err.data_source == "file:///tmp/x"
+def test_provider_not_exist_fields_and_repr():
+    err = ProviderNotExist("file:///tmp/x", "gone")
+    assert err.provider == "file:///tmp/x"
     assert err.msg == "gone"
-    assert repr(err) == "datasource: file:///tmp/x not exist"
+    assert repr(err) == "provider: file:///tmp/x not exist"

@@ -3,7 +3,7 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-"""``server.mode: peer`` end to end: startup, SO_REUSEPORT serving, shutdown."""
+"""``multi_process`` + ``merge`` (peer) end to end: startup, SO_REUSEPORT serving, shutdown."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from tests.server import _e2e_support as e2e
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="peer mode needs fork")
 linux_only = pytest.mark.skipif(sys.platform != "linux", reason="SO_REUSEPORT only balances load on Linux")
 
-PEER = "mode: peer\nworker_num: 2"
+PEER = "mode: multi_process\nio_handle_type: merge\nhandle_num: 2"
 BOUND = r"peer: 2 workers bound in (\d+) ms"
 
 
@@ -54,8 +54,8 @@ def _wait_gone(pids: List[int], timeout: float) -> bool:
     return all(_gone(pid) for pid in pids)
 
 
-def _start(tmp_path, ports, extra: str = PEER, **kwargs) -> e2e.Server:
-    server = e2e.Server(tmp_path, ports, extra, **kwargs)
+def _start(tmp_path, ports, server_extra: str = "", processmodel: str = PEER, **kwargs) -> e2e.Server:
+    server = e2e.Server(tmp_path, ports, server_extra, processmodel=processmodel, **kwargs)
     if not server.wait_output(BOUND):
         server.stop()
         raise AssertionError(f"peer workers not bound:\n{server.output}")
@@ -92,7 +92,7 @@ def test_connections_spread_over_both_workers(tmp_path):
 
 
 def test_worker_zero_waits_for_every_worker_before_registering(tmp_path):
-    server = e2e.Server(tmp_path, {"tcp": e2e.free_port()}, PEER, env={"SLOW_HOOK": "1"})
+    server = e2e.Server(tmp_path, {"tcp": e2e.free_port()}, processmodel=PEER, env={"SLOW_HOOK": "1"})
     assert server.wait_output(BOUND, timeout=20), server.output
     elapsed_ms = int(re.search(BOUND, server.output).group(1))
     code = server.stop()
@@ -103,7 +103,7 @@ def test_worker_zero_waits_for_every_worker_before_registering(tmp_path):
 
 @pytest.mark.parametrize("failing", ["1", "0"])
 def test_failing_on_start_exits_with_status_1_and_leaves_no_child(tmp_path, failing):
-    server = e2e.Server(tmp_path, {"tcp": e2e.free_port()}, PEER, env={"FAIL_HOOK": failing})
+    server = e2e.Server(tmp_path, {"tcp": e2e.free_port()}, processmodel=PEER, env={"FAIL_HOOK": failing})
     time.sleep(1)
     children = _children(server.proc.pid)
     code = server.wait_exit()
@@ -115,7 +115,8 @@ def test_failing_on_start_exits_with_status_1_and_leaves_no_child(tmp_path, fail
 
 
 def test_ready_timeout_aborts_startup(tmp_path):
-    server = e2e.Server(tmp_path, {"tcp": e2e.free_port()}, PEER + "\nready_timeout: 1000", env={"SLOW_HOOK": "1"})
+    server = e2e.Server(tmp_path, {"tcp": e2e.free_port()}, "ready_timeout: 1000", processmodel=PEER,
+                        env={"SLOW_HOOK": "1"})
     began = time.monotonic()
     code = server.wait_exit()
 
@@ -126,7 +127,7 @@ def test_ready_timeout_aborts_startup(tmp_path):
 
 def test_in_flight_request_finishes_within_close_wait_time(tmp_path):
     port = e2e.free_port()
-    server = _start(tmp_path, {"tcp": port}, PEER + "\nclose_wait_time: 2000")
+    server = _start(tmp_path, {"tcp": port}, "close_wait_time: 2000")
 
     async def _call_then_sigterm():
         call = asyncio.ensure_future(e2e.tcp_call(port, 1, "1"))
@@ -142,7 +143,7 @@ def test_in_flight_request_finishes_within_close_wait_time(tmp_path):
 
 
 def test_second_sigterm_cuts_close_wait_time_short(tmp_path):
-    server = _start(tmp_path, {"tcp": e2e.free_port()}, PEER + "\nclose_wait_time: 30000")
+    server = _start(tmp_path, {"tcp": e2e.free_port()}, "close_wait_time: 30000")
     began = time.monotonic()
     server.proc.send_signal(signal.SIGTERM)
     time.sleep(0.5)
@@ -165,7 +166,7 @@ def test_sigterm_to_the_process_group_stops_every_worker(tmp_path):
 
 @pytest.mark.parametrize("extra", ["", "\nmax_restarts: 3"])
 def test_dead_worker_shuts_the_server_down_with_status_1(tmp_path, extra):
-    server = _start(tmp_path, {"tcp": e2e.free_port()}, PEER + extra)
+    server = _start(tmp_path, {"tcp": e2e.free_port()}, extra)
     children = _children(server.proc.pid)
     assert len(children) == 1, server.output
     os.kill(children[0], signal.SIGKILL)
@@ -185,7 +186,7 @@ def test_workers_exit_when_worker_zero_is_killed(tmp_path):
 
 
 def test_task_is_rejected_before_the_fork(tmp_path):
-    server = e2e.Server(tmp_path, {"tcp": e2e.free_port()}, PEER, env={"TASK": "1"})
+    server = e2e.Server(tmp_path, {"tcp": e2e.free_port()}, processmodel=PEER, env={"TASK": "1"})
     code = server.wait_exit()
 
     assert code != 0, server.output
@@ -205,7 +206,7 @@ def test_named_timer_runs_on_its_worker_only(tmp_path):
 
 def test_single_worker_serves_and_warns(tmp_path):
     port = e2e.free_port()
-    server = e2e.Server(tmp_path, {"tcp": port}, "mode: peer\nworker_num: 1")
+    server = e2e.Server(tmp_path, {"tcp": port}, processmodel="mode: multi_process\nio_handle_type: peer\nhandle_num: 1")
     assert server.wait_output(r"peer: 1 workers bound"), server.output
 
     reply = asyncio.run(e2e.tcp_call(port, 1, "info:0"))
@@ -213,4 +214,4 @@ def test_single_worker_serves_and_warns(tmp_path):
 
     assert code == 0, server.output
     assert reply[1] == 0 and e2e.parse_info(reply[2])[0] == 0
-    assert "worker_num=1 in peer mode" in server.output
+    assert "handle_num=1 in peer mode" in server.output

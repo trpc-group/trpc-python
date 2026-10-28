@@ -3,7 +3,7 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-"""``server.mode: separate`` end to end: startup order, scheduling, shutdown."""
+"""``multi_process`` + ``separate`` end to end: startup order, scheduling, shutdown."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from tests.server._e2e_support import udp_call
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="separate mode needs fork")
 
-SEPARATE = "mode: separate\nworker_num: 2"
+SEPARATE = "mode: multi_process\nio_handle_type: separate\nhandle_num: 2"
 
 
 def _children(pid: int) -> List[int]:
@@ -58,7 +58,7 @@ def _tcp_refused(port: int) -> bool:
 
 def test_serves_every_network_and_spreads_tcp_over_rpc_tasks(tmp_path):
     ports = {"tcp": free_port(), "udp": free_port(socket.SOCK_DGRAM), "http": free_port()}
-    server = Server(tmp_path, ports, SEPARATE)
+    server = Server(tmp_path, ports, processmodel=SEPARATE)
     server.wait_ready()
 
     replies = asyncio.run(tcp_pipelined(ports["tcp"], ["info:0.01"] * 6))
@@ -77,7 +77,7 @@ def test_serves_every_network_and_spreads_tcp_over_rpc_tasks(tmp_path):
 
 def test_tcp_is_bound_only_after_every_rpc_task_started(tmp_path):
     port = free_port()
-    server = Server(tmp_path, {"tcp": port}, SEPARATE, env={"SLOW_HOOK": "1"})
+    server = Server(tmp_path, {"tcp": port}, processmodel=SEPARATE, env={"SLOW_HOOK": "1"})
     time.sleep(2)
     refused_while_starting = _tcp_refused(port)
     server.wait_ready()
@@ -89,7 +89,7 @@ def test_tcp_is_bound_only_after_every_rpc_task_started(tmp_path):
 
 def test_failing_on_start_aborts_startup_with_status_1(tmp_path):
     port = free_port()
-    server = Server(tmp_path, {"tcp": port}, SEPARATE, env={"FAIL_HOOK": "1"})
+    server = Server(tmp_path, {"tcp": port}, processmodel=SEPARATE, env={"FAIL_HOOK": "1"})
 
     code = server.wait_exit()
 
@@ -102,7 +102,8 @@ def test_failing_on_start_aborts_startup_with_status_1(tmp_path):
 
 
 def test_ready_timeout_aborts_startup(tmp_path):
-    server = Server(tmp_path, {"tcp": free_port()}, SEPARATE + "\nready_timeout: 1000", env={"SLOW_HOOK": "0"})
+    server = Server(tmp_path, {"tcp": free_port()}, "ready_timeout: 1000", processmodel=SEPARATE,
+                    env={"SLOW_HOOK": "0"})
     started = time.monotonic()
 
     code = server.wait_exit()
@@ -113,7 +114,7 @@ def test_ready_timeout_aborts_startup(tmp_path):
 
 def test_in_flight_request_finishes_within_close_wait_time(tmp_path):
     port = free_port()
-    server = Server(tmp_path, {"tcp": port}, SEPARATE + "\nclose_wait_time: 2000")
+    server = Server(tmp_path, {"tcp": port}, "close_wait_time: 2000", processmodel=SEPARATE)
     server.wait_ready()
 
     async def call_then_stop():
@@ -130,7 +131,7 @@ def test_in_flight_request_finishes_within_close_wait_time(tmp_path):
 
 
 def test_second_sigterm_cuts_close_wait_time_short(tmp_path):
-    server = Server(tmp_path, {"tcp": free_port()}, SEPARATE + "\nclose_wait_time: 30000")
+    server = Server(tmp_path, {"tcp": free_port()}, "close_wait_time: 30000", processmodel=SEPARATE)
     server.wait_ready()
 
     started = time.monotonic()
@@ -146,7 +147,8 @@ def test_second_sigterm_cuts_close_wait_time_short(tmp_path):
 
 def test_sigterm_to_the_process_group_keeps_the_shutdown_order(tmp_path):
     port = free_port()
-    server = Server(tmp_path, {"tcp": port}, SEPARATE + "\nclose_wait_time: 2000", start_new_session=True)
+    server = Server(tmp_path, {"tcp": port}, "close_wait_time: 2000", processmodel=SEPARATE,
+                    start_new_session=True)
     server.wait_ready()
 
     async def call_then_stop():
@@ -164,7 +166,7 @@ def test_sigterm_to_the_process_group_keeps_the_shutdown_order(tmp_path):
 
 
 def test_dead_rpc_task_shuts_the_server_down_with_status_1(tmp_path):
-    server = Server(tmp_path, {"tcp": free_port()}, SEPARATE)
+    server = Server(tmp_path, {"tcp": free_port()}, processmodel=SEPARATE)
     server.wait_ready()
     children = _children(server.proc.pid)
     assert len(children) == 2
@@ -177,7 +179,7 @@ def test_dead_rpc_task_shuts_the_server_down_with_status_1(tmp_path):
 
 
 def test_children_exit_when_the_io_process_is_killed(tmp_path):
-    server = Server(tmp_path, {"tcp": free_port()}, SEPARATE)
+    server = Server(tmp_path, {"tcp": free_port()}, processmodel=SEPARATE)
     server.wait_ready()
     children = _children(server.proc.pid)
     assert len(children) == 2

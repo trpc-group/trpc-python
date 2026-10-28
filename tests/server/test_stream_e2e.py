@@ -6,7 +6,7 @@
 """End-to-end checks of streaming RPC in mode 1 over real sockets.
 
 Three thread shapes are covered: merge on one thread (``SINGLE``), merge on
-several threads (``THREADED``) and ``io_handle_type: separate``
+several threads (``THREADED``) and ``processmodel.io_handle_type: separate``
 (``SEPARATE``). The subprocess registers one bidirectional stream,
 ``Chat``, whose ``HelloRequest.msg`` drives it:
 
@@ -44,8 +44,8 @@ from tests.server._e2e_support import tcp_call
 from trpc_sdk._inner.pb import trpc_pb2
 
 SINGLE = ""
-THREADED = "io_thread_num: 3"
-SEPARATE = "io_handle_type: separate\nio_thread_num: 2\nhandle_thread_num: 3"
+THREADED = "mode: single_process\nio_handle_type: merge\nio_num: 3"
+SEPARATE = "mode: single_process\nio_handle_type: separate\nio_num: 2\nhandle_num: 3"
 SHAPES = {"single": SINGLE, "threaded": THREADED, "separate": SEPARATE}
 CHAT = f"/{SERVICES['tcp']}/Chat"
 
@@ -269,12 +269,13 @@ async def _wait_drained(port: int, timeout: float = 3.0, errors: Optional[int] =
 def start_server(tmp_path) -> Iterator:
     servers: List[Server] = []
 
-    def start(server_extra: str, service_extra: str = "") -> Tuple[Server, int]:
+    def start(processmodel: str, service_extra: str = "", server_extra: str = "") -> Tuple[Server, int]:
         port = free_port()
         server = Server(tmp_path, {"tcp": port},
                         server_extra,
                         script_template=STREAM_SERVER_SCRIPT,
-                        service_extra=service_extra)
+                        service_extra=service_extra,
+                        processmodel=processmodel)
         servers.append(server)
         server.wait_ready()
         return server, port
@@ -445,7 +446,7 @@ async def test_handler_finishing_before_client_close_leaves_nothing(start_server
 
 
 async def test_handler_limits_do_not_apply_to_streams(start_server):
-    _, port = start_server(SEPARATE + "\nhandler_max_concurrency: 1\nhandler_queue_size: 0")
+    _, port = start_server(SEPARATE, server_extra="handler_max_concurrency: 1\nhandler_queue_size: 0")
     conn = await StreamConn.open(port)
     stream_ids = list(range(1, 7))
     try:

@@ -8,15 +8,21 @@ import socket
 
 import pytest
 
-from trpc_sdk.naming.circuitbreaker import NoopCircuitBreaker
-from trpc_sdk.naming.discovery import IpDiscovery, resolve_host, set_default_discovery
-from trpc_sdk.naming.ip_selector import IpSelector, DNSSelector, get_selector
-from trpc_sdk.naming.loadbalance import RandomLoadBalance, set_default_loadbalance
-from trpc_sdk.naming.option import SelectorOption
-from trpc_sdk.naming.trpc_selector import TrpcSelector
-from trpc_sdk.abc.node import Node
-from trpc_sdk.naming import discovery as discovery_mod
-from trpc_sdk.naming import loadbalance as lb_mod
+from trpc_sdk.abc import Node
+from trpc_sdk.abc import SelectorOption
+from trpc_sdk.naming import DNSSelector
+from trpc_sdk.naming import IpDiscovery
+from trpc_sdk.naming import IpSelector
+from trpc_sdk.naming import NoopCircuitBreaker
+from trpc_sdk.naming import RandomLoadBalance
+from trpc_sdk.naming import TrpcSelector
+from trpc_sdk.naming import get_default_discovery
+from trpc_sdk.naming import get_default_loadbalance
+from trpc_sdk.naming import get_selector
+from trpc_sdk.naming import resolve_host
+from trpc_sdk.naming import set_default_discovery
+from trpc_sdk.naming import set_default_loadbalance
+from trpc_sdk.naming import _discovery as discovery_mod
 
 
 @pytest.mark.asyncio
@@ -46,7 +52,7 @@ async def test_loadbalance():
 
 @pytest.mark.asyncio
 async def test_circuitbreaker():
-    node = Node("demo", "192.0.0.1")
+    node = Node(service_name="demo", ip="192.0.0.1")
     circuitbreaker = NoopCircuitBreaker()
     is_available = await circuitbreaker.available(node)
     await circuitbreaker.report(node, 1, 0)
@@ -58,7 +64,7 @@ async def test_selector():
     options = SelectorOption()
     options.set_discovery("IPDiscovery")
     options.set_loadbalance("RandomLB")
-    options.set_circuitbreaker("NoopCB")
+    options.set_circuit_breaker("NoopCB")
     trpc_selector = TrpcSelector()
     node = await trpc_selector.select("192.168.0.1:10086", options)
     assert node.address == "192.168.0.1:10086"
@@ -75,18 +81,18 @@ async def test_selector():
 
 @pytest.fixture(autouse=True)
 def _restore_naming_defaults():
-    old_discovery = discovery_mod.DefaultDiscovery
-    old_lb = lb_mod.DefaultLoadBalance
+    old_discovery = get_default_discovery()
+    old_lb = get_default_loadbalance()
     yield
-    discovery_mod.DefaultDiscovery = old_discovery
-    lb_mod.DefaultLoadBalance = old_lb
+    set_default_discovery(old_discovery)
+    set_default_loadbalance(old_lb)
 
 
 def test_set_default_discovery_and_loadbalance():
     set_default_discovery("CustomDiscovery")
-    assert discovery_mod.DefaultDiscovery == "CustomDiscovery"
+    assert get_default_discovery() == "CustomDiscovery"
     set_default_loadbalance("CustomLB")
-    assert lb_mod.DefaultLoadBalance == "CustomLB"
+    assert get_default_loadbalance() == "CustomLB"
 
 
 def test_resolve_host_ipv6_bracket():
@@ -96,7 +102,7 @@ def test_resolve_host_ipv6_bracket():
 
 
 def test_resolve_host_ipv6_wrong_address():
-    with pytest.raises(Exception, match="wrong address"):
+    with pytest.raises(Exception, match="missing ':port'"):
         resolve_host("[::1]")
 
 
@@ -117,9 +123,9 @@ def test_safe_gethostbyname_gaierror(monkeypatch):
 @pytest.mark.asyncio
 async def test_ip_selector_empty_service_name():
     opt = SelectorOption()
-    with pytest.raises(Exception, match="service_name empty"):
+    with pytest.raises(Exception, match="empty service_name"):
         await IpSelector().select("", opt)
-    with pytest.raises(Exception, match="service_name empty"):
+    with pytest.raises(Exception, match="empty service_name"):
         await DNSSelector().select("", opt)
 
 
@@ -140,7 +146,7 @@ def test_get_selector_plugin():
 
 @pytest.mark.asyncio
 async def test_random_loadbalance_empty_nodes():
-    with pytest.raises(Exception, match="ErrNoServerAvailable"):
+    with pytest.raises(Exception, match="no nodes"):
         await RandomLoadBalance().select("svc", [], "ns")
 
 
@@ -151,11 +157,11 @@ def test_selector_option_setters():
 
     opt.set_env_key("env")
     assert opt.env_key == "env"
-    assert opt.servicerouter_opt.env_key == "env"
+    assert opt.service_router_opt.env_key == "env"
 
-    opt.set_servicerouter("polaris")
-    assert opt.servicerouter == "polaris"
+    opt.set_service_router("polaris")
+    assert opt.service_router == "polaris"
 
     opt.set_disable_service_router(True)
     assert opt.disable_service_router is True
-    assert opt.servicerouter_opt.disable_service_router is True
+    assert opt.service_router_opt.disable_service_router is True
