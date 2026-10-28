@@ -14,7 +14,7 @@ loops call ``listen`` and describes them in a
 :func:`~trpc_sdk.runtime.current_thread_model`; the transport alone
 decides how the endpoint is served and closed. The dispatcher
 / worker / executor / task pipe protocols stay in the parent package; this
-package only holds the objects a service registers on the engine.
+package only holds the objects a service registers on the server adapter.
 
 The package is split by responsibility:
 

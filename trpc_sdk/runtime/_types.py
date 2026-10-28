@@ -6,7 +6,7 @@
 
 """Shared types for runtime components.
 
-Holds the pre-fork records the worker / engine fill before any child exists.
+Holds the pre-fork records the worker / server adapter fill before any child exists.
 Implementation stays in ``_worker`` and ``_task``.
 """
 
@@ -130,7 +130,7 @@ class WorkerInfo:
 class TaskInfo:
     """Master-side record for one task child process.
 
-    The engine fills this **before fork**: process class, handler pair, IPC
+    The server adapter fills this **before fork**: process class, handler pair, IPC
     pipes, and C-task flags. After ``start()``, ``process_instance`` holds the
     live child. Copied from the user-facing
     :class:`~trpc_sdk.abc.Task` registration in
@@ -154,7 +154,7 @@ class TaskInfo:
     # so it is what routes a result back to the process that asked for it.
     sender_names: List[str] = field(default_factory=list)
     # Batch size for :class:`~trpc_sdk.task.TaskConsumer`; ``0``
-    # means fall back to ``engine.opts.task_batch_size``.
+    # means fall back to ``adapter.opts.task_batch_size``.
     batch_size: int = 0
     # The four fields below configured the native C-task driver, which this
     # build no longer ships. They are still carried from the registration so

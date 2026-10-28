@@ -101,9 +101,9 @@ from ._process import RpcTaskProcess
 from ._process import SeparateWorker
 from ._process import TaskProcess
 from ._switches import use_c_task
+from ._threadmodel import BaseReactor
 from ._threadmodel import HandlerThreadInfo
 from ._threadmodel import InlineReactor
-from ._threadmodel import Reactor
 from ._threadmodel import ReactorGroup
 from ._threadmodel import ResourceKind
 from ._threadmodel import ThreadModel
@@ -147,8 +147,8 @@ __all__ = [
     "PROCESS_MODEL_SINGLE",
     "Network",
     # Thread model the worker installs after fork; server transports read it
+    "BaseReactor",
     "InlineReactor",
-    "Reactor",
     "ReactorGroup",
     "ResourceKind",
     "ThreadModel",

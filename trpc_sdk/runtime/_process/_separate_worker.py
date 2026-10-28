@@ -203,22 +203,24 @@ class SeparateWorker(ChildReadiness, BaseWorker):
             the session id a response has to match.
     """
 
-    def __init__(self, engine, name: str = "separate_worker") -> None:
-        """Copy the endpoint tables out of the engine; nothing is bound yet.
+    _main_loop_only = True
+
+    def __init__(self, adapter, name: str = "separate_worker") -> None:
+        """Copy the endpoint tables out of the server adapter; nothing is bound yet.
 
         Sockets, pipes and the event loop are all created later. Nothing here
         may outlive a fork boundary: this worker forks its children after
         being constructed and before its loop exists.
 
         Args:
-            engine: Engine holding ``process_info`` (the per-endpoint tables
-                filled during ``ServiceAdapter.init_transport``) and ``opts``.
+            adapter: Server adapter holding ``process_info`` (the per-endpoint
+                tables filled during ``ServiceAdapter.init_transport``) and ``opts``.
             name: Process name shown in logs and process listings.
         """
         super().__init__(name, ProcessType.WORKER)
-        self._bind_process_info(engine)
+        self._bind_process_info(adapter)
 
-        opts = engine.opts
+        opts = adapter.opts
         # Already resolved by ``server._option_resolver``; the fallback only
         # guards options built by hand.
         configured = getattr(opts, "worker_num", 0)

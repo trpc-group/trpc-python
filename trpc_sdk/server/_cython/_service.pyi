@@ -61,7 +61,7 @@ class ServiceAdapter(BaseServiceAdapter):
         ...
 
     def init_transport(self) -> None:
-        """Resolve and bind this service's transport, then register it on the engine (pre-fork).
+        """Resolve and bind this service's transport, then register it on the server adapter (pre-fork).
 
         A protocol with a starter registered through
         ``register_protocol_handle`` gets a ``UserProtocolTransport``.

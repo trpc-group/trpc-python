@@ -57,6 +57,7 @@ import time
 from functools import partial
 from typing import Any
 from typing import Dict
+from typing import Iterable
 from typing import List
 from typing import Optional
 from typing import Sequence
@@ -104,8 +105,8 @@ class MergeWorker(BaseWorker):
     # ``SchedulerParams.target`` of the HTTP acceptors.
     _http_schedule_target = ""
 
-    def __init__(self, engine, name: str = "merge_worker") -> None:
-        """Copy the endpoint tables out of the engine; nothing is bound yet.
+    def __init__(self, adapter, name: str = "merge_worker") -> None:
+        """Copy the endpoint tables out of the server adapter; nothing is bound yet.
 
         Sockets, threads and the event loop are all created later, in
         :meth:`~trpc_sdk.runtime._worker.BaseWorker.run`. Nothing here may outlive a
@@ -113,20 +114,20 @@ class MergeWorker(BaseWorker):
         constructed and before its loop exists.
 
         Args:
-            engine: Engine holding ``process_info`` (the per-endpoint tables
-                filled during ``ServiceAdapter.init_transport``) and ``opts``.
+            adapter: Server adapter holding ``process_info`` (the per-endpoint
+                tables filled during ``ServiceAdapter.init_transport``) and ``opts``.
             name: Process name shown in logs and process listings.
         """
         super().__init__(name, ProcessType.WORKER)
-        self._bind_process_info(engine)
+        self._bind_process_info(adapter)
 
         # Already resolved by ``server._option_resolver``; the clamp only
         # guards options built by hand.
-        self.thread_num: int = self._resolve_thread_num(engine.opts)
-        self.handler_max_concurrency: int = engine.opts.handler_max_concurrency
-        self.handler_queue_size: int = engine.opts.handler_queue_size
-        self.tcp_reuse_port: bool = engine.opts.tcp_reuse_port
-        self.ready_timeout: float = max(0, engine.opts.ready_timeout) / 1000.0
+        self.thread_num: int = self._resolve_thread_num(adapter.opts)
+        self.handler_max_concurrency: int = adapter.opts.handler_max_concurrency
+        self.handler_queue_size: int = adapter.opts.handler_queue_size
+        self.tcp_reuse_port: bool = adapter.opts.tcp_reuse_port
+        self.ready_timeout: float = max(0, adapter.opts.ready_timeout) / 1000.0
         self.loop_threads: List[LoopThread] = []
 
         # Bridge between aiohttp requests and the tRPC handler, one per HTTP
@@ -147,13 +148,16 @@ class MergeWorker(BaseWorker):
         self._thread_infos: List[Optional[HandlerThreadInfo]] = [None] * self.thread_num
         # Monotonic deadline shared by every thread's startup.
         self._ready_deadline: float = 0.0
+        # Set once the threads are being stopped on purpose, so their exit
+        # is not taken for a death; see :meth:`_on_loop_thread_died`.
+        self._stopping_threads: bool = False
 
     @staticmethod
     def _resolve_thread_num(opts) -> int:
         """Number of serving loops: ``io_thread_num`` in the merge thread model.
 
         Args:
-            opts: The engine's :class:`~trpc_sdk.server.ServerOption`.
+            opts: The server adapter's :class:`~trpc_sdk.server.ServerOption`.
         """
         return max(1, opts.io_thread_num)
 
@@ -167,15 +171,13 @@ class MergeWorker(BaseWorker):
         The thread objects are created here, not started: thread 0 starts
         user protocols from its init, and they read this model.
         """
-        main = MainLoopReactor(self.loop)
         if not self._uses_loop_threads():
-            return ThreadModel(acceptor=main,
-                               io=ReactorGroup([main]),
-                               handle=ReactorGroup([main]),
-                               reuse_port=self.tcp_reuse_port,
-                               ready_timeout=self.ready_timeout,
-                               worker=self)
-        self.loop_threads = [LoopThread(i, name_prefix=self._thread_name_prefix) for i in range(self.thread_num)]
+            return ThreadModel.main_loop(self.loop,
+                                         worker=self,
+                                         reuse_port=self.tcp_reuse_port,
+                                         ready_timeout=self.ready_timeout)
+        main = MainLoopReactor(self.loop)
+        self.loop_threads = self._new_loop_threads(range(self.thread_num), self._thread_name_prefix)
         return ThreadModel(acceptor=main,
                            io=ReactorGroup(list(self.loop_threads)),
                            handle=ReactorGroup(list(self.loop_threads), self._http_schedule_target),
@@ -183,6 +185,47 @@ class MergeWorker(BaseWorker):
                            ready_timeout=self.ready_timeout,
                            worker=self,
                            view_factory=WorkerLoopView)
+
+    def _new_loop_threads(self, indexes: Iterable[int], name_prefix: str) -> List[LoopThread]:
+        """Create loop threads, not started, that report their exit to this worker.
+
+        Args:
+            indexes: Index of each thread, also its name suffix.
+            name_prefix: Prefix of the OS thread names.
+        """
+        return [LoopThread(i, name_prefix=name_prefix, on_exit=self._on_loop_thread_exit) for i in indexes]
+
+    def _on_loop_thread_exit(self, thread: LoopThread) -> None:
+        """Pass a loop thread's exit on to the main loop; runs on the exiting thread.
+
+        The exit template only runs on the main loop, so nothing is decided
+        here. A main loop already closed means the process is on its way out.
+
+        Args:
+            thread: The thread whose loop just closed.
+        """
+        try:
+            self.loop.call_soon_threadsafe(self._on_loop_thread_died, thread.name)
+        except RuntimeError:
+            pass
+
+    def _on_loop_thread_died(self, name: str) -> None:
+        """Shut the process down with status 1 when a loop thread exits while serving; on the main loop.
+
+        A stop during shutdown, or while :meth:`_stop_serving_threads` undoes
+        a failed startup, is expected and ignored. Otherwise the thread died:
+        the acceptor would go on handing it connections that are dropped, so
+        the process goes down the way it does for a dead child
+        (``BaseWorker._replace_child``).
+
+        Args:
+            name: OS name of the thread, for the log line.
+        """
+        if self._exiting or self._stopping_threads:
+            return
+        logger.error("[merge worker] %s exited unexpectedly; shutting down", name)
+        self._exit_code = 1
+        self._handle_sigterm()
 
     def start_worker_process(self) -> None:
         """Serve every configured endpoint; the serving loops already exist.
@@ -198,7 +241,7 @@ class MergeWorker(BaseWorker):
         """
         logger.info("[merge worker] %s start_worker_process(), serving loops: %s", type(self).__name__,
                     self.thread_num)
-        # addresses 用 基类 tran_opts
+        # TODO：addresses 用 基类 tran_opts
         for i, _ in enumerate(self.addresses):
             try:
                 kind = classify_address(self, i)
@@ -443,7 +486,9 @@ class MergeWorker(BaseWorker):
 
         Each thread runs :meth:`_before_stop_service_thread` on its own loop
         first. A thread that does not exit in time is logged and left behind.
+        From here on a thread exit is expected, not a death.
         """
+        self._stopping_threads = True
         if not self.loop_threads:
             return
         stop_loop_threads(self.loop_threads, self._before_stop_service_thread, LOOP_THREAD_STOP_TIMEOUT)

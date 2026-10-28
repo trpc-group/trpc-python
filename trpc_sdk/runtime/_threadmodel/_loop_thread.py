@@ -28,12 +28,15 @@ per loop. Transports in particular are owned by the loop that created them:
 serving loop opens its own connections to the task processes, and why the
 separate thread model hands responses back through
 :class:`~trpc_sdk.protocol.ConnWriter`.
+
+A loop thread that dies while the worker is serving is not left behind
+silently: its ``on_exit`` callback tells the worker, which shuts the process
+down with status 1 (see ``MergeWorker._on_loop_thread_exit``).
 """
 
 from __future__ import annotations
 
 import asyncio
-import inspect
 import socket
 import threading
 import time
@@ -49,75 +52,19 @@ from typing import Sequence
 from trpc_sdk.config import TrpcConfig
 from trpc_sdk.log import logger
 from trpc_sdk.utils import get_async_lib
-from ._thread_model import InlineReactor
+from ._thread_model import attach_on_loop
+from ._thread_model import call_on_loop
+from ._thread_model import schedule_on_loop
 
 # ``init(loop)``: runs on the new thread before the loop turns.
 LoopInit = Callable[[asyncio.AbstractEventLoop], None]
 # ``before_stop()``: coroutine factory run on the loop right before it stops.
 BeforeStop = Callable[[], Awaitable[None]]
+# ``on_exit(thread)``: runs on the dying thread once its loop is closed.
+LoopExit = Callable[["LoopThread"], None]
 
 # Seconds every join gets after the shared stop deadline is spent.
 _JOIN_GRACE = 0.5
-
-
-def connect_accepted(loop: asyncio.AbstractEventLoop,
-                     sock: socket.socket,
-                     protocol_factory: Callable[[], asyncio.BaseProtocol],
-                     ssl_context: Optional[Any],
-                     label: str) -> None:
-    """Wrap an accepted socket in a transport on ``loop``; runs on ``loop``'s thread.
-
-    ``connect_accepted_socket`` is a coroutine (it may have to perform a TLS
-    handshake), so it is scheduled as a task rather than awaited. Nothing else
-    observes that task, so a failed hand-off closes ``sock`` here instead of
-    leaking the fd behind an "exception never retrieved" warning.
-
-    Args:
-        loop: Loop that will own the transport. Must be the running loop of
-            the calling thread.
-        sock: Socket returned by ``accept()``, already non-blocking.
-        protocol_factory: Builds the protocol serving this connection.
-        ssl_context: Server-side ``SSLContext``, or ``None`` for plaintext.
-        label: Who owns ``loop``, for log messages.
-    """
-
-    def _on_attached(task: asyncio.Task) -> None:
-        if task.cancelled():
-            sock.close()
-            return
-        err = task.exception()
-        if err is not None:
-            logger.error("[merge worker] %s failed to serve a connection: %s", label, repr(err))
-            sock.close()
-
-    task = loop.create_task(loop.connect_accepted_socket(protocol_factory, sock, ssl=ssl_context))
-    task.add_done_callback(_on_attached)
-
-
-class MainLoopReactor(InlineReactor):
-    """The worker's main loop as a reactor of its thread model.
-
-    The acceptor runs on this loop too, so an accepted socket is wrapped
-    directly rather than through ``call_soon_threadsafe``.
-    """
-
-    @property
-    def name(self) -> str:
-        """Owner of the loop, for log messages."""
-        return "main loop"
-
-    def attach_socket(self,
-                      sock: socket.socket,
-                      protocol_factory: Callable[[], asyncio.BaseProtocol],
-                      ssl_context: Optional[Any] = None) -> None:
-        """Wrap an accepted socket in a transport on the main loop; runs on the main thread.
-
-        Args:
-            sock: Socket returned by ``accept()``, already non-blocking.
-            protocol_factory: Builds the protocol serving this connection.
-            ssl_context: Server-side ``SSLContext``, or ``None`` for plaintext.
-        """
-        connect_accepted(self.loop, sock, protocol_factory, ssl_context, self.name)
 
 
 class LoopThread:
@@ -130,30 +77,40 @@ class LoopThread:
     so the caller can never be sure the thread is gone by the time it
     returns.
 
-    Every public method is called from the thread that owns the worker
-    (normally the main thread) and crosses over through
-    ``call_soon_threadsafe`` / ``run_coroutine_threadsafe``.
+    Public methods are normally called from the thread that owns the worker
+    (the main thread) and cross over through ``call_soon_threadsafe`` /
+    ``run_coroutine_threadsafe``. Called on this thread itself, :meth:`submit`
+    and :meth:`attach_socket` run directly instead.
 
     Attributes:
         index: Position in the worker's thread list. This is what the
             scheduler in :mod:`trpc_sdk.transport` selects, so it plays
             the role a worker index plays in ``dispatcher`` mode.
         loop: Event loop of this thread; ``None`` until the thread created it.
+        owner_ident: ``threading.get_ident()`` of this thread; ``None`` until
+            it started.
         start_error: What ``init`` raised, re-raised by :meth:`wait_ready`.
     """
 
-    def __init__(self, index: int, name_prefix: str = "trpc-loop") -> None:
+    def __init__(self, index: int, name_prefix: str = "trpc-loop", on_exit: Optional[LoopExit] = None) -> None:
         """Create the thread object; no loop exists yet.
 
         Args:
             index: Position in the worker's thread list, used for scheduling
                 and for the thread name.
             name_prefix: Prefix of the OS thread name, shown in stack dumps.
+            on_exit: Called on this thread once its loop stopped and was
+                closed, whatever the reason: an exception out of
+                ``run_forever``, a stray ``loop.stop()``, or :meth:`stop`.
+                The callee tells an expected stop from a death. Not called
+                when ``init`` failed, which :meth:`wait_ready` reports.
         """
         self.index: int = index
         self.loop: Optional[asyncio.AbstractEventLoop] = None
+        self.owner_ident: Optional[int] = None
         self.start_error: Optional[BaseException] = None
         self._init: Optional[LoopInit] = None
+        self._on_exit: Optional[LoopExit] = on_exit
         self._thread = threading.Thread(target=self._run, name=f"{name_prefix}-{index}", daemon=True)
         # Set once ``init`` finished, from inside the loop on success: waiting
         # on it means the loop is not merely created but already turning and
@@ -164,6 +121,10 @@ class LoopThread:
     def name(self) -> str:
         """OS thread name, for log messages."""
         return self._thread.name
+
+    def in_loop_thread(self) -> bool:
+        """Whether the caller is this thread."""
+        return self.owner_ident is not None and threading.get_ident() == self.owner_ident
 
     def start(self, init: Optional[LoopInit] = None) -> None:
         """Start the thread and return at once; see :meth:`wait_ready`.
@@ -204,7 +165,11 @@ class LoopThread:
         ``set_event_loop`` matters beyond bookkeeping: handler code that calls
         ``asyncio.get_event_loop()`` off the running-loop path must find this
         thread's loop and not the worker's main one.
+
+        ``owner_ident`` is set before ``init`` runs, so a ``submit`` from
+        ``init`` onto this very thread already takes the direct path.
         """
+        self.owner_ident = threading.get_ident()
         loop = get_async_lib(TrpcConfig.global_config().enable_uvloop).new_event_loop()
         asyncio.set_event_loop(loop)
         self.loop = loop
@@ -225,6 +190,11 @@ class LoopThread:
             logger.error("[merge worker] %s exited with error: %s", self.name, repr(err))
         finally:
             self._shutdown_loop(loop)
+        if self._on_exit is not None:
+            try:
+                self._on_exit(self)
+            except Exception as err:  # pylint: disable=broad-except
+                logger.error("[merge worker] %s: exit callback failed: %s", self.name, repr(err))
 
     def _shutdown_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Cancel what is left on the stopped loop, then close it; runs on this thread.
@@ -255,29 +225,32 @@ class LoopThread:
         serve it, such as an aiohttp ``AppRunner.setup()`` whose ``Server``
         binds to whichever loop is running when it is constructed.
 
+        From another thread the call is posted to the loop. From this thread
+        it runs directly (see
+        :func:`~trpc_sdk.runtime._threadmodel._thread_model.call_on_loop`):
+        during ``init`` an awaitable result is driven with
+        ``run_until_complete``; once the loop runs, an awaitable result is
+        refused, since blocking on it would deadlock the loop.
+
         Args:
             func: Callable executed on the loop thread. If it returns an
                 awaitable, that awaitable is awaited and its result returned.
-            timeout: Seconds to wait; ``None`` waits forever.
+            timeout: Seconds a cross-thread call may take; ``None`` waits
+                forever.
 
         Returns:
             Whatever ``func`` returned, after awaiting it when applicable.
 
         Raises:
-            RuntimeError: The loop is not running (not started, or closed).
+            RuntimeError: The loop is not running (not started, or closed),
+                or an awaitable was submitted from inside the running loop.
             TimeoutError: ``func`` did not finish in time; it was cancelled.
             Exception: Whatever ``func`` raised, re-raised in the caller.
         """
-        # TODO:Thread.id 看下是否能避免跨线程
-        future = self._schedule(func)
-        try:
-            return future.result(timeout)
-        except FutureTimeoutError as err:
-            future.cancel()
-            raise TimeoutError(f"{self.name}: call did not finish within {timeout}s") from err
+        return call_on_loop(self.loop, func, timeout, in_loop_thread=self.in_loop_thread(), label=self.name)
 
     def _schedule(self, func: Callable[[], Any]) -> Future:
-        """Start ``func`` on the loop without waiting; see :meth:`submit`.
+        """Start ``func`` on the loop from another thread, without waiting.
 
         Args:
             func: Callable executed on the loop thread.
@@ -288,17 +261,7 @@ class LoopThread:
         Raises:
             RuntimeError: The loop is not running.
         """
-        loop = self.loop
-        if loop is None or loop.is_closed():
-            raise RuntimeError(f"{self.name} is not running")
-
-        async def _call() -> Any:
-            result = func()
-            if inspect.isawaitable(result):
-                result = await result
-            return result
-
-        return asyncio.run_coroutine_threadsafe(_call(), loop)
+        return schedule_on_loop(self.loop, func, self.name)
 
     def attach_socket(self,
                       sock: socket.socket,
@@ -308,7 +271,9 @@ class LoopThread:
 
         Called from the acceptor thread on the hot path, so it only queues the
         hand-off: the transport is built on the loop thread, which is the only
-        thread allowed to touch it afterwards.
+        thread allowed to touch it afterwards. On this thread itself the
+        transport is built at once. A loop that is gone (not created yet, or
+        closed during shutdown) refuses the connection and closes the socket.
 
         Args:
             sock: Socket returned by ``accept()`` on the listen socket.
@@ -318,15 +283,12 @@ class LoopThread:
             ssl_context: Server-side ``SSLContext`` for a TLS endpoint, or
                 ``None`` for plaintext.
         """
-        # TODO: _loop ， Thread_id 支持 通过 Thread_id 方式来实现跨
-        try:
-            self.loop.call_soon_threadsafe(connect_accepted, self.loop, sock, protocol_factory, ssl_context,
-                                           self.name)
-        except RuntimeError as err:
-            # The loop closed between accept and hand-off (worker shutting
-            # down). Drop the connection rather than leaking the fd.
-            logger.warning("[merge worker] %s refused a connection: %s", self.name, repr(err))
-            sock.close()
+        attach_on_loop(self.loop,
+                       sock,
+                       protocol_factory,
+                       ssl_context,
+                       in_loop_thread=self.in_loop_thread(),
+                       label=self.name)
 
     def stop(self, timeout: float, before_stop: Optional[BeforeStop] = None) -> bool:
         """Run ``before_stop`` on the loop, stop it and join the thread.

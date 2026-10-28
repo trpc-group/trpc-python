@@ -15,7 +15,7 @@ values.
 forks use it to swap a class in the table.
 
 :meth:`Server.serve` calls :func:`create_worker` after every ``ServiceAdapter.init_transport``
-has registered its listen endpoints on the engine, and before any child is
+has registered its listen endpoints on the server adapter, and before any child is
 forked. The returned worker then owns this process: it forks the children and
 only afterwards creates the event loop. Unknown mode names fail here rather
 than in the worker constructor, so a typo in YAML is reported before any
@@ -62,8 +62,8 @@ def register_worker_mode(mode: str, worker_cls: Type[BaseWorker]) -> None:
 
     Args:
         mode: Value that will appear as ``server.mode`` in the YAML config.
-        worker_cls: Class to instantiate with the engine. Must accept
-            ``(engine)`` and behave as a :class:`BaseWorker`: the server calls
+        worker_cls: Class to instantiate with the server adapter. Must accept
+            ``(adapter)`` and behave as a :class:`BaseWorker`: the server calls
             ``_spawn_children()`` and then ``run()`` on it.
 
     Raises:
@@ -101,12 +101,12 @@ def resolve_worker_cls(mode: str) -> Type[BaseWorker]:
     raise ValueError(f"unknown server.mode: {mode!r}; registered modes are {sorted(_WORKER_MODES)}")
 
 
-def create_worker(mode: str, engine: Any) -> BaseWorker:
+def create_worker(mode: str, adapter: Any) -> BaseWorker:
     """Build the worker this process will become.
 
     Args:
         mode: The ``server.mode`` value, as written in the config.
-        engine: :class:`TrpcServerAdapter` holding the listen-endpoint tables
+        adapter: :class:`TrpcServerAdapter` holding the listen-endpoint tables
             filled during ``ServiceAdapter.init_transport``, handed to the worker constructor.
             Typed as ``Any`` to avoid a cycle with :mod:`._adapter`.
 
@@ -120,11 +120,11 @@ def create_worker(mode: str, engine: Any) -> BaseWorker:
     # The thread model only varies the built-in merge worker; a class
     # registered over ``merge`` keeps full control. An option built by hand
     # skips the resolver, so an empty ``io_handle_type`` is inferred here too.
-    opts = engine.opts
+    opts = adapter.opts
     io_handle_type = getattr(opts, "io_handle_type", "")
     io_handle_type = MODE_SPELLINGS.get(io_handle_type, io_handle_type)
     if not io_handle_type and getattr(opts, "handle_thread_num", 0) > 0:
         io_handle_type = IO_HANDLE_TYPE_SEPARATE
     if worker_cls is MergeWorker and io_handle_type == IO_HANDLE_TYPE_SEPARATE:
         worker_cls = SeparateThread
-    return worker_cls(engine)
+    return worker_cls(adapter)

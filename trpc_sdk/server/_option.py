@@ -7,7 +7,7 @@
 """Process-model and per-service options consumed by Server / TrpcServerAdapter.
 
 ``create_server(yaml)`` copies YAML ``server:`` fields onto :class:`ServerOption`
-and each ``server.service[]`` entry onto a :class:`ServiceOption`. The engine
+and each ``server.service[]`` entry onto a :class:`ServiceOption`. The server adapter
 reads ``ServerOption.mode`` (``merge``, ``separate`` or ``peer``), the merge-mode
 thread model, and how many rpc tasks or peer workers to start. Each ``ServiceAdapter`` keeps its ``ServiceOption``
 for listen address, codec, registry, and filters.
@@ -133,7 +133,7 @@ class ServerOption:
     # Restart a crashed child instead of exiting. Not supported in this
     # version: the worker treats it as False and warns when it is set.
     reboot_child: bool = DEFAULT_REBOOT_CHILD
-    # Event loop assigned by the engine.
+    # Event loop assigned by the server adapter.
     loop: Optional[AbstractEventLoop] = None
     # Drain period on SIGTERM, in milliseconds: the listen sockets are
     # closed and in-flight requests get this long to finish before exit.

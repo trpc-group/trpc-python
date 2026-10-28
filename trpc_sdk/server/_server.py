@@ -8,7 +8,7 @@
 
 :class:`Server` is the object application code holds after :func:`create_server`.
 It is not a supervisor of servers: it collects the ``service_name -> ServiceAdapter``
-map, hands the listen endpoints to the engine, and then hands the process
+map, hands the listen endpoints to the server adapter, and then hands the process
 itself over to a worker chosen by ``server.mode``. Everything after that —
 listen sockets, handlers, signals, children — belongs to that worker.
 
@@ -76,7 +76,7 @@ class Server(BaseServer):
     """
 
     def __init__(self, server_option: ServerOption) -> None:
-        """Record options and create the engine; nothing is forked or bound yet.
+        """Record options and create the server adapter; nothing is forked or bound yet.
 
         Args:
             server_option: Process-model options, including ``mode``,
@@ -145,7 +145,7 @@ class Server(BaseServer):
         The steps are:
 
         1. Force the ``fork`` start method for the whole process.
-        2. ``ServiceAdapter.init_transport`` registers each listen endpoint on the engine. No
+        2. ``ServiceAdapter.init_transport`` registers each listen endpoint on the server adapter. No
            socket is bound yet, only recorded.
         3. Look up ``server.mode`` and build the worker for it, and hand it
            the lifecycle work that belongs to the server: naming

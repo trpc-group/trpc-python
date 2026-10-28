@@ -24,6 +24,11 @@ do not exist there.
 Resources a transport cannot release in ``stop`` (datagram endpoints, aiohttp
 runners) are kept on the model, per reactor, so the runtime can release them on
 that reactor's loop when it stops.
+
+Every reactor knows the thread that owns its loop. A call made on that thread
+runs directly; only a call from another thread is posted with
+``run_coroutine_threadsafe`` / ``call_soon_threadsafe``. That is what keeps a
+reactor correct whichever thread its caller happens to be on.
 """
 
 from __future__ import annotations
@@ -32,6 +37,9 @@ import asyncio
 import inspect
 import os
 import socket
+import threading
+from concurrent.futures import Future
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import contextmanager
 from dataclasses import dataclass
 from dataclasses import field
@@ -48,20 +56,26 @@ from typing import Tuple
 
 from trpc_sdk.log import logger
 
-# BaseReactor
-class Reactor(Protocol):
+class BaseReactor(Protocol):
     """One event loop a server transport can serve on; owned by the runtime.
 
-    ``submit`` and ``attach_socket`` are called from the acceptor thread, the
-    thread ``listen`` runs on.
+    ``submit`` and ``attach_socket`` are usually called from the acceptor
+    thread, the thread ``listen`` runs on, but may be called from any thread:
+    a reactor runs the call directly on its own thread and posts it otherwise.
 
     Attributes:
         index: Position of the reactor in its group, read by the scheduler.
         loop: Its event loop; ``None`` until a loop thread created it.
+        owner_ident: ``threading.get_ident()`` of the thread owning ``loop``;
+            ``None`` until that thread exists.
     """
 
     index: int
     loop: Optional[asyncio.AbstractEventLoop]
+    owner_ident: Optional[int]
+
+    def in_loop_thread(self) -> bool:
+        """Whether the calling thread owns the reactor's loop."""
 
     def submit(self, func: Callable[[], Any], timeout: Optional[float] = None) -> Any:
         """Run ``func`` on the reactor's loop, await an awaitable result, and return it."""
@@ -73,56 +87,224 @@ class Reactor(Protocol):
         """Serve an accepted socket on the reactor's loop, without blocking."""
 
 
-class InlineReactor:
-    """A loop owned by the calling thread and not running yet.
+def connect_accepted(loop: asyncio.AbstractEventLoop,
+                     sock: socket.socket,
+                     protocol_factory: Callable[[], asyncio.BaseProtocol],
+                     ssl_context: Optional[Any],
+                     label: str) -> None:
+    """Wrap an accepted socket in a transport on ``loop``; runs on ``loop``'s thread.
 
-    Everything runs on the calling thread: :meth:`submit` drives the loop with
-    ``run_until_complete``, and :meth:`attach_socket` assumes the acceptor
-    already runs on this loop.
+    ``connect_accepted_socket`` is a coroutine (it may have to perform a TLS
+    handshake), so it is scheduled as a task rather than awaited. Nothing else
+    observes that task, so a failed hand-off closes ``sock`` here instead of
+    leaking the fd behind an "exception never retrieved" warning.
+
+    Args:
+        loop: Loop that will own the transport. Must belong to the calling
+            thread; it need not be running yet.
+        sock: Socket returned by ``accept()``, already non-blocking.
+        protocol_factory: Builds the protocol serving this connection.
+        ssl_context: Server-side ``SSLContext``, or ``None`` for plaintext.
+        label: Who owns ``loop``, for log messages.
+    """
+
+    def _on_attached(task: asyncio.Task) -> None:
+        if task.cancelled():
+            sock.close()
+            return
+        err = task.exception()
+        if err is not None:
+            logger.error("[thread model] %s failed to serve a connection: %s", label, repr(err))
+            sock.close()
+
+    task = loop.create_task(loop.connect_accepted_socket(protocol_factory, sock, ssl=ssl_context))
+    task.add_done_callback(_on_attached)
+
+
+def attach_on_loop(loop: Optional[asyncio.AbstractEventLoop],
+                   sock: socket.socket,
+                   protocol_factory: Callable[[], asyncio.BaseProtocol],
+                   ssl_context: Optional[Any],
+                   *,
+                   in_loop_thread: bool,
+                   label: str) -> None:
+    """Serve an accepted socket on ``loop``, directly or by posting it there; never blocks.
+
+    A loop that does not exist or is closed (the worker is shutting down)
+    refuses the connection: the socket is closed rather than leaked.
+
+    Args:
+        loop: Loop that will own the transport.
+        sock: Socket returned by ``accept()``, already non-blocking.
+        protocol_factory: Builds the protocol serving this connection.
+        ssl_context: Server-side ``SSLContext``, or ``None`` for plaintext.
+        in_loop_thread: Whether the calling thread owns ``loop``.
+        label: Who owns ``loop``, for log messages.
+    """
+    if in_loop_thread and loop is not None:
+        connect_accepted(loop, sock, protocol_factory, ssl_context, label)
+        return
+    try:
+        if loop is None or loop.is_closed():
+            raise RuntimeError(f"{label} is not running")
+        loop.call_soon_threadsafe(connect_accepted, loop, sock, protocol_factory, ssl_context, label)
+    except RuntimeError as err:
+        # Also raised by call_soon_threadsafe when the loop closed between
+        # the check and the call.
+        logger.warning("[thread model] %s refused a connection: %s", label, repr(err))
+        sock.close()
+
+
+def schedule_on_loop(loop: Optional[asyncio.AbstractEventLoop], func: Callable[[], Any], label: str) -> Future:
+    """Start ``func`` on another thread's ``loop`` without waiting for it.
+
+    Args:
+        loop: The target loop.
+        func: Callable executed on the loop's thread. An awaitable result is
+            awaited there.
+        label: Who owns ``loop``, for the error message.
+
+    Returns:
+        Future resolved with the result of ``func``.
+
+    Raises:
+        RuntimeError: ``loop`` does not exist or is closed.
+    """
+    if loop is None or loop.is_closed():
+        raise RuntimeError(f"{label} is not running")
+
+    async def _call() -> Any:
+        result = func()
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+
+    return asyncio.run_coroutine_threadsafe(_call(), loop)
+
+
+def call_on_loop(loop: Optional[asyncio.AbstractEventLoop],
+                 func: Callable[[], Any],
+                 timeout: Optional[float],
+                 *,
+                 in_loop_thread: bool,
+                 label: str) -> Any:
+    """Run ``func`` on ``loop`` and return its result, awaiting an awaitable one.
+
+    On the loop's own thread there is nothing to post to: posting would wait
+    on a loop that only this thread can turn. So ``func`` runs directly, and
+    an awaitable result is driven with ``run_until_complete`` while the loop
+    is not running yet (``init`` of a loop thread, the main thread before
+    ``run_forever``). With the loop already running that is impossible, and
+    the caller is told to ``await`` instead of being left blocked.
+
+    Args:
+        loop: The target loop.
+        func: Callable to run on the loop's thread.
+        timeout: Seconds a cross-thread call may take; ``None`` waits
+            forever. Unused on the loop's own thread.
+        in_loop_thread: Whether the calling thread owns ``loop``.
+        label: Who owns ``loop``, for error messages.
+
+    Returns:
+        Whatever ``func`` returned, after awaiting it when applicable.
+
+    Raises:
+        RuntimeError: ``loop`` is not running (cross-thread), or ``func``
+            returned an awaitable on the loop's own thread while it runs.
+        TimeoutError: A cross-thread call did not finish in time; it was
+            cancelled.
+        Exception: Whatever ``func`` raised.
+    """
+    if in_loop_thread and loop is not None:
+        result = func()
+        if not inspect.isawaitable(result):
+            return result
+        if loop.is_running():
+            if inspect.iscoroutine(result):
+                result.close()
+            raise RuntimeError(f"{label}: submit() from inside its own running loop got an awaitable; "
+                               "await it instead")
+        return loop.run_until_complete(result)
+    future = schedule_on_loop(loop, func, label)
+    try:
+        return future.result(timeout)
+    except FutureTimeoutError as err:
+        future.cancel()
+        raise TimeoutError(f"{label}: call did not finish within {timeout}s") from err
+
+
+class InlineReactor:
+    """A loop owned by the thread that created the reactor, usually not running yet.
+
+    On its own thread, :meth:`submit` runs the call directly, driving the loop
+    with ``run_until_complete`` for an awaitable result, and
+    :meth:`attach_socket` wraps the socket at once. From any other thread both
+    are posted to the loop instead.
 
     Attributes:
         index: Position of the reactor in its group.
-        loop: The calling thread's loop.
+        loop: The owning thread's loop.
+        owner_ident: ``threading.get_ident()`` of the thread that created the
+            reactor.
     """
 
     def __init__(self, loop: asyncio.AbstractEventLoop, index: int = 0) -> None:
         self.index = index
         self.loop = loop
+        self.owner_ident: Optional[int] = threading.get_ident()
+
+    @property
+    def name(self) -> str:
+        """Owner of the loop, for log messages."""
+        return "inline loop"
+
+    def in_loop_thread(self) -> bool:
+        """Whether the calling thread is the one that created this reactor."""
+        return threading.get_ident() == self.owner_ident
 
     def submit(self, func: Callable[[], Any], timeout: Optional[float] = None) -> Any:
-        """Run ``func`` here; an awaitable result is driven to completion on the loop.
+        """Run ``func`` on this loop; see :func:`call_on_loop`.
 
         Args:
             func: Callable to run.
-            timeout: Unused: the call runs on this thread.
+            timeout: Seconds a call from another thread may take; ``None``
+                waits forever.
 
         Returns:
             Whatever ``func`` returned, after awaiting it when applicable.
         """
-        del timeout
-        result = func()
-        if inspect.isawaitable(result):
-            result = self.loop.run_until_complete(result)
-        return result
+        return call_on_loop(self.loop, func, timeout, in_loop_thread=self.in_loop_thread(), label=self.name)
 
     def attach_socket(self,
                       sock: socket.socket,
                       protocol_factory: Callable[[], asyncio.BaseProtocol],
                       ssl_context: Optional[Any] = None) -> None:
-        """Wrap an accepted socket in a transport on this loop; runs on its thread.
+        """Wrap an accepted socket in a transport on this loop; see :func:`attach_on_loop`.
 
         Args:
             sock: Socket returned by ``accept()``, already non-blocking.
             protocol_factory: Builds the protocol serving this connection.
             ssl_context: Server-side ``SSLContext``, or ``None`` for plaintext.
         """
+        attach_on_loop(self.loop,
+                       sock,
+                       protocol_factory,
+                       ssl_context,
+                       in_loop_thread=self.in_loop_thread(),
+                       label=self.name)
 
-        def _on_attached(task: asyncio.Task) -> None:
-            if task.cancelled() or task.exception() is not None:
-                sock.close()
 
-        task = self.loop.create_task(self.loop.connect_accepted_socket(protocol_factory, sock, ssl=ssl_context))
-        task.add_done_callback(_on_attached)
+class MainLoopReactor(InlineReactor):
+    """The worker's main loop as a reactor of its thread model.
+
+    The acceptor runs on this loop too, so an accepted socket is normally
+    wrapped directly; an acceptor on another thread would post it instead.
+    """
+
+    @property
+    def name(self) -> str:
+        """Owner of the loop, for log messages."""
+        return "main loop"
 
 
 @dataclass
@@ -135,7 +317,7 @@ class ReactorGroup:
             connection selector.
     """
 
-    reactors: Sequence[Reactor]
+    reactors: Sequence[BaseReactor]
     schedule_target: str = ""
 
 
@@ -172,7 +354,7 @@ class ThreadModel:
             worker's own loop.
     """
 
-    acceptor: Reactor
+    acceptor: BaseReactor
     io: ReactorGroup
     handle: ReactorGroup
     handler_pool: Optional[Any] = None
@@ -205,6 +387,38 @@ class ThreadModel:
                    reuse_port=reuse_port,
                    worker=worker)
 
+    @classmethod
+    def main_loop(cls,
+                  loop: asyncio.AbstractEventLoop,
+                  *,
+                  worker: Any,
+                  reuse_port: bool,
+                  ready_timeout: Optional[float] = None) -> ThreadModel:
+        """Serve everything on a worker's main loop: accept, I/O and handlers on one thread.
+
+        The model of every multi-process role (separate I/O process, rpc
+        task, peer worker, task process) and of a merge worker with a single
+        serving loop. Must be built on the main thread, which owns ``loop``.
+
+        Args:
+            loop: The worker's main loop, not running yet.
+            worker: The serving process.
+            reuse_port: ``SO_REUSEPORT`` of stream and datagram sockets.
+            ready_timeout: Seconds a ``submit`` onto the reactor may take.
+        """
+        main = MainLoopReactor(loop)
+        return cls(acceptor=main,
+                   io=ReactorGroup([main]),
+                   handle=ReactorGroup([main]),
+                   reuse_port=reuse_port,
+                   ready_timeout=ready_timeout,
+                   worker=worker)
+
+    @property
+    def is_single_thread(self) -> bool:
+        """Whether every reactor is the acceptor, i.e. the process serves on one loop."""
+        return all(reactor is self.acceptor for reactor in (*self.io.reactors, *self.handle.reactors))
+
     def worker_view(self, loop: asyncio.AbstractEventLoop) -> Any:
         """Return what code running on ``loop`` should see as the worker.
 
@@ -218,7 +432,7 @@ class ThreadModel:
             return self.worker
         return self.view_factory(self.worker, loop)
 
-    def keep_resource(self, reactor: Reactor, resource: Any, kind: ResourceKind) -> None:
+    def keep_resource(self, reactor: BaseReactor, resource: Any, kind: ResourceKind) -> None:
         """Keep a resource the runtime releases on ``reactor``'s loop when it stops.
 
         Args:
@@ -228,7 +442,7 @@ class ThreadModel:
         """
         self._resources.setdefault(id(reactor), []).append((kind, resource))
 
-    def pop_resources(self, reactor: Reactor, kind: Optional[ResourceKind] = None) -> List[Any]:
+    def pop_resources(self, reactor: BaseReactor, kind: Optional[ResourceKind] = None) -> List[Any]:
         """Take the resources kept for ``reactor``.
 
         Args:
@@ -247,7 +461,7 @@ class ThreadModel:
             self._resources.pop(id(reactor), None)
         return taken
 
-    async def release_resources(self, reactor: Reactor, kind: Optional[ResourceKind] = None) -> None:
+    async def release_resources(self, reactor: BaseReactor, kind: Optional[ResourceKind] = None) -> None:
         """Release the resources kept for ``reactor``; await on that reactor's loop.
 
         aiohttp runners are cleaned up, which closes their connections;
