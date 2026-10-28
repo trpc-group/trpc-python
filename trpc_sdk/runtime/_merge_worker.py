@@ -28,7 +28,8 @@ each transport's ``listen()`` reads them from there:
   just without the parallelism. ``register_dispatcher_worker_func`` does not
   apply to UDP.
 * User protocols (a :class:`~trpc_sdk.transport.UserProtocolTransport`) and
-  the timer executor run on serving thread 0, so every piece of user code
+  the process timer executor run on serving thread 0, and each serving
+  thread runs its own thread timer executor, so every piece of user code
   runs on a serving thread and none on the main one. The user worker-exit
   callbacks are the exception: they run on the main thread, after every
   serving loop has finished draining.
@@ -65,7 +66,6 @@ from trpc_sdk.abc import BaseServerTransport
 from trpc_sdk.abc import ProcessType
 from trpc_sdk.log import logger
 from trpc_sdk.transport import UserProtocolTransport
-from trpc_sdk.utils import TimerExecutor
 from ._constants import LOOP_THREAD_STOP_TIMEOUT
 from ._threadmodel import HandlerThreadInfo
 from ._threadmodel import LoopThread
@@ -395,22 +395,15 @@ class MergeWorker(BaseWorker):
         self._user_transports.setdefault(id(reactor), []).append(self._listen_on(transport, reactor.loop))
 
     def _start_timers(self) -> None:
-        """Start the timer executor, on serving thread 0 when there are threads.
+        """Start the timer executors; one that fails to start aborts startup.
 
-        One executor per process, as on the single-loop path, so a timer
-        without a target name still runs once and not once per thread. Its
-        schedules (``call_later``, ``aiocron``, ``call_at``) must be created on
-        the loop that runs them, hence ``submit`` rather than ``run()`` here.
+        The process executor runs on serving loop 0, so a process-scope timer
+        without a target name still runs once and not once per thread.
         """
-        if not self.loop_threads:
-            super()._start_timers()
-            return
-        thread = self.loop_threads[0]
-        self.timer = TimerExecutor(loop=thread.loop, name=f"worker:{self.worker_id}")
         try:
-            thread.submit(self.timer.run, timeout=self.ready_timeout)
+            super()._start_timers()
         except Exception as err:  # pylint: disable=broad-except
-            logger.error("[merge worker] failed to start timers on %s: %s", thread.name, repr(err))
+            logger.error("[merge worker] failed to start timers: %s", repr(err))
             self._abort_startup()
 
     def _stop_accepting(self) -> None:
@@ -434,12 +427,14 @@ class MergeWorker(BaseWorker):
             return
         stop_loop_threads(self.loop_threads, self._before_stop_service_thread, LOOP_THREAD_STOP_TIMEOUT)
         self.loop_threads.clear()
+        self.thread_timers.clear()
 
     async def _before_stop_service_thread(self, index: int) -> None:
         """Release one serving thread's resources; runs on that thread.
 
-        The timer first (thread 0), so no new timer callback starts while
-        the rest is torn down; then the UDP endpoints, the ``on_stop`` hooks,
+        The timers first (this thread's, plus the process executor on thread
+        0), so no new timer callback starts while the rest is torn down; then
+        the UDP endpoints, the ``on_stop`` hooks,
         the user protocol transports (which may want to finish what the hooks
         flushed), and the aiohttp runners last, since cleaning a runner up
         closes its connections. Handlers still in flight are cancelled
@@ -450,8 +445,13 @@ class MergeWorker(BaseWorker):
         """
         reactor = self.loop_threads[index]
         model = self.thread_model
-        if index == 0 and self.timer is not None:
-            self.timer.stop()
+        if index == 0:
+            timer, self.timer = self.timer, None
+            if timer is not None:
+                timer.stop()
+        for timer in self.thread_timers:
+            if timer.thread_index == index:
+                timer.stop()
         await model.release_resources(reactor, ResourceKind.ENDPOINT)
         info, self._thread_infos[index] = self._thread_infos[index], None
         if info is not None:
@@ -480,11 +480,14 @@ class MergeWorker(BaseWorker):
         to loops that are no longer turning, and those connections would hang
         until the process died rather than being refused.
 
-        When the main loop is the serving loop, its ``on_stop`` thread hooks
-        run next, then what it served is released. The loop has stopped by
-        now, so ``run_until_complete`` is allowed again. Every step takes what
-        it releases out of ``self`` first, so a second call does nothing.
+        When the main loop is the serving loop, its timers stop first, its
+        ``on_stop`` thread hooks run next, then what it served is released.
+        The loop has stopped by now, so ``run_until_complete`` is allowed
+        again. Every step takes what it releases out of ``self`` first, so a
+        second call does nothing.
         """
+        if not self.loop_threads:
+            self._stop_timers()
         self._stop_listening()
         if self._main_thread_info is not None:
             info, self._main_thread_info = self._main_thread_info, None
