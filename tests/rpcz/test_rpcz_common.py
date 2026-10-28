@@ -6,9 +6,9 @@
 
 import time
 
-from trpc_sdk.rpcz.filter.common import HighLowWaterLevelSampler
-from trpc_sdk.rpcz.filter.common import SampleRateLimiter
-from trpc_sdk.rpcz.filter.common import SpanIdGenerator
+from trpc_sdk.rpcz import HighLowWaterLevelSampler
+from trpc_sdk.rpcz import SampleRateLimiter
+from trpc_sdk.rpcz import SpanIdGenerator
 
 
 def test_span_id_generator_increase():

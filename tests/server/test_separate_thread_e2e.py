@@ -3,10 +3,10 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-"""End-to-end checks of the separate thread model (``handle_thread_num > 0``) over real sockets.
+"""End-to-end checks of the separate thread model (``single_process`` + ``separate``) over real sockets.
 
-I/O runs on the main loop (plus ``io_thread_num - 1`` I/O threads) and every
-request is handled on one of the ``handle_thread_num`` handle threads. See
+I/O runs on the main loop (plus ``io_num - 1`` I/O threads) and every
+request is handled on one of the ``handle_num`` handle threads. See
 :mod:`tests.server._e2e_support` for how the subprocess servicer is driven.
 """
 
@@ -33,16 +33,17 @@ from tests.server._e2e_support import tcp_pipelined
 from tests.server._e2e_support import udp_call
 
 
-def _separate(io: int, handle: int, extra: str = "") -> str:
-    return f"io_thread_num: {io}\nhandle_thread_num: {handle}\n{extra}"
+def _separate(io: int, handle: int) -> str:
+    return f"mode: single_process\nio_handle_type: separate\nio_num: {io}\nhandle_num: {handle}"
 
 
 @pytest.fixture
 def start_server(tmp_path) -> Iterator:
     servers: List[Server] = []
 
-    def start(ports: Dict[str, int], server_extra: str = "", env: Optional[Dict[str, str]] = None) -> Server:
-        server = Server(tmp_path, ports, server_extra, env)
+    def start(ports: Dict[str, int], processmodel: str, server_extra: str = "",
+              env: Optional[Dict[str, str]] = None) -> Server:
+        server = Server(tmp_path, ports, server_extra, env, processmodel=processmodel)
         servers.append(server)
         server.wait_ready()
         return server
@@ -97,7 +98,7 @@ def test_blocking_handler_does_not_block_other_requests(start_server):
 
 def test_queue_limit_drops_overflow_and_logs(start_server):
     ports = {"tcp": free_port()}
-    server = start_server(ports, _separate(1, 2, "handler_max_concurrency: 1\nhandler_queue_size: 1"))
+    server = start_server(ports, _separate(1, 2), "handler_max_concurrency: 1\nhandler_queue_size: 1")
 
     replies = asyncio.run(tcp_pipelined_with_timeout(ports["tcp"], ["0.5"] * 4))
     assert len(replies) == 3, replies
@@ -153,3 +154,18 @@ def test_sigterm_with_requests_in_flight_exits_cleanly(start_server):
 
     asyncio.run(run())
     _assert_clean_exit(server, server.wait_exit())
+
+
+def test_dead_handle_thread_shuts_the_server_down_with_status_1(start_server):
+    ports = {"tcp": free_port()}
+    server = start_server(ports, _separate(2, 2))
+
+    async def run() -> None:
+        try:
+            await asyncio.wait_for(tcp_call(ports["tcp"], 1, "stop_loop"), 2)
+        except (asyncio.TimeoutError, OSError, asyncio.IncompleteReadError):
+            pass
+
+    asyncio.run(run())
+    assert server.wait_exit() == 1, server.output
+    assert "exited unexpectedly" in server.output, server.output

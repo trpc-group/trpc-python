@@ -7,10 +7,10 @@
 import json
 
 from examples.helloworld.stub.trpc_trpc_python_group_helloworld import helloworld_pb2
-from trpc_sdk.codec import SerializationType
-from trpc_sdk.codec import deserialize
-from trpc_sdk.codec import serialize
-from trpc_sdk.codec.serialization_noop import Body
+from trpc_sdk.serialization import Body
+from trpc_sdk.serialization import SerializationType
+from trpc_sdk.serialization import deserialize
+from trpc_sdk.serialization import serialize
 
 
 def test_serialization():

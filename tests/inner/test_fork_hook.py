@@ -8,14 +8,15 @@
 import multiprocessing
 import os
 
-from trpc_sdk._inner.fork_hook import ProcessType
-from trpc_sdk._inner.fork_hook import execute_after_in_child
-from trpc_sdk._inner.fork_hook import execute_after_in_parent
-from trpc_sdk._inner.fork_hook import execute_before
-from trpc_sdk._inner.fork_hook import execute_before_loop_run_in_child
-from trpc_sdk._inner.fork_hook import register_at_fork
-from trpc_sdk._inner.fork_hook import register_child_callback
-from trpc_sdk.utils import set_current_process_var
+from trpc_sdk.common import ProcessType
+from trpc_sdk.common import execute_after_in_child
+from trpc_sdk.common import execute_after_in_parent
+from trpc_sdk.common import execute_before_in_parent
+from trpc_sdk.common import execute_before_loop_run_in_child
+from trpc_sdk.common import register_at_fork
+from trpc_sdk.common import register_child_callback
+from trpc_sdk.common import set_current_process_var
+from trpc_sdk.common._process_hook import register_before_loop_run_in_child
 
 
 def _func(var: ProcessType = None):
@@ -60,17 +61,16 @@ def test_fork_hook():
         with test_val.get_lock():
             test_val.value += 1
 
-    register_at_fork(before=_before,
-                     after_in_parent=_after,
-                     after_in_child=_after_in_child,
-                     before_loop_in_child=_before_loop_in_child)
+    register_at_fork(before=_before, after_in_parent=_after, after_in_child=_after_in_child)
+    register_before_loop_run_in_child(_before_loop_in_child)
 
     print(f"master pid: {os.getpid()}")
     multiprocessing.set_start_method("fork", force=True)
-    execute_before()
+    execute_before_in_parent()
     p = _create_child_process()
     execute_after_in_parent()
     p.join()
+    assert test_val.value >= 3
 
 
 def test_register_child_callback():
@@ -82,13 +82,11 @@ def test_register_child_callback():
         with test_val.get_lock():
             test_val.value += 1
 
-    register_child_callback(cb=_callback, type=ProcessType.DISPATCHER)
     register_child_callback(cb=_callback, type=ProcessType.WORKER)
     register_child_callback(cb=_callback, type=ProcessType.TASK)
-    p = _create_child_process(ProcessType.DISPATCHER)
-    p.join()
+    multiprocessing.set_start_method("fork", force=True)
     p = _create_child_process(ProcessType.WORKER)
     p.join()
     p = _create_child_process(ProcessType.TASK)
     p.join()
-    assert test_val.value == 3
+    assert test_val.value == 2

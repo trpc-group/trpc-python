@@ -3,192 +3,169 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-"""Test server executor module"""
+"""Merge worker and datagram connection that replaced ExecutorProcess."""
+
 import asyncio
 from unittest.mock import MagicMock
 
 import pytest
 
-from trpc_sdk.server import server_engine
-from trpc_sdk.server.service import ServiceAdapter
-from trpc_sdk.server.option import ServiceOption, ServerOption
-from trpc_sdk.transport import server_executor, BaseServerTransportOption
-from trpc_sdk.server.worker import Worker, ExecutorProcess
-from trpc_sdk.http import routes as http_routes
+from trpc_sdk.abc import BaseServerTransportOption
 from trpc_sdk.exceptions import ServerDecodeError
-from trpc_sdk.transport.server_executor import ExecutorUDPConnection, TaskConnection
-from trpc_sdk.utils.loop_lib import get_or_create_event_loop
-
-from ..common_util import unused_port
-from ..transport_util import TestParser, TestClientConn
-
-
-def create_service(engine: server_engine.TrpcServerEngine):
-    """Create mock service"""
-    engine.process_info.add_socket_type("net")
-    service_option = ServiceOption()
-    engine.process_info.add_parser(TestParser())
-    service = ServiceAdapter(service_option=service_option)
-    engine.process_info.add_handler(service.handle)
-    engine.process_info.add_timeout(1000)
-    engine.process_info.add_service(service)
-    return service
+from trpc_sdk.runtime import MergeWorker
+from trpc_sdk.server import ServerOption
+from trpc_sdk.server import ServiceAdapter
+from trpc_sdk.server import ServiceOption
+from trpc_sdk.server import TrpcServerAdapter
+from trpc_sdk.task import TaskWorkerConnection
+from trpc_sdk.transport import ConnectionOption
+from trpc_sdk.transport import DefaultDatagramConnection
+from trpc_sdk.transport import TrpcServerTransport
+from trpc_sdk.transport import get_protocol_handle
+from trpc_sdk.transport import register_protocol_handle
 
 
-def test_server_executor_tcp():
-    """Test server_executor_tcp"""
-    engine = server_engine.TrpcServerEngine(ServerOption())
-    engine.process_info.add_address(("127.0.0.1", unused_port()))
-    create_service(engine)
-    engine.process_info.add_network("tcp")
-    engine.process_info.add_parser(TestParser())
-    worker = Worker()
-    app = ExecutorProcess(worker, engine)
-    app.block = False
-    try:
-        app.run()
-    except Exception:  # pylint: disable=broad-except
-        assert False
-    assert True
+class _Parser:
+    def __init__(self, frames=None, error=None):
+        self.frames = list(frames or [])
+        self.error = error
+        self.reset_count = 0
+
+    def feed_data(self, data):
+        if not self.frames and self.error is None:
+            self.frames.append(data)
+
+    def feeds_data(self, data):
+        self.feed_data(data)
+
+    def read(self):
+        if self.error is not None:
+            raise self.error
+        frames, self.frames = self.frames, []
+        return frames
+
+    def reset(self):
+        self.reset_count += 1
+        self.frames = []
 
 
-def test_server_executor_http():
-    """Test server_executor_http"""
-    engine = server_engine.TrpcServerEngine(ServerOption())
-    service = create_service(engine)
-    engine.process_info.add_service(service)
-    engine.process_info.add_address(("127.0.0.1", unused_port()))
-    engine.process_info.add_network("http")
-    http_routes.StaticFileRouters = {}
+class _Factory:
+    def __init__(self, parser):
+        self.parser = parser
 
+    def create(self):
+        return self.parser
+
+
+def test_merge_worker_reads_endpoint_fields_from_transport_opt():
+    opt = ServiceOption()
+    opt.set_address(("127.0.0.1", 18081))
+    opt.set_network("tcp")
+    opt.set_protocol("trpc")
+    opt.set_timeout(1000)
+    service = ServiceAdapter(opt)
+    transport_opt = opt.transport_option
+    transport_opt.service_adapter = service
+    transport_opt.rpc_handler = service.handle
+
+    adapter = TrpcServerAdapter(ServerOption())
+    adapter.process_info.add_transport_opt(transport_opt)
+    adapter.process_info.add_transport(object())
+    worker = MergeWorker(adapter)
+
+    assert worker.addresses == [("127.0.0.1", 18081)]
+    assert worker.networks == ["tcp"]
+    assert worker.handlers == [service.handle]
+    assert worker.timeouts == [1000]
+    assert worker.services == [service]
+    assert worker.parsers[0] is not None
+
+
+def test_trpc_transport_rejects_a_network_it_cannot_serve():
+    transport = TrpcServerTransport()
     opt = BaseServerTransportOption()
-    opt.tls_key = "./examples/helloworld/cert/domain_srv.key"
-    opt.tls_cert = "./examples/helloworld/cert/domain_srv.crt"
-    worker = Worker()
-    app = ExecutorProcess(worker, engine)
-    app.tran_opts = [opt]
-    app.block = False
-    try:
-        app.run()
-    except Exception:  # pylint: disable=broad-except
-        assert False
-    assert True
+    opt.set_network("http")
+    opt.set_address(("127.0.0.1", 1))
+    transport.bind(opt)
+    assert transport.check_endpoint() is False
+
+    udp = TrpcServerTransport()
+    bad = BaseServerTransportOption()
+    bad.set_network("udp")
+    bad.set_address(("127.0.0.1", -1))
+    udp.bind(bad)
+    assert udp.check_endpoint() is False
 
 
-def test_server_executor_user_protocol():
-    """Test test_server_executor_user_protocol"""
-    engine = server_engine.TrpcServerEngine(ServerOption())
-    service = create_service(engine)
-    service.opt.protocol = "http_test"
-    engine.process_info.add_service(service)
-    engine.process_info.add_address(("127.0.0.1", unused_port()))
-    engine.process_info.add_network("http")
-    http_routes.StaticFileRouters = {}
+def test_user_protocol_handle_is_registered_for_the_worker():
+    def starter(worker, index):
+        return index
 
-    opt = BaseServerTransportOption()
-    opt.tls_key = "./examples/helloworld/cert/domain_srv.key"
-    opt.tls_cert = "./examples/helloworld/cert/domain_srv.crt"
-    worker = Worker()
-    app = ExecutorProcess(worker, engine)
-    app.user_protocol_handles["http_test"] = lambda index: print(f"index : {index}, http_test")
-    app.tran_opts = [opt]
-    app.block = False
-    try:
-        app.run()
-    except Exception:  # pylint: disable=broad-except
-        assert False
-    assert True
-
-
-# server_executor_udp
-def test_server_executor_udp():
-    """Test server_executor_udp"""
-    engine = server_engine.TrpcServerEngine(ServerOption())
-    service = create_service(engine)
-    engine.process_info.add_address(("127.0.0.1", unused_port()))
-    engine.process_info.add_network("udp")
-    engine.process_info.add_parser(TestParser())
-    engine.process_info.add_service(service)
-    worker = Worker()
-    app = ExecutorProcess(worker, engine)
-    app.block = False
-    try:
-        app.run()
-    except Exception:  # pylint: disable=broad-except
-        assert False
-
-    task_conn = server_executor.TaskConnection()
-    task_conn.data_received(b'123')
-    task_conn.connection_made(None)
-    task_conn.connection_lost(None)
-
-    try:
-        dispatcher_conn = server_executor.ExecutorUDPConnection(app, TestParser(), service.handle, 1000)
-        dispatcher_conn.connection_made(TestClientConn())
-        dispatcher_conn.datagram_received(
-            b'\t0\x00\x00\x00\x00\x00\x1f\x00\x02\x00\x00\x00\x00\x00\x00\x18\x01\n\x0bhi: hello: ', 'test_addr')
-    except Exception:  # pylint: disable=broad-except
-        assert False
-
-    assert True
+    register_protocol_handle("http_test_unit", starter)
+    assert get_protocol_handle("http_test_unit") is starter
+    assert get_protocol_handle("missing_protocol_unit") is None
 
 
 @pytest.mark.asyncio
-async def test_executor_udp_send_failure_and_decode_error(monkeypatch):
-    parser = MagicMock()
-    parser.create.return_value = parser
-    parser.read.side_effect = ServerDecodeError("bad")
+async def test_datagram_connection_dispatches_and_survives_decode_errors():
+    seen = []
 
-    async def handle(ctx, req):
-        return b"rsp"
+    async def handle(conn, frame):
+        seen.append((conn.remote_addr, frame))
 
-    conn = ExecutorUDPConnection(app=None, parser=parser, handle=handle, timeout=1000)
-    conn.connection_made(MagicMock())
-    conn.datagram_received(b"x", ("127.0.0.1", 1))
+    parser = _Parser()
+    conn = DefaultDatagramConnection(ConnectionOption(parser=_Factory(parser), msg_handler=handle))
+    transport = MagicMock()
+    transport.get_extra_info.return_value = ("127.0.0.1", 8000)
+    transport.is_closing.return_value = False
+    conn.connection_made(transport)
+    conn.datagram_received(b"hello", ("127.0.0.1", 9))
+    await asyncio.sleep(0)
+    assert seen == [(("127.0.0.1", 9), b"hello")]
 
-    # process exception is caught around _handle_packages
-    parser2 = MagicMock()
-    parser2.create.return_value = parser2
-    parser2.read.side_effect = [[b"pkg"], []]
-    conn2 = ExecutorUDPConnection(app=None, parser=parser2, handle=handle, timeout=1)
-    transport2 = MagicMock()
-    transport2.get_extra_info.return_value = ("127.0.0.1", 0)
-    conn2.connection_made(transport2)
+    failing = _Parser(error=ServerDecodeError("bad"))
+    bad = DefaultDatagramConnection(ConnectionOption(parser=_Factory(failing), msg_handler=handle))
+    bad.connection_made(transport)
+    bad.datagram_received(b"x", ("127.0.0.1", 1))
+    assert failing.reset_count == 1
+    assert transport.close.called is False
 
-    def boom(*_a, **_k):
+
+@pytest.mark.asyncio
+async def test_datagram_handler_error_does_not_close_the_socket():
+    async def handle(_conn, _frame):
         raise RuntimeError("proc")
 
-    monkeypatch.setattr(conn2, "_handle_packages", boom)
-    conn2.datagram_received(b"y", ("127.0.0.1", 2))
+    parser = _Parser(frames=[b"pkg"])
+    conn = DefaultDatagramConnection(ConnectionOption(parser=_Factory(parser), msg_handler=handle))
+    transport = MagicMock()
+    transport.get_extra_info.return_value = ("127.0.0.1", 8000)
+    transport.is_closing.return_value = False
+    conn.connection_made(transport)
+    conn.datagram_received(b"y", ("127.0.0.1", 2))
+    await asyncio.sleep(0)
+    transport.close.assert_not_called()
 
-    transport3 = MagicMock()
-    transport3.sendto.side_effect = OSError("send fail")
-    conn3 = ExecutorUDPConnection(
-        app=None, parser=MagicMock(create=lambda: MagicMock()), handle=handle, timeout=1
+
+def test_task_worker_connection_decode_and_close(monkeypatch):
+    received = []
+    monkeypatch.setattr(
+        "trpc_sdk.task._connection.receive_pkg_from_worker",
+        lambda index, package: received.append((index, package)),
     )
-    conn3.connection_made(transport3)
-    await conn3._handle_request(b"req", transport3, ("127.0.0.1", 3), MagicMock())
-
-
-def test_task_connection_decode_and_process_errors(monkeypatch):
-    tc = TaskConnection()
+    conn = TaskWorkerConnection(app=None, index=1)
     transport = MagicMock()
     transport.is_closing.return_value = False
-    tc.connection_made(transport)
+    conn.connection_made(transport)
 
-    parser = MagicMock()
-    parser.read.side_effect = ServerDecodeError("d")
-    tc.parser = parser
-    tc.data_received(b"x")
+    conn.parser = _Parser(error=ServerDecodeError("d"))
+    conn.parser.feeds_data = lambda data: None
+    conn.data_received(b"x")
+    assert received == []
 
-    parser2 = MagicMock()
-    parser2.read.side_effect = [[b"pkg"], []]
-    tc.parser = parser2
-    monkeypatch.setattr(
-        "trpc_sdk.transport.server_executor.inner_decode_task_rsp",
-        lambda pkg: (_ for _ in ()).throw(RuntimeError("decode")),
-    )
-    tc.data_received(b"y")
+    conn.parser = _Parser(frames=[b"pkg"])
+    conn.data_received(b"y")
+    assert received == [(1, b"pkg")]
 
-    tc.connection_lost(None)
+    conn.connection_lost(None)
     transport.close.assert_called()

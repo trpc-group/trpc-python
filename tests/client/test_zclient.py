@@ -10,20 +10,19 @@ from socketserver import BaseRequestHandler
 from socketserver import TCPServer
 from threading import Thread
 
+import pytest
+
 from examples.helloworld.stub.trpc_trpc_python_group_helloworld import helloworld_pb2
 from tests.common_util import unused_port
+from trpc_sdk.abc import TrpcContext
 from trpc_sdk.client import Client
-from trpc_sdk.client.options import with_caller_service_name
-from trpc_sdk.client.options import with_metadata
-from trpc_sdk.client.options import with_protocol
-from trpc_sdk.client.options import with_service_name
-from trpc_sdk.client.options import with_target
-from trpc_sdk.client.options import with_timeout
-from trpc_sdk.codec.message import Message
-from trpc_sdk.context import Context
+from trpc_sdk.client import Options
+from trpc_sdk.codec import create_message
+from trpc_sdk.config import ClientServiceConfig
+from trpc_sdk.config import TrpcConfig
 from trpc_sdk.exceptions import ClientEncodeError
 from trpc_sdk.exceptions import ClientRouteError
-from trpc_sdk.exceptions import ErrorCode
+from trpc_sdk.exceptions import TrpcErrorCode
 
 
 class MockTCPServer(object):
@@ -36,10 +35,7 @@ class MockTCPServer(object):
 
     def stop(self):
         self.serv.shutdown()
-        print("after self.serv.shutdown")
-
         self.serv.server_close()
-        print("after self.serv.server_close")
 
 
 class TestClient:
@@ -53,7 +49,6 @@ class TestClient:
                 self.request.sendall(
                     b'\t0\x00\x00\x00\x00\x00$\x00\x02\x00\x00\x00\x00\x00\x00\x18\x01\n\x10hi: hello: hello')
                 self.request.close()
-                pass
 
         self.port = unused_port()
         self.srv = MockTCPServer(self.port, HandlerRead)
@@ -62,57 +57,46 @@ class TestClient:
         self.srv.stop()
 
     def test_client(self):
-        ctx = Context()
-        msg = Message()
+        ctx, msg = create_message(TrpcContext())
         msg.set_namespace('Development')
-        ctx.msg = msg
         req = helloworld_pb2.HelloRequest()
         req.msg = 'hello'
         rsp_cls = helloworld_pb2.HelloReply
-
         cli = Client()
-        # 测试service_name为空
-        options = []
-        try:
-            cli.invoke_sync(ctx, req, rsp_cls, options)
-        except Exception as e:  # pylint: disable=broad-except
-            assert str(e) == 'service_name empty'
 
-        # 测试不指定protocol，codec为空
-        options = [
-            with_target('ip://127.0.0.1:%s' % self.port),
-            with_service_name('trpc_sdk.test.helloworld.Greeter'),
-        ]
-        try:
-            cli.invoke_sync(ctx, req, rsp_cls, options)
-        except ClientEncodeError as e:
-            assert e.code == ErrorCode.TRPC_CLIENT_ENCODE_ERR
-        except Exception:  # pylint: disable=broad-except
-            pass
+        with pytest.raises(Exception, match="empty service_name"):
+            cli.invoke_sync(ctx, req, rsp_cls, Options())
 
-        # 测试非法target
-        options = [
-            with_target('ip:/127.0.0.1:%s' % self.port),
-            with_service_name('trpc_sdk.test.helloworld.Greeter'),
-        ]
+        saved = dict(TrpcConfig._client_service_configs)
         try:
-            cli.invoke_sync(ctx, req, rsp_cls, options)
-        except ClientRouteError as e:
-            assert e.code == ErrorCode.TRPC_CLIENT_ROUTER_ERR
-        except Exception:  # pylint: disable=broad-except
-            pass
+            TrpcConfig.set_client_service_config(
+                "codec.empty.service",
+                ClientServiceConfig(callee="codec.empty.service", protocol=""),
+            )
+            empty_ctx, empty_msg = create_message(TrpcContext())
+            empty_msg.set_callee_service_name("codec.empty.service")
+            options = (Options()
+                       .set_target('ip://127.0.0.1:%s' % self.port)
+                       .set_service_name('codec.empty.service'))
+            with pytest.raises(ClientEncodeError) as encode_error:
+                cli.invoke_sync(empty_ctx, req, rsp_cls, options)
+            assert encode_error.value.code == TrpcErrorCode.TRPC_CLIENT_ENCODE_ERR
+        finally:
+            TrpcConfig.set_client_service_configs(saved)
 
-        # 正常请求
-        try:
-            options = [
-                with_target('ip://127.0.0.1:%s' % self.port),
-                with_service_name('trpc_sdk.test.helloworld.Greeter'),
-                with_protocol('trpc'),
-                with_caller_service_name('trpc_sdk.app.caller.service'),
-                with_timeout(10000),
-                with_metadata('testKey', b'testValue')
-            ]
-            rsp = cli.invoke_sync(ctx, req, rsp_cls, options)
-            assert rsp.msg == 'hi: hello: hello'
-        except Exception:  # pylint: disable=broad-except
-            pass
+        options = (Options()
+                   .set_target('ip:/127.0.0.1:%s' % self.port)
+                   .set_service_name('trpc_sdk.test.helloworld.Greeter'))
+        with pytest.raises(ClientRouteError) as route_error:
+            cli.invoke_sync(ctx, req, rsp_cls, options)
+        assert route_error.value.code == TrpcErrorCode.TRPC_CLIENT_ROUTER_ERR
+
+        options = (Options()
+                   .set_target('ip://127.0.0.1:%s' % self.port)
+                   .set_service_name('trpc_sdk.test.helloworld.Greeter')
+                   .set_protocol('trpc')
+                   .set_caller_service_name('trpc_sdk.app.caller.service')
+                   .set_timeout(10000)
+                   .set_metadata('testKey', b'testValue'))
+        rsp = cli.invoke_sync(ctx, req, rsp_cls, options)
+        assert rsp.msg == 'hi: hello: hello'

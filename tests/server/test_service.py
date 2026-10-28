@@ -3,7 +3,7 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-"""Tests for the unary budget path of :class:`trpc_sdk.server.ServiceAdapter` and its registrar wiring."""
+"""Tests for the unary budget path of :class:`trpc_sdk.server.ServiceAdapter` and its service_register wiring."""
 
 from __future__ import annotations
 
@@ -100,25 +100,25 @@ def test_context_timeout_accessors() -> None:
 
 def test_start_service_registry_only_for_configured_registry(monkeypatch) -> None:
     started = []
-    monkeypatch.setattr(_registry.ServiceRegistrar, "start", lambda self: started.append(self.opt))
+    monkeypatch.setattr(_registry.ServiceRegister, "start", lambda self: started.append(self.opt))
 
     with_registry = _make_service()
     with_registry.opt.registry = object()
     without_registry = _make_service()
     without_registry.opt.registry = None
-    server = SimpleNamespace(services={"a": with_registry, "b": without_registry})
+    server = SimpleNamespace(service_adapters={"a": with_registry, "b": without_registry})
 
     _registry.start_service_registry(server)
 
     assert started == [with_registry.opt]
-    assert isinstance(with_registry.registrar, _registry.ServiceRegistrar)
-    assert without_registry.registrar is None
+    assert isinstance(with_registry.service_register, _registry.ServiceRegister)
+    assert without_registry.service_register is None
 
 
-def test_close_stops_registrar() -> None:
+def test_close_stops_service_register() -> None:
     stopped = []
     service = _make_service()
     service.close()
-    service.registrar = SimpleNamespace(stop=lambda: stopped.append(True))
+    service.service_register = SimpleNamespace(stop=lambda: stopped.append(True))
     service.close()
     assert stopped == [True]

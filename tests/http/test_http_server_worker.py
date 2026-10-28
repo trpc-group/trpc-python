@@ -4,64 +4,19 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 """Test http module"""
-import threading
-
-import pytest
+import tempfile
 
 from aiohttp import web
 
-from trpc_sdk.abc.codec import Parser  # pylint: disable=no-name-in-module
-from trpc_sdk.codec import TrpcServerParser
+from trpc_sdk.abc import BaseServerTransportOption
+from trpc_sdk.http import HttpServerTransport
+from trpc_sdk.http import RegisteredRoutes
 from trpc_sdk.http import StaticFileRouters
 from trpc_sdk.http import register_static
-from trpc_sdk.http import routes
-from trpc_sdk.http.http_transport import HttpMessageHandle
-from trpc_sdk.server import ServerOption
-from trpc_sdk.server import ServiceAdapter
-from trpc_sdk.server import ServiceOption  # pylint: disable=no-name-in-module
-from trpc_sdk.server.server_engine import TrpcServerEngine
-from trpc_sdk.server.server_process_info import BaseServerTransportOption
-from trpc_sdk.server.worker import ExecutorProcess
-from trpc_sdk.server.worker import Worker
-from trpc_sdk.server.worker import get_https_certs
-from trpc_sdk.transport import server_executor
-
-
-class _TestParser(Parser):
-    """Test parser"""
-
-    def create(self):
-        """Create server parser"""
-        return TrpcServerParser()
-
-
-def _create_executor_process() -> ExecutorProcess:
-    service_option = ServiceOption()
-    service_obj = ServiceAdapter(service_option)
-    engine = TrpcServerEngine(ServerOption())
-    engine.process_info.add_address(("127.0.0.1", 8000))
-    opts = BaseServerTransportOption()
-    opts.set_address(("127.0.0.1", 8000))
-    engine.process_info.add_transport_opt(opts)
-    engine.process_info.add_network("http")
-    engine.process_info.add_handler(service_obj.handle)
-    engine.process_info.add_parser(_TestParser())
-    engine.process_info.add_timeout(1000)
-    engine.process_info.add_service(service_obj)
-    app = ExecutorProcess(Worker(), engine)
-    return app
-
-
-@pytest.mark.asyncio
-async def test_server_executor_udp():
-    """Test server udp"""
-    app = _create_executor_process()
-    task_conn = server_executor.TaskConnection()
-    task_conn.data_received(b'123')
-    task_conn.connection_made(None)
-    task_conn.connection_lost(None)
-
-    threading.Thread(target=app.run, daemon=True).start()
+from trpc_sdk.http import route
+from trpc_sdk.server import ServiceOption
+from trpc_sdk.server import create_service_adapter
+from trpc_sdk.transport import ssl_context_from_opts
 
 
 def test_https_cert():
@@ -70,7 +25,7 @@ def test_https_cert():
     opt.tls_key = "./examples/helloworld/cert/domain_srv.key"
     opt.tls_cert = "./examples/helloworld/cert/domain_srv.crt"
     try:
-        get_https_certs(opt)
+        ssl_context_from_opts(opt)
     except Exception:  # pylint: disable=broad-except
         assert False
     else:
@@ -83,7 +38,7 @@ def test_https_cert_empty():
     opt.tls_key = ""
     opt.tls_cert = ""
     try:
-        ret = get_https_certs(opt)
+        ret = ssl_context_from_opts(opt)
     except Exception:  # pylint: disable=broad-except
         assert False
     else:
@@ -96,7 +51,7 @@ def test_https_without_cert_key():
     opt.tls_key = "fake"
     opt.tls_cert = "fake"
     try:
-        get_https_certs(opt)
+        ssl_context_from_opts(opt)
     except KeyError:  # pylint: disable=broad-except
         assert True
     else:
@@ -109,7 +64,7 @@ def test_https_without_cert():
     opt.tls_key = "./examples/helloworld/cert/domain_srv.key"
     opt.tls_cert = "fake"
     try:
-        get_https_certs(opt)
+        ssl_context_from_opts(opt)
     except ValueError:  # pylint: disable=broad-except
         assert True
     else:
@@ -118,8 +73,13 @@ def test_https_without_cert():
 
 def test_register_static():
     """Test register static"""
-    register_static("/static", "static")
-    assert StaticFileRouters["/static"] == "static"
+    saved = dict(StaticFileRouters)
+    try:
+        register_static("/static", "static")
+        assert StaticFileRouters["/static"] == "static"
+    finally:
+        StaticFileRouters.clear()
+        StaticFileRouters.update(saved)
 
 
 async def _service_1(_, __) -> bytes:  # return rsp
@@ -130,11 +90,40 @@ async def _service_2(_, __) -> bytes:  # return rsp
     return b"_service_2"
 
 
+async def _other_service(_, __) -> bytes:
+    return b"_other_service"
+
+
 def test_many_service():
-    """Test many service"""
-    web_app = web.Application(client_max_size=100)
-    app = _create_executor_process()
-    msg_handle = HttpMessageHandle(0, app)
-    routes.route("/test", service_name="trpc_sdk.test.many.service")(_service_1)
-    routes.route("/test1")(_service_2)
-    app._add_user_route(web_app, "trpc_sdk.test.many.service", msg_handle)
+    """User routes for this service, and only this service, land on the app."""
+    saved_routes = dict(RegisteredRoutes)
+    saved_static = dict(StaticFileRouters)
+    RegisteredRoutes.clear()
+    StaticFileRouters.clear()
+    try:
+        route("/test", service_name="trpc_sdk.test.many.service")(_service_1)
+        route("/test1")(_service_2)
+        route("/other", service_name="trpc_sdk.test.other.service")(_other_service)
+
+        adapter = create_service_adapter("trpc_sdk.test.many.service", ServiceOption())
+        transport = HttpServerTransport()
+        transport.bind(adapter.opt.transport_option)
+
+        with tempfile.TemporaryDirectory() as static_dir:
+            register_static("/static", static_dir)
+            web_app = transport._build_app()
+
+        paths = []
+        for resource in web_app.router.resources():
+            canonical = getattr(resource, "canonical", None)
+            if canonical:
+                paths.append(canonical)
+        assert "/test" in paths
+        assert "/test1" in paths
+        assert "/other" not in paths
+        assert any(isinstance(resource, web.StaticResource) for resource in web_app.router.resources())
+    finally:
+        RegisteredRoutes.clear()
+        RegisteredRoutes.update(saved_routes)
+        StaticFileRouters.clear()
+        StaticFileRouters.update(saved_static)

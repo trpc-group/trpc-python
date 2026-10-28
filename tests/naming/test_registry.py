@@ -6,9 +6,9 @@
 
 import multiprocessing
 
-from trpc_sdk.naming.registry import pause_heartbeat
-from trpc_sdk.naming.registry import resume_heartbeat
-from trpc_sdk.naming.registry import should_heartbeat
+from trpc_sdk.utils import pause_heartbeat
+from trpc_sdk.utils import resume_heartbeat
+from trpc_sdk.utils import should_heartbeat
 
 
 def handler():

@@ -14,8 +14,8 @@ def test_time_utils_fallback_without_time_ns(monkeypatch):
     """Cover the else branch that uses time.time()."""
     monkeypatch.delattr(time, "time_ns", raising=False)
     # Drop cached module so reload re-evaluates getattr(time, "time_ns", None).
-    sys.modules.pop("trpc_sdk.utils.time_utils", None)
-    time_utils = importlib.import_module("trpc_sdk.utils.time_utils")
+    sys.modules.pop("trpc_sdk.utils._time_utils", None)
+    time_utils = importlib.import_module("trpc_sdk.utils._time_utils")
 
     assert time_utils._time_ns is None
     us = time_utils.now_us()
@@ -26,8 +26,8 @@ def test_time_utils_fallback_without_time_ns(monkeypatch):
 
     # Restore the normal (time_ns) implementation for other tests.
     monkeypatch.undo()
-    sys.modules.pop("trpc_sdk.utils.time_utils", None)
-    restored = importlib.import_module("trpc_sdk.utils.time_utils")
+    sys.modules.pop("trpc_sdk.utils._time_utils", None)
+    restored = importlib.import_module("trpc_sdk.utils._time_utils")
     assert restored._time_ns is not None
     assert restored.now_us() > 0
     assert restored.now_ms() > 0

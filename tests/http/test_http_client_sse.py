@@ -5,14 +5,13 @@
 # tRPC-Python is licensed under Apache-2.0.
 """Test cases for HTTP SSE (Server-Sent Events) client functionality"""
 
-from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 
 import pytest
 
-from trpc_sdk.http.sse_client import SSEEvent
-from trpc_sdk.http.sse_client import SSEEventSource
-from trpc_sdk.http.sse_client import _SSEParser
+from trpc_sdk.http import SSEEvent
+from trpc_sdk.http import SSEEventSource
+from trpc_sdk.http._sse_parser import SSEDecoder
 
 # pylint: disable=protected-access
 # pylint: disable=invalid-name
@@ -70,8 +69,8 @@ def test_sse_parser_decode_empty_line():
     Verifies:
     - Returns None for empty lines (event separator)
     """
-    parser = _SSEParser()
-    assert parser.decode("") is None
+    parser = SSEDecoder()
+    assert parser.feed_line("") is None
 
 
 def test_sse_parser_decode_comment_line():
@@ -80,8 +79,8 @@ def test_sse_parser_decode_comment_line():
     Verifies:
     - Returns None for comment lines
     """
-    parser = _SSEParser()
-    assert parser.decode(":comment") is None
+    parser = SSEDecoder()
+    assert parser.feed_line(":comment") is None
 
 
 def test_sse_parser_decode_event_field():
@@ -90,9 +89,9 @@ def test_sse_parser_decode_event_field():
     Verifies:
     - Correctly extracts event type
     """
-    parser = _SSEParser()
-    parser.decode("event:test")
-    assert parser._event == "test"
+    parser = SSEDecoder()
+    parser.feed_line("event:test")
+    assert parser._event_type == "test"
 
 
 def test_sse_parser_decode_multiple_data():
@@ -101,10 +100,10 @@ def test_sse_parser_decode_multiple_data():
     Verifies:
     - Correctly combines multiple data lines
     """
-    parser = _SSEParser()
-    parser.decode("data:line1")
-    parser.decode("data:line2")
-    assert parser._data == ["line1", "line2"]
+    parser = SSEDecoder()
+    parser.feed_line("data:line1")
+    parser.feed_line("data:line2")
+    assert parser._data_lines == ["line1", "line2"]
 
 
 def test_sse_parser_decode_complete_event():
@@ -114,12 +113,12 @@ def test_sse_parser_decode_complete_event():
     - Correctly parses all SSE fields
     - Returns complete event object
     """
-    parser = _SSEParser()
-    parser.decode("event:test")
-    parser.decode("data:test data")
-    parser.decode("id:123")
-    parser.decode("retry:1000")
-    event = parser.decode("")
+    parser = SSEDecoder()
+    parser.feed_line("event:test")
+    parser.feed_line("data:test data")
+    parser.feed_line("id:123")
+    parser.feed_line("retry:1000")
+    event = parser.feed_line("")
     assert event.event == "test"
     assert event.data == "test data"
     assert event.id == "123"
@@ -136,9 +135,12 @@ async def test_sse_event_source_aiter_sse():
     """
     mock_response = MagicMock()
     mock_response.trpc_rsp.headers = {"content-type": "text/event-stream"}
-    mock_stream = AsyncMock()
-    mock_stream.__aiter__.return_value = iter(["event:test\ndata:test data\n\n", b"event:test\ndata:test data\n\n"])
-    mock_response.stream_data.return_value = mock_stream
+
+    async def _chunks():
+        yield "event:test\ndata:test data\n\n"
+        yield b"event:test\ndata:test data\n\n"
+
+    mock_response.stream_data.return_value = _chunks()
 
     event_source = SSEEventSource(mock_response)
     async for event in event_source.aiter_sse():
@@ -154,7 +156,6 @@ def test_sse_event_source_check_content_type_fail():
     """
     mock_response = MagicMock()
     mock_response.trpc_rsp.headers = {"content-type": "application/json"}
+    source = SSEEventSource(mock_response)
     with pytest.raises(TypeError):
-        SSEEventSource(mock_response)
-        source = SSEEventSource(mock_response)
-        source._check_content_type()
+        source._ensure_event_stream()

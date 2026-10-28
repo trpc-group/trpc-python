@@ -7,86 +7,76 @@
 
 import pytest
 
-from trpc_sdk.exceptions import ClientCanceledError
 from trpc_sdk.exceptions import ClientConnectionError
 from trpc_sdk.exceptions import ClientDecodeError
 from trpc_sdk.exceptions import ClientEncodeError
-from trpc_sdk.exceptions import ClientNetError
+from trpc_sdk.exceptions import ClientInvokeError
 from trpc_sdk.exceptions import ClientPoolClosedError
 from trpc_sdk.exceptions import ClientPoolConnClosedError
 from trpc_sdk.exceptions import ClientPoolLimitError
 from trpc_sdk.exceptions import ClientRouteError
-from trpc_sdk.exceptions import ClientStreamQueueFullError
 from trpc_sdk.exceptions import ClientTimeoutError
-from trpc_sdk.exceptions import ErrorCode
-from trpc_sdk.exceptions import ErrorType
-from trpc_sdk.exceptions import FuncNotFoundError
-from trpc_sdk.exceptions import NewBusinessError
-from trpc_sdk.exceptions import NewFrameError
-from trpc_sdk.exceptions import PluginInitError
-from trpc_sdk.exceptions import ServerAuthFailError
 from trpc_sdk.exceptions import ServerDecodeError
 from trpc_sdk.exceptions import ServerEncodeError
+from trpc_sdk.exceptions import ServerFuncNotFoundError
 from trpc_sdk.exceptions import ServerSystemError
 from trpc_sdk.exceptions import ServerTimeoutError
-from trpc_sdk.exceptions import ServerValidateFailError
-from trpc_sdk.exceptions import ServiceNotFoundError
-from trpc_sdk.exceptions import TRPCBaseError
+from trpc_sdk.exceptions import TrpcErrorCode
+from trpc_sdk.exceptions import TrpcErrorType
+from trpc_sdk.exceptions import TrpcException
 from trpc_sdk.exceptions import UnknownError
+from trpc_sdk.exceptions import create_business_error
+from trpc_sdk.exceptions import create_frame_error
+from trpc_sdk.plugin import PluginInitError
 
 
 def test_error_type_values():
-    """Test ErrorType enum values"""
-    assert ErrorType.Framework == 1
-    assert ErrorType.Business == 2
-    assert ErrorType.CalleeFramework == 3
+    """Test TrpcErrorType enum values"""
+    assert TrpcErrorType.FRAMEWORK == 1
+    assert TrpcErrorType.BUSINESS == 2
+    assert TrpcErrorType.CALLEE_FRAMEWORK == 3
 
 
 def test_error_code_values():
-    """Test key ErrorCode values"""
-    assert ErrorCode.TRPC_INVOKE_SUCCESS == 0
-    assert ErrorCode.TRPC_SERVER_DECODE_ERR == 1
-    assert ErrorCode.TRPC_CLIENT_INVOKE_TIMEOUT_ERR == 101
-    assert ErrorCode.TRPC_INVOKE_UNKNOWN_ERR == 999
+    """Test key TrpcErrorCode values"""
+    assert TrpcErrorCode.TRPC_INVOKE_SUCCESS == 0
+    assert TrpcErrorCode.TRPC_SERVER_DECODE_ERR == 1
+    assert TrpcErrorCode.TRPC_CLIENT_INVOKE_TIMEOUT_ERR == 101
+    assert TrpcErrorCode.TRPC_INVOKE_UNKNOWN_ERR == 999
 
 
-def test_trpc_base_error_initialization():
-    """Test TRPCBaseError initialization"""
-    error = TRPCBaseError(ErrorType.Framework, ErrorCode.TRPC_SERVER_DECODE_ERR, "test error")
-    assert error.type == ErrorType.Framework
-    assert error.code == ErrorCode.TRPC_SERVER_DECODE_ERR
+def test_trpc_exception_initialization():
+    """Test TrpcException initialization"""
+    error = TrpcException(TrpcErrorType.FRAMEWORK, TrpcErrorCode.TRPC_SERVER_DECODE_ERR, "test error")
+    assert error.type == TrpcErrorType.FRAMEWORK
+    assert error.code == TrpcErrorCode.TRPC_SERVER_DECODE_ERR
     assert error.msg == "test error"
-    assert str(error) == "(1, 1, 'test error')"
+    assert str(error) == str((error.type, error.code, error.msg))
 
 
-def test_trpc_base_error_msg_conversion():
-    """Test TRPCBaseError message type conversion"""
-    # Test bytes to str conversion
-    error = TRPCBaseError(1, 1, b"bytes message")
+def test_trpc_exception_msg_conversion():
+    """Test TrpcException message type conversion"""
+    error = TrpcException(1, 1, b"bytes message")
     assert error.msg == "bytes message"
 
-    # Test non-str conversion
-    error = TRPCBaseError(1, 1, 123)
+    error = TrpcException(1, 1, 123)
     assert error.msg == "123"
 
 
 @pytest.mark.parametrize("exception_class,error_code", [
-    (ServerDecodeError, ErrorCode.TRPC_SERVER_DECODE_ERR),
-    (ServerEncodeError, ErrorCode.TRPC_SERVER_ENCODE_ERR),
-    (ServiceNotFoundError, ErrorCode.TRPC_SERVER_NOSERVICE_ERR),
-    (FuncNotFoundError, ErrorCode.TRPC_SERVER_NOFUNC_ERR),
-    (ServerTimeoutError, ErrorCode.TRPC_SERVER_TIMEOUT_ERR),
-    (ServerSystemError, ErrorCode.TRPC_SERVER_SYSTEM_ERR),
-    (ServerAuthFailError, ErrorCode.TRPC_SERVER_AUTH_FAIL),
-    (ServerValidateFailError, ErrorCode.TRPC_SERVER_VALIDATE_FAIL),
+    (ServerDecodeError, TrpcErrorCode.TRPC_SERVER_DECODE_ERR),
+    (ServerEncodeError, TrpcErrorCode.TRPC_SERVER_ENCODE_ERR),
+    (ServerFuncNotFoundError, TrpcErrorCode.TRPC_SERVER_NOFUNC_ERR),
+    (ServerTimeoutError, TrpcErrorCode.TRPC_SERVER_TIMEOUT_ERR),
+    (ServerSystemError, TrpcErrorCode.TRPC_SERVER_SYSTEM_ERR),
 ])
 def test_server_exceptions(exception_class, error_code):
     """Test server-side exception classes"""
     msg = "test message"
     exc = exception_class(msg)
 
-    assert isinstance(exc, TRPCBaseError)
-    assert exc.type == ErrorType.Framework
+    assert isinstance(exc, TrpcException)
+    assert exc.type == TrpcErrorType.FRAMEWORK
     assert exc.code == error_code
     assert exc.msg == msg
 
@@ -102,53 +92,67 @@ def test_client_timeout_error():
 
 
 @pytest.mark.parametrize("exception_class,error_code", [
-    (ClientConnectionError, ErrorCode.TRPC_CLIENT_CONNECT_ERR),
-    (ClientEncodeError, ErrorCode.TRPC_CLIENT_ENCODE_ERR),
-    (ClientDecodeError, ErrorCode.TRPC_CLIENT_DECODE_ERR),
-    (ClientRouteError, ErrorCode.TRPC_CLIENT_ROUTER_ERR),
-    (ClientNetError, ErrorCode.TRPC_CLIENT_NET_ERR),
-    (ClientPoolLimitError, ErrorCode.TRPC_CLIENT_POOL_LIMIT),
-    (ClientPoolClosedError, ErrorCode.TRPC_CLIENT_POOL_CLOSED),
-    (ClientPoolConnClosedError, ErrorCode.TRPC_CLIENT_POOL_CONN_CLOSED),
-    (ClientCanceledError, ErrorCode.TRPC_CLIENT_CANCELED),
-    (ClientStreamQueueFullError, ErrorCode.TRPC_CLIENT_STREAM_QUEUE_FULL),
+    (ClientConnectionError, TrpcErrorCode.TRPC_CLIENT_CONNECT_ERR),
+    (ClientEncodeError, TrpcErrorCode.TRPC_CLIENT_ENCODE_ERR),
+    (ClientDecodeError, TrpcErrorCode.TRPC_CLIENT_DECODE_ERR),
+    (ClientRouteError, TrpcErrorCode.TRPC_CLIENT_ROUTER_ERR),
+    (ClientInvokeError, TrpcErrorCode.TRPC_INVOKE_UNKNOWN_ERR),
+    (ClientPoolLimitError, TrpcErrorCode.TRPC_CLIENT_VALIDATE_ERR),
+    (ClientPoolClosedError, TrpcErrorCode.TRPC_CLIENT_POOL_CLOSED),
+    (ClientPoolConnClosedError, TrpcErrorCode.TRPC_CLIENT_POOL_CONN_CLOSED),
 ])
 def test_client_exceptions(exception_class, error_code):
     """Test client-side exception classes"""
     msg = "client error"
     exc = exception_class(msg)
 
-    assert isinstance(exc, TRPCBaseError)
-    assert exc.type == ErrorType.Framework
+    assert isinstance(exc, TrpcException)
+    assert exc.type == TrpcErrorType.FRAMEWORK
     assert exc.code == error_code
     assert exc.msg == msg
+
+
+@pytest.mark.parametrize("code", [
+    TrpcErrorCode.TRPC_SERVER_NOSERVICE_ERR,
+    TrpcErrorCode.TRPC_SERVER_AUTH_ERR,
+    TrpcErrorCode.TRPC_SERVER_VALIDATE_ERR,
+    TrpcErrorCode.TRPC_CLIENT_CANCELED_ERR,
+    TrpcErrorCode.TRPC_CLIENT_NETWORK_ERR,
+])
+def test_frame_error_for_codes_without_dedicated_classes(code):
+    """Codes that no longer have their own exception class still build a frame error."""
+    exc = create_frame_error(code, "frame error")
+    assert isinstance(exc, TrpcException)
+    assert exc.type == TrpcErrorType.FRAMEWORK
+    assert exc.code == code
+    assert exc.msg == "frame error"
 
 
 def test_plugin_init_error():
     """Test PluginInitError specific features"""
     exc = PluginInitError("plugin failed")
-    assert exc.code == ErrorCode.TRPC_PLUGIN_INIT_ERR
-    assert isinstance(exc, TRPCBaseError)
+    assert exc.code == TrpcErrorCode.TRPC_PLUGIN_INIT_ERR
+    assert isinstance(exc, TrpcException)
 
 
 def test_unknown_error():
     """Test UnknownError features"""
     exc = UnknownError("unknown issue")
-    assert exc.code == ErrorCode.TRPC_INVOKE_UNKNOWN_ERR
-    assert isinstance(exc, TRPCBaseError)
+    assert exc.code == TrpcErrorCode.TRPC_INVOKE_UNKNOWN_ERR
+    assert isinstance(exc, TrpcException)
 
 
-def test_new_frame_error():
-    """Test NewFrameError helper function"""
-    exc = NewFrameError(ErrorCode.TRPC_SERVER_DECODE_ERR, "frame error")
-    assert exc.type == ErrorType.Framework
-    assert exc.code == ErrorCode.TRPC_SERVER_DECODE_ERR
+def test_create_frame_error():
+    """Test create_frame_error helper function"""
+    exc = create_frame_error(TrpcErrorCode.TRPC_SERVER_DECODE_ERR, "frame error")
+    assert exc.type == TrpcErrorType.FRAMEWORK
+    assert exc.code == TrpcErrorCode.TRPC_SERVER_DECODE_ERR
     assert exc.msg == "frame error"
 
 
-def test_new_business_error():
-    """Test NewBusinessError helper function"""
-    exc = NewBusinessError(1001, "business error")
-    assert exc.type == ErrorType.Business
+def test_create_business_error():
+    """Test create_business_error helper function"""
+    exc = create_business_error(1001, "business error")
+    assert exc.type == TrpcErrorType.BUSINESS
     assert exc.code == 1001
     assert exc.msg == "business error"

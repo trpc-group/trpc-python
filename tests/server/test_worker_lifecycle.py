@@ -25,7 +25,7 @@ from trpc_sdk.runtime import _worker
 from trpc_sdk.runtime._process._rpc_task import RpcTaskProcess
 from trpc_sdk.runtime._process._separate_worker import SeparateWorker
 from trpc_sdk.runtime._process._task_process import TaskProcess
-from trpc_sdk.runtime._types import ChildRecord
+from trpc_sdk.runtime._types import ChildProcessInfo
 from trpc_sdk.runtime._worker import BaseWorker
 
 
@@ -107,7 +107,7 @@ def test_io_wait_gives_up_when_a_child_dies(worker, monkeypatch):
     monkeypatch.setattr(_worker.time, "sleep", lambda seconds: pytest.fail("should not sleep with a dead child"))
     stopped = []
     monkeypatch.setattr(_Worker, "_stop_children", lambda self: stopped.append(True))
-    worker.children.append(ChildRecord(name="infer:0", factory=lambda: None,
+    worker.children.append(ChildProcessInfo(name="infer:0", factory=lambda: None,
                                        process=SimpleNamespace(is_alive=lambda: False)))
     worker.io_wait_count = 1
     previous = signal.getsignal(signal.SIGTERM)
@@ -133,14 +133,18 @@ def test_only_the_listening_process_waits(engine_factory):
         pipes.close()
 
 
-def test_ready_callbacks_run_after_listen_and_before_timers(worker):
+def test_ready_callbacks_run_before_listen_and_timers(worker):
+    """Current order is ready callbacks, then listen, then timers.
+
+    A failing callback is logged and does not stop the later ones.
+    """
     worker.loop = asyncio.new_event_loop()
     worker.ready_callbacks.append(lambda: worker.steps.append("register"))
     worker.ready_callbacks.insert(0, lambda: 1 / 0)
 
     worker._prepare_to_serve()
 
-    assert worker.steps == ["listen", "register", "timers"]
+    assert worker.steps == ["register", "listen", "timers"]
 
 
 def test_reboot_child_is_forced_off_and_warned(monkeypatch):
@@ -157,7 +161,7 @@ def test_reboot_child_is_forced_off_and_warned(monkeypatch):
 
 def test_dead_child_exits_the_loop_with_status_one(worker):
     worker.loop = asyncio.new_event_loop()
-    worker._children_by_pid[4242] = ChildRecord(name="rpc_task-0", factory=lambda: None)
+    worker._children_by_pid[4242] = ChildProcessInfo(name="rpc_task-0", factory=lambda: None)
     worker.loop.call_soon(worker._replace_child, 4242)
 
     with pytest.raises(SystemExit) as exc:
@@ -168,7 +172,7 @@ def test_dead_child_exits_the_loop_with_status_one(worker):
 
 def test_child_exit_during_shutdown_is_not_a_failure(worker):
     worker._exiting = True
-    worker._children_by_pid[4242] = ChildRecord(name="rpc_task-0", factory=lambda: None)
+    worker._children_by_pid[4242] = ChildProcessInfo(name="rpc_task-0", factory=lambda: None)
 
     worker._replace_child(4242)
 
@@ -177,9 +181,9 @@ def test_child_exit_during_shutdown_is_not_a_failure(worker):
 
 def test_sigchld_reaps_only_framework_children(worker, monkeypatch):
     worker._exiting = True
-    worker._children_by_pid[11] = ChildRecord(name="alive", factory=lambda: None)
-    worker._children_by_pid[22] = ChildRecord(name="dead", factory=lambda: None)
-    worker._children_by_pid[33] = ChildRecord(name="gone", factory=lambda: None)
+    worker._children_by_pid[11] = ChildProcessInfo(name="alive", factory=lambda: None)
+    worker._children_by_pid[22] = ChildProcessInfo(name="dead", factory=lambda: None)
+    worker._children_by_pid[33] = ChildProcessInfo(name="gone", factory=lambda: None)
     waited = []
 
     def fake_waitpid(pid, options):
@@ -194,6 +198,21 @@ def test_sigchld_reaps_only_framework_children(worker, monkeypatch):
 
     assert sorted(waited) == [11, 22, 33]
     assert list(worker._children_by_pid) == [11]
+
+
+def test_uvloop_watches_child_sentinels_instead_of_sigchld(worker):
+    uvloop = pytest.importorskip("uvloop")
+    loop = uvloop.new_event_loop()
+    worker.loop = loop
+    worker._spawn("short_lived", lambda: Process(target=time.sleep, args=(0.2,)))
+    try:
+        with pytest.raises(SystemExit) as exc:
+            worker._serve()
+    finally:
+        loop.close()
+
+    assert exc.value.code == 1
+    assert not worker._children_by_pid
 
 
 def _run_until_exit(worker, *later) -> int:
@@ -489,7 +508,7 @@ def test_stop_children_kills_a_child_that_ignores_its_stop_signal(worker, monkey
     monkeypatch.setattr(_shutdown, "CHILD_EXIT_GRACE_SECONDS", 0.3)
     child = _StubbornChild()
     child.start()
-    worker.children.append(ChildRecord(name="stubborn", factory=lambda: None, process=child))
+    worker.children.append(ChildProcessInfo(name="stubborn", factory=lambda: None, process=child))
     began = time.monotonic()
     try:
         time.sleep(0.2)

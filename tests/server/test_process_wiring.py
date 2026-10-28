@@ -23,10 +23,9 @@ from trpc_sdk.common import _process_helper
 from trpc_sdk.http import HttpServerTransport
 from trpc_sdk.common import bind_lifetime_to_parent
 from trpc_sdk.server import _server
-from trpc_sdk.server import _engine
+from trpc_sdk.server import _adapter
 from trpc_sdk.server._registry import RegistryThread
 from trpc_sdk.server._registry import start_service_registry
-from trpc_sdk.runtime._common import _healthy_checker
 from trpc_sdk.runtime._common._signals import run_server_signal_handle
 from trpc_sdk.transport import TrpcServerTransport
 from trpc_sdk.transport import UserProtocolTransport
@@ -56,17 +55,16 @@ class _FakeWorker:
 def _serve(monkeypatch, set_start_method):
     fake = _FakeWorker()
     monkeypatch.setattr(_server, "create_worker", lambda mode, engine: fake)
-    monkeypatch.setattr(_server, "execute_before", lambda: None)
+    monkeypatch.setattr(_server, "execute_before_in_parent", lambda: None)
     monkeypatch.setattr(_server, "execute_after_in_parent", lambda: None)
-    monkeypatch.setattr(_server._engine_module, "GLOBAL_SERVER_ENGINE", None)
     monkeypatch.setattr(multiprocessing, "set_start_method", set_start_method)
     server = _server.Server.__new__(_server.Server)
-    server.services = {}
-    server.opt = SimpleNamespace(mode="merge", close_wait_time=1500)
-    server.server_engine = SimpleNamespace(close=lambda: None)
+    server.service_adapters = {}
+    server.opt = SimpleNamespace(mode="merge", close_wait_time=1500, io_wait_count=2)
+    server.server_adapter = SimpleNamespace(close=lambda: None)
     server.worker = None
     server.close = False
-    server.serve(io_wait_count=2)
+    server.serve()
     return server, fake
 
 
@@ -101,7 +99,7 @@ def test_serve_registers_after_listen_and_drains_on_exit(served):
     assert isinstance(registry, partial)
     assert registry.func is start_service_registry and registry.args == (server,)
     assert worker.exit_callbacks == [server._shutdown_services]
-    assert worker.post_drain_callbacks == [server.server_engine.close]
+    assert worker.post_drain_callbacks == [server.server_adapter.close]
     assert worker.master_exit_callbacks == [run_server_signal_handle]
     assert worker.drain_seconds == pytest.approx(1.5)
     assert worker.io_wait_count == 2
@@ -149,44 +147,6 @@ def test_bind_lifetime_is_a_no_op_outside_forked_children(monkeypatch):
     bind_lifetime_to_parent()
 
 
-@pytest.fixture
-def heartbeat_tasks(monkeypatch):
-    monkeypatch.setattr(_healthy_checker.TrpcConfig.server_config(), "heartbeat_interval", 1)
-    monkeypatch.setattr(_healthy_checker, "_init_healthy_checker", None)
-    _healthy_checker.init_healthy_checker([SimpleNamespace(name="infer:0"), SimpleNamespace(name="infer:1")])
-    options = _healthy_checker._all_options()
-    yield options
-    for option in options:
-        for sock in option.child_pipe.socket_pair:
-            sock.close()
-
-
-def test_task_keeps_only_its_own_heartbeat_pipe(heartbeat_tasks):
-    kept = _healthy_checker.close_heartbeat_pipes(keep="infer:1")
-
-    assert kept is heartbeat_tasks[1]
-    assert all(sock.fileno() == -1 for sock in heartbeat_tasks[0].child_pipe.socket_pair)
-    assert kept.child_pipe.get_socket().fileno() != -1
-
-
-def test_non_task_child_closes_every_heartbeat_pipe(heartbeat_tasks):
-    assert _healthy_checker.close_heartbeat_pipes() is None
-    assert all(sock.fileno() == -1 for option in heartbeat_tasks for sock in option.child_pipe.socket_pair)
-
-
-def test_worker_monitors_heartbeats_on_its_own_loop(heartbeat_tasks):
-    loop = asyncio.new_event_loop()
-    try:
-        _healthy_checker.start_heartbeat_monitor(loop)
-        assert all(option.child_pipe.get_socket().fileno() == -1 for option in heartbeat_tasks)
-    finally:
-        pending = asyncio.all_tasks(loop)
-        for task in pending:
-            task.cancel()
-        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-        loop.close()
-
-
 def test_rpcz_side_pipe_carries_worker_id(monkeypatch):
     sent = []
     encoded = []
@@ -225,7 +185,7 @@ def test_star_import_resolves_every_name_in_all():
 def test_unavailable_listen_address_exits_with_failure(monkeypatch, network):
     monkeypatch.setattr(server_transport, "is_tcp_port_available", lambda host, port: False)
     monkeypatch.setattr(server_transport, "is_udp_port_available", lambda host, port: False)
-    engine = _engine.TrpcServerEngine(SimpleNamespace(service_num=1))
+    engine = _adapter.TrpcServerAdapter(SimpleNamespace(service_num=1))
     opts = BaseServerTransportOption()
     opts.set_address(("127.0.0.1", 20000))
     opts.set_network(network)
@@ -239,7 +199,7 @@ def test_unavailable_listen_address_exits_with_failure(monkeypatch, network):
 
 
 def test_user_protocol_transport_does_not_probe_the_address(monkeypatch):
-    engine = _engine.TrpcServerEngine(SimpleNamespace(service_num=1))
+    engine = _adapter.TrpcServerAdapter(SimpleNamespace(service_num=1))
     opts = BaseServerTransportOption()
     opts.set_address(("127.0.0.1", 20000))
     transport = UserProtocolTransport(lambda worker, index: None)
@@ -276,7 +236,7 @@ def test_udp_request_context_carries_receive_time():
                            get_extra_info=lambda key, default=None: ("127.0.0.1", 8000) if key == "sockname" else None)
 
     async def serve():
-        conn = transport.datagram_protocol_factory(SimpleNamespace(shared_pool=None))()
+        conn = transport.datagram_protocol_factory()()
         assert isinstance(conn, server_datagram.DefaultDatagramConnection)
         conn.connection_made(sock)
         conn.datagram_received(b"req", ("127.0.0.1", 30000))

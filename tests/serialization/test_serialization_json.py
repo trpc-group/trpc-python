@@ -14,11 +14,27 @@ from tests.helloworld_pb2 import HelloReply
 from tests.helloworld_pb2 import HelloRequest
 
 # Import JsonSerializer and JsonData for testing
-from trpc_sdk.codec.serialization_json import _PROTOBUF_VERSION
-from trpc_sdk.codec.serialization_json import _USE_NEW_PARAM
-from trpc_sdk.codec.serialization_json import JsonData
-from trpc_sdk.codec.serialization_json import JsonSerializer
-from trpc_sdk.codec.serialization_json import register_pb_json_format_kwargs
+from trpc_sdk.abc import BaseSerializer
+from trpc_sdk.serialization import JsonData
+from trpc_sdk.serialization import JsonSerializer
+from trpc_sdk.serialization import json_to_pb_kwargs
+from trpc_sdk.serialization import pb_to_json_kwargs
+from trpc_sdk.serialization._serialization import _PROTOBUF_VERSION
+from trpc_sdk.serialization._serialization import _USE_NEW_PARAM
+
+
+def register_pb_json_format_kwargs(pb_kwargs=None, json_kwargs=None):
+    """Update the serializer kwargs dicts in place.
+
+    An empty mapping clears that side so JsonSerializer falls back to its
+    protobuf-version defaults. ``None`` leaves that side unchanged.
+    """
+    if pb_kwargs is not None:
+        pb_to_json_kwargs.clear()
+        pb_to_json_kwargs.update(pb_kwargs)
+    if json_kwargs is not None:
+        json_to_pb_kwargs.clear()
+        json_to_pb_kwargs.update(json_kwargs)
 
 
 # JsonSerializer tests
@@ -483,9 +499,8 @@ def test_protobuf_serialization_with_version_compatibility():
 def test_protobuf_default_values_included():
     """Test that default values are included in serialization for scalar fields
 
-    Note: In proto3, empty repeated fields are not included in JSON output,
-    even with including_default_value_fields=True or always_print_fields_with_no_presence=True.
-    These parameters only affect scalar fields with default values.
+    Note: The JSON serializer asks protobuf to print fields with no presence,
+    so an empty repeated field is emitted as an empty list.
     """
     serializer = JsonSerializer()
 
@@ -502,9 +517,9 @@ def test_protobuf_default_values_included():
     assert "msg" in json_obj
     assert json_obj["msg"] == "Test"
 
-    # Empty repeated fields are NOT included in proto3 JSON output
-    # This is expected behavior regardless of the default value settings
-    assert "msgList" not in json_obj and "msg_list" not in json_obj
+    # Default-value printing includes an empty repeated field as [].
+    repeated = json_obj.get("msg_list", json_obj.get("msgList"))
+    assert repeated == []
 
     # Test with non-empty repeated field
     request2 = HelloRequest()
@@ -574,11 +589,9 @@ def test_json_data_field_default_factory():
 
 
 def test_serializer_inheritance():
-    """Test that JsonSerializer inherits from AbstractSerializer"""
-    from trpc_sdk.codec.serialization_abc import AbstractSerializer
-
+    """Test that JsonSerializer inherits from BaseSerializer"""
     serializer = JsonSerializer()
-    assert isinstance(serializer, AbstractSerializer)
+    assert isinstance(serializer, BaseSerializer)
 
 
 def test_protobuf_with_bytes_data():

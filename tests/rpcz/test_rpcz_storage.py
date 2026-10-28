@@ -6,28 +6,31 @@
 
 from types import SimpleNamespace
 
-from trpc_sdk.rpcz.span import Span
-from trpc_sdk.rpcz.span import SpanType
-from trpc_sdk.rpcz.storage import RPCZ_SERVER_REQ_SIZE_CTX_KEY
-from trpc_sdk.rpcz.storage import RPCZ_SERVER_RSP_SIZE_CTX_KEY
-from trpc_sdk.rpcz.storage import RPCZ_SERVER_SPAN_CTX_KEY
-from trpc_sdk.rpcz.storage import pop_all_spans
-from trpc_sdk.rpcz.storage import pop_sub_spans
-from trpc_sdk.rpcz.storage import prepare_server_span_for_dispatch
-from trpc_sdk.rpcz.storage import submit_server_span_on_dispatcher_post_io
-from trpc_sdk.rpcz.storage import submit_server_span_on_executor_post_io
-from trpc_sdk.rpcz.storage import submit_span
-from trpc_sdk.rpcz.storage import submit_sub_span
+from trpc_sdk.rpcz import RPCZ_SERVER_REQ_SIZE_CTX_KEY
+from trpc_sdk.rpcz import RPCZ_SERVER_RSP_SIZE_CTX_KEY
+from trpc_sdk.rpcz import RPCZ_SERVER_SPAN_CTX_KEY
+from trpc_sdk.rpcz import Span
+from trpc_sdk.rpcz import SpanType
+from trpc_sdk.rpcz import _storage as storage_mod
+from trpc_sdk.rpcz import pop_all_spans
+from trpc_sdk.rpcz import pop_sub_spans
+from trpc_sdk.rpcz import prepare_server_span_for_dispatch
+from trpc_sdk.rpcz import submit_server_span_on_dispatcher_post_io
+from trpc_sdk.rpcz import submit_server_span_on_executor_post_io
+from trpc_sdk.rpcz import submit_span
+from trpc_sdk.rpcz import submit_sub_span
 
 
 class _Ctx:
     def __init__(self):
         self.meta_data = {}
-        self.server_post_sched_recv_msg_us = 101
-        self.server_pre_sched_send_msg_us = 102
-        self.server_post_sched_send_msg_us = 103
-        self.server_pre_io_send_msg_us = 104
-        self.server_post_io_send_msg_us = 105
+        self.rpcz_data = SimpleNamespace(
+            server_post_sched_recv_msg_us=101,
+            server_pre_sched_send_msg_us=102,
+            server_post_sched_send_msg_us=103,
+            server_pre_io_send_msg_us=104,
+            server_post_io_send_msg_us=105,
+        )
 
     def with_meta_data(self, key, value):
         self.meta_data[key] = value
@@ -38,9 +41,13 @@ class _Ctx:
 
 def _reset_storage_state():
     # module-level containers are used by design; reset for test isolation
-    from trpc_sdk.rpcz import storage as storage_mod
     storage_mod._spans.clear()      # pylint: disable=protected-access
     storage_mod._sub_spans.clear()  # pylint: disable=protected-access
+
+
+def _patch_min_cost(monkeypatch, timecost_ms: int) -> None:
+    rpcz = SimpleNamespace(sample_minimum_timecost=timecost_ms)
+    monkeypatch.setattr(storage_mod.TrpcConfig, "global_config", staticmethod(lambda: SimpleNamespace(rpcz=rpcz)))
 
 
 def test_submit_and_pop_spans():
@@ -56,16 +63,7 @@ def test_submit_and_pop_spans():
 
 def test_submit_server_span_on_executor_post_io_merge_size_and_subspans(monkeypatch):
     _reset_storage_state()
-    monkeypatch.setattr(
-        "trpc_sdk.rpcz.storage.config",
-        SimpleNamespace(
-            global_config_obj=SimpleNamespace(
-                global_config=SimpleNamespace(
-                    rpcz=SimpleNamespace(sample_minimum_timecost=0),
-                ),
-            ),
-        ),
-    )
+    _patch_min_cost(monkeypatch, 0)
 
     server_span = Span(
         span_id=100,
@@ -113,16 +111,7 @@ def test_prepare_server_span_for_dispatch_merge_size_and_subspans():
 
 def test_submit_server_span_on_dispatcher_post_io_minimum_cost_filter(monkeypatch):
     _reset_storage_state()
-    monkeypatch.setattr(
-        "trpc_sdk.rpcz.storage.config",
-        SimpleNamespace(
-            global_config_obj=SimpleNamespace(
-                global_config=SimpleNamespace(
-                    rpcz=SimpleNamespace(sample_minimum_timecost=1000),
-                ),
-            ),
-        ),
-    )
+    _patch_min_cost(monkeypatch, 1000)
     span = Span(
         span_id=400,
         span_type=SpanType.SERVER,

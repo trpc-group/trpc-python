@@ -3,57 +3,40 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-"""Test server_conn_info module"""
+"""Inner IPC framing used between the I/O process and an rpc task."""
 
-from trpc_sdk.server.server_process_info import ProcessTaskInfo
-from trpc_sdk.transport.server_conn_info import InnerParser
-from trpc_sdk.transport.server_conn_info import inner_decode
-from trpc_sdk.transport.server_conn_info import inner_encode
+import pytest
+
+from trpc_sdk.exceptions import ServerDecodeError
+from trpc_sdk.runtime import ProcessTaskInfo
+from trpc_sdk.transport import InnerStreamParser
+from trpc_sdk.transport._cython import inner_decode_req
+from trpc_sdk.transport._cython import inner_encode_req
 
 
 def test_server_conn_info():
-    """Test server conn info"""
-    data = b'123'
-    encoded_data = inner_encode(data)
-    decoded_data = inner_decode(encoded_data)
-    assert decoded_data == data
+    """A complete frame round-trips; a short or corrupt buffer does not."""
+    body = b"123"
+    addr = b"127.0.0.1:8000|127.0.0.1:9000"
+    encoded = inner_encode_req(1, 2, 3, 4, addr, body)
+    fd, index, session_id, recv_time, addr_info, decoded = inner_decode_req(encoded)
+    assert (fd, index, session_id, recv_time, addr_info, decoded) == (1, 2, 3, 4, addr, body)
 
     task_info = ProcessTaskInfo()
-    assert len(task_info.task_name) == 0
-    assert len(task_info.task_pipe_conn) == 0
+    assert task_info.task_name == []
+    assert task_info.task_pipe_conn == []
 
-    parser = InnerParser()
-    assert parser.read() is None
-    parser = InnerParser()
-    parser.feeds_data(b'1')
-    assert parser.read() is None
-    parser = InnerParser()
-    parser.feeds_data(b'\x05"\x00\x00\x00\t1')
-    assert parser.read() is None
-    parser = InnerParser()
-    parser.feeds_data(encoded_data)
-    assert parser.read().content == encoded_data
+    parser = InnerStreamParser()
+    assert parser.read() == []
 
-    try:
-        parser = InnerParser()
-        parser.feeds_data(b'\x04"\x00\x00\x00\t123123')
-        parser.read()
-        assert False
-    except Exception:  # pylint: disable=broad-except
-        assert True
+    parser.feeds_data(encoded[:1])
+    assert parser.read() == []
 
-    try:
-        parser = InnerParser()
-        parser.feeds_data(b'\x05"\x00\x00\x00\t123123')
-        parser.read()
-        assert False
-    except Exception as err:  # pylint: disable=broad-except
-        print(err)
-        assert True
+    parser.feeds_data(encoded[1:])
+    assert parser.read() == [encoded]
+    assert parser.read() == []
 
-    try:
-        inner_decode(b'\x05"\x00\x00\x00\t1')
-        assert False
-    except Exception as err:  # pylint: disable=broad-except
-        print(err)
-        assert True
+    bad = InnerStreamParser()
+    bad.feeds_data(b"\x00" * 32)
+    with pytest.raises(ServerDecodeError):
+        bad.read()

@@ -39,19 +39,19 @@ def test_ip_type():
 
 def test_port():
     """Test port"""
-    assert port_valid(22345)
-    assert not port_valid(2234500)
-    assert not tcp_port_valid('127.0.0.1', 2234500)
-    assert tcp_port_valid("127.0.0.1", 12345)
-    assert tcp_port_valid("::1", 12345)
-    assert udp_port_valid("127.0.0.1", 12345)
-    assert not udp_port_valid("::1", 1234500)
-    assert real_tcp_port_valid("127.0.0.1", 12345)
-    assert not real_tcp_port_valid("127..0.0.1", 12345)
-    assert real_udp_port_valid("127.0.0.1", 12345)
-    assert not real_udp_port_valid("127..0.0.1", 12345)
+    assert is_port_valid(22345)
+    assert not is_port_valid(2234500)
+    assert not is_tcp_port_available('127.0.0.1', 2234500)
+    assert is_tcp_port_available("127.0.0.1", 12345)
+    assert is_tcp_port_available("::1", 12345)
+    assert is_udp_port_available("127.0.0.1", 12345)
+    assert not is_udp_port_available("::1", 1234500)
+    assert is_tcp_port_available("127.0.0.1", 12345)
+    assert not is_tcp_port_available("127..0.0.1", 12345)
+    assert is_udp_port_available("127.0.0.1", 12345)
+    assert not is_udp_port_available("127..0.0.1", 12345)
     port = find_free_port()
-    assert port_valid(port)
+    assert is_port_valid(port)
 
 
 def test_unix():
@@ -82,7 +82,8 @@ def test_socket_state():
     assert is_valid_socket(sock)
     assert not is_valid_socket(None)
     assert not is_close_wait(sock)
-    assert "TCP_CLOSE" == get_tcp_state(sock)
+    if hasattr(socket, "TCP_INFO"):
+        assert "TCP_CLOSE" == get_tcp_state(sock)
     set_close_wait(sock, 2)
     set_default_close_wait(sock)
     set_no_close_wait(sock)

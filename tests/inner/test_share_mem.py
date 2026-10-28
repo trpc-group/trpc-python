@@ -6,20 +6,23 @@
 """Test meme share"""
 import multiprocessing
 
-from trpc_sdk.share_mem.share_mem import RegisterStatus
-from trpc_sdk.share_mem.share_mem import dec_io_wait_count
-from trpc_sdk.share_mem.share_mem import get_register_status
-from trpc_sdk.share_mem.share_mem import register_enable
-from trpc_sdk.share_mem.share_mem import register_spinlock
-from trpc_sdk.share_mem.share_mem import remove_lock_file
-from trpc_sdk.share_mem.share_mem import set_register_status
-from trpc_sdk.share_mem.share_mem import wait_notify_in_io
-from trpc_sdk.share_mem.share_mem import warm_up
+import pytest
+
+from trpc_sdk.utils import RegisterStatus
+from trpc_sdk.utils import get_register_status
+from trpc_sdk.utils import inc_io_wait_count
+from trpc_sdk.utils import register_enable
+from trpc_sdk.utils import register_spinlock
+from trpc_sdk.utils import remove_lock_file
+from trpc_sdk.utils import set_register_status
+from trpc_sdk.utils import wait_notify_in_io
+from trpc_sdk.utils import warm_up
 
 
 def test_get_register_status():
     """Test register"""
     warm_up()
+    set_register_status(0)
     assert get_register_status() == 0
     remove_lock_file()
 
@@ -43,10 +46,12 @@ def test_register_enable():
     remove_lock_file()
 
 
-def test_register_loop():
+@pytest.mark.asyncio
+async def test_register_loop():
     """Test register loop"""
+    warm_up()
     register_enable()
-    register_spinlock()
+    await register_spinlock()
     remove_lock_file()
 
 
@@ -56,11 +61,12 @@ def _func(interval: int):
         wait_notify_in_io(3)
         print("wait for dispatcher end")
         return
-    print("dec_io_wait_count")
-    dec_io_wait_count()
+    print("inc_io_wait_count")
+    inc_io_wait_count()
 
 
 def test_dispatcher_wait():
     """Test dispatcher wait"""
-    with multiprocessing.Pool(5) as p:
-        p.map(_func, [0, 1, 2, 3])
+    multiprocessing.set_start_method("fork", force=True)
+    with multiprocessing.Pool(5) as pool:
+        pool.map(_func, [0, 1, 2, 3])

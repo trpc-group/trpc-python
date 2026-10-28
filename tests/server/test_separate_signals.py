@@ -35,7 +35,7 @@ def worker(engine_factory):
 
 @pytest.fixture
 def rpc_task(worker):
-    task = RpcTaskProcess(0, worker.rpc_task_pipes, worker._ready_flags, worker.server_engine)
+    task = RpcTaskProcess(0, worker.rpc_task_pipes, worker._ready_flags, worker.server_adapter)
     yield task
     if task.loop is not None and not task.loop.is_closed():
         task.loop.remove_signal_handler(signal.SIGUSR1)
@@ -153,7 +153,7 @@ def test_second_sigterm_cuts_the_drain_resignals_rpc_tasks_and_still_runs_post_d
 
     assert code == 0
     assert time.monotonic() - began < 5
-    assert signalled == [worker._rpc_records, worker._rpc_records]
+    assert signalled == [worker._rpc_children, worker._rpc_children]
     assert posted == [True]
 
 

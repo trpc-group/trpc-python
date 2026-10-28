@@ -9,16 +9,9 @@ from unittest.mock import MagicMock
 import pytest
 from aiohttp import hdrs
 
-from trpc_sdk.exceptions import TRPCBaseError, ServerDecodeError
-from trpc_sdk.http._utils import InvalidURL, UrlParser
-from trpc_sdk.context import TrpcContext
-from trpc_sdk.http import _api
-from trpc_sdk.http._http_response import HttpClientRspHeader, TrpcHttpResponse
-from trpc_sdk.http.dict_pb_convertor import dict_to_protobuf
-from trpc_sdk.http.http_ctx_manager import _BaseRequestContextManager, _RequestContextManager
-from trpc_sdk.http.serialization_form import FormSerializer
-
-from .. import helloworld_pb2
+from trpc_sdk.exceptions import TrpcException
+from trpc_sdk.http import InvalidURL
+from trpc_sdk.http import UrlParser
 
 
 class TestUrlParser:
@@ -158,7 +151,7 @@ class TestUrlParser:
     def test_invalid_url_exception_type(self):
         """Test InvalidURL exception is TRPCBaseError"""
         parser = UrlParser('invalid_url')
-        with pytest.raises(TRPCBaseError):
+        with pytest.raises(TrpcException):
             parser.parse()
 
     def test_parse_url_with_port(self):

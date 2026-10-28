@@ -14,7 +14,7 @@ from trpc_sdk.abc import BaseClientTransportOption
 from trpc_sdk.abc import BaseServerProtocolParser
 from trpc_sdk.abc import BaseServerTransport
 from trpc_sdk.abc import BaseServerTransportOption
-from trpc_sdk.abc import BaseService
+from trpc_sdk.abc import BaseServiceAdapter
 from trpc_sdk.abc import TrpcContext
 
 
@@ -36,7 +36,7 @@ class MockServerTransport(BaseServerTransport):
 def test_server_transport_option_defaults():
     """Defaults of the server transport option."""
     options = BaseServerTransportOption()
-    assert options.service is None
+    assert options.service_adapter is None
     assert options.address == ("", 0)
     assert options.port == 8000
     assert options.parser is None
@@ -67,8 +67,8 @@ def test_server_transport_option_setters():
     options.set_parser(parser)
     assert options.parser is parser
 
-    options.set_service(BaseService())
-    assert options.service is not None
+    options.set_service_adapter(BaseServiceAdapter())
+    assert options.service_adapter is not None
     options.set_service_name("service_name")
     assert options.service_name == "service_name"
     options.set_network("udp")

@@ -6,20 +6,21 @@
 """Test metrics"""
 import pytest
 
-from trpc_sdk.abc import metrics
-from trpc_sdk.abc.metrics import ActiveData
-from trpc_sdk.abc.metrics import CallResult
-from trpc_sdk.abc.metrics import CustomData
-from trpc_sdk.abc.metrics import PassiveData
-from trpc_sdk.abc.metrics import StatPolicy
-from trpc_sdk.telemetry.metrics import report_active
-from trpc_sdk.telemetry.metrics import report_attr
-from trpc_sdk.telemetry.metrics import report_custom
-from trpc_sdk.telemetry.metrics import report_passive
-from trpc_sdk.telemetry.metrics import set_default_metrics
+from trpc_sdk.abc import ActiveData
+from trpc_sdk.abc import BaseMetrics
+from trpc_sdk.abc import CallResult
+from trpc_sdk.abc import CustomData
+from trpc_sdk.abc import PassiveData
+from trpc_sdk.abc import StatPolicy
+from trpc_sdk.abc import StatValue
+from trpc_sdk.telemetry import report_active
+from trpc_sdk.telemetry import report_attr
+from trpc_sdk.telemetry import report_custom
+from trpc_sdk.telemetry import report_passive
+from trpc_sdk.telemetry import set_default_metrics
 
 
-class _TestMetrics(metrics.BaseMetrics):
+class _TestMetrics(BaseMetrics):
 
     def report_active(self, active_data: ActiveData, call_result: CallResult) -> bool:
         print(f"report_active -> active_data: {active_data} call_result: {call_result}")
@@ -48,6 +49,6 @@ async def test_metrics():
     assert report_active(ActiveData(), CallResult())
     assert report_passive(PassiveData(), CallResult())
     assert report_attr("k", 1, StatPolicy.SUM)
-    custom = CustomData("custom", ["dim"], [metrics.StatValue(1.1, 1, StatPolicy.SUM)])
+    custom = CustomData("custom", ["dim"], [StatValue(1.1, 1, StatPolicy.SUM)])
     custom.tags = {"a": "b"}
     assert report_custom(custom)

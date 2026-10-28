@@ -11,45 +11,52 @@ import asyncio
 
 import pytest
 
+from trpc_sdk.abc import BaseServerTransportOption
 from trpc_sdk.http import HttpServerTransport
+from trpc_sdk.runtime import ResourceKind
+from trpc_sdk.runtime import current_thread_model
 from trpc_sdk.runtime._common import _shutdown
-from trpc_sdk.runtime._constants import AddressKind
-from trpc_sdk.runtime._listeners import classify_address
-from trpc_sdk.runtime._listeners import pop_loop_resources
 from trpc_sdk.runtime._process import _rpc_task
 from trpc_sdk.runtime._process import _separate_worker
 from trpc_sdk.runtime._process._rpc_task import RpcTaskProcess
+from trpc_sdk.runtime._process._separate_worker import SeparateForwardTransport
 from trpc_sdk.runtime._process._separate_worker import SeparateWorker
+from trpc_sdk.transport._server import StreamListener
 from trpc_sdk.transport import TrpcServerTransport
+from trpc_sdk.transport import UserProtocolTransport
 from trpc_sdk.transport import register_protocol_handle
-from trpc_sdk.transport._server import _user_transport
+from trpc_sdk.transport._server import _custom_transport
 
 
 @pytest.fixture
 def custom_protocol(monkeypatch):
     calls = []
-    monkeypatch.setattr(_user_transport, "_PROTOCOL_HANDLES", {})
+    monkeypatch.setattr(_custom_transport, "_PROTOCOL_HANDLES", {})
     register_protocol_handle("custom", lambda worker, index: calls.append((worker, index)))
     return calls
 
 
-def test_classify_address_user_protocol_then_network(engine_factory, custom_protocol):
+def test_only_trpc_over_tcp_is_ipc_forwardable(engine_factory, custom_protocol):
     worker = SeparateWorker(engine_factory([
         ("tcp", "custom"),
         ("tcp,http", "trpc"),
         ("udp", "trpc"),
-        ("http", "http"),
+        ("tcp", "http"),
     ]))
 
-    kinds = [classify_address(worker, i) for i in range(4)]
+    transports = worker.transports
 
-    assert kinds == [AddressKind.USER, AddressKind.TCP, AddressKind.UDP, AddressKind.HTTP]
+    assert isinstance(transports[0], UserProtocolTransport)
+    assert [t.ipc_forwardable for t in transports] == [False, True, False, False]
 
 
-def test_classify_address_flags_an_unservable_network(engine_factory):
-    worker = SeparateWorker(engine_factory([("sctp", "trpc")]))
+def test_check_endpoint_rejects_an_unservable_network():
+    opts = BaseServerTransportOption()
+    opts.set_network("sctp")
+    transport = TrpcServerTransport()
+    transport.bind(opts)
 
-    assert classify_address(worker, 0) is AddressKind.UNKNOWN
+    assert transport.check_endpoint() is False
 
 
 def test_register_protocol_handle_is_exported():
@@ -61,26 +68,27 @@ def test_register_protocol_handle_is_exported():
 
 
 def test_separate_listen_serves_only_tcp_with_its_own_factory(monkeypatch, engine_factory):
-    worker = SeparateWorker(engine_factory([("tcp", "trpc"), ("udp", "trpc"), ("http", "http")]))
+    worker = SeparateWorker(engine_factory([("tcp", "trpc"), ("udp", "trpc"), ("tcp", "http")]))
     listened = []
-    monkeypatch.setattr(TrpcServerTransport, "listen",
-                        lambda self, ctx: listened.append((self.opts.address, ctx)))
-    monkeypatch.setattr(HttpServerTransport, "listen", lambda self, ctx: pytest.fail("http listened"))
+    bound_opts = worker.transports[0].opts
+    monkeypatch.setattr(TrpcServerTransport, "listen", lambda self: listened.append(self))
+    monkeypatch.setattr(HttpServerTransport, "listen", lambda self: pytest.fail("http listened"))
     worker.loop = object()
 
     worker._listen()
 
-    ((address, ctx),) = listened
-    assert address == worker.addresses[0]
-    assert ctx.loop is worker.loop and not ctx.serving_loops
-    assert ctx.protocol_factory.keywords["index"] == 0
+    (forward,) = listened
+    assert isinstance(forward, SeparateForwardTransport)
+    assert forward is worker.transports[0]
+    assert forward.opts is bound_opts
+    assert forward.protocol_factory().keywords["index"] == 0
     assert worker._listening == [(worker.transports[0], worker.loop)]
 
 
 def test_separate_stop_accepting_stops_the_transports(monkeypatch, engine_factory):
     worker = SeparateWorker(engine_factory([("tcp", "trpc")]))
     stopped = []
-    monkeypatch.setattr(TrpcServerTransport, "listen", lambda self, ctx: None)
+    monkeypatch.setattr(TrpcServerTransport, "listen", lambda self: None)
     monkeypatch.setattr(TrpcServerTransport, "stop", lambda self: stopped.append(self))
     monkeypatch.setattr(worker, "_signal", lambda records: None)
     worker.loop = object()
@@ -92,9 +100,8 @@ def test_separate_stop_accepting_stops_the_transports(monkeypatch, engine_factor
     assert stopped == [worker.transports[0]]
 
 
-@pytest.mark.parametrize("network,protocol", [("sctp", "trpc"), ("tcp", "noparser")])
-def test_separate_rejects_unservable_address_before_fork(monkeypatch, engine_factory, network, protocol):
-    worker = SeparateWorker(engine_factory([(network, protocol)]))
+def test_separate_rejects_unframeable_address_before_fork(monkeypatch, engine_factory):
+    worker = SeparateWorker(engine_factory([("tcp", "noparser")]))
     forked = []
     monkeypatch.setattr(_separate_worker.BaseWorker, "_spawn_children", lambda self: forked.append(True))
 
@@ -104,32 +111,36 @@ def test_separate_rejects_unservable_address_before_fork(monkeypatch, engine_fac
 
 
 def test_rpc_task_starts_its_own_listeners(monkeypatch, engine_factory, custom_protocol):
-    engine = engine_factory([("tcp", "trpc"), ("udp", "trpc"), ("http", "http"), ("tcp", "custom")])
+    engine = engine_factory([("tcp", "trpc"), ("udp", "trpc"), ("tcp", "http"), ("tcp", "custom")])
     worker = SeparateWorker(engine)
     worker._create_rpc_task_pipes()
     task = RpcTaskProcess(0, worker.rpc_task_pipes, worker._ready_flags, engine)
-    task.loop = object()
+    task.loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(task.loop)
     started = []
 
-    def _udp_listen(self, ctx):
-        started.append(("udp", ctx.index, ctx.reuse_port))
-        self.keep_loop_resource(None, "endpoint")
+    def _udp_listen(self):
+        model = current_thread_model()
+        started.append(("udp", task.transports.index(self), model.reuse_port))
+        model.keep_resource(model.acceptor, "endpoint", ResourceKind.ENDPOINT)
 
-    def _http_listen(self, ctx):
-        started.append(("http", ctx.http_runner_factory.args[1:], ctx.reuse_port))
-        self.keep_loop_resource(None, "runner")
+    def _http_listen(self):
+        model = current_thread_model()
+        started.append(("http", task.transports.index(self), model.reuse_port))
+        model.keep_resource(model.acceptor, "runner", ResourceKind.RUNNER)
 
     monkeypatch.setattr(TrpcServerTransport, "listen", _udp_listen)
     monkeypatch.setattr(HttpServerTransport, "listen", _http_listen)
-    monkeypatch.setattr(_rpc_task, "create_http_msg_handle", lambda w, i: f"handle{i}")
 
+    task._install_thread_model()
     task._start_own_listeners()
 
-    assert started == [("udp", 1, True), ("http", (2, "handle2"), True)]
+    assert started == [("udp", 1, True), ("http", 2, True)]
     assert custom_protocol == [(task, 3)]
     assert task._user_transports == [task.transports[3]]
-    assert task._resource_transports == [task.transports[1], task.transports[2]]
-    assert pop_loop_resources(task._resource_transports, None) == ["endpoint", "runner"]
+    assert task.thread_model.pop_resources(task.thread_model.acceptor) == ["endpoint", "runner"]
+    asyncio.set_event_loop(None)
+    task.loop.close()
     for pipes in worker.rpc_task_pipes:
         pipes.close()
 
@@ -152,13 +163,16 @@ def test_rpc_task_exit_destroys_user_transports_after_on_stop(monkeypatch, engin
     monkeypatch.setattr(transport, "destroy", _destroy)
     monkeypatch.setattr(_rpc_task, "run_stop_hooks", _stop_hooks)
     loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     task.loop = loop
     task._thread_info = object()
     try:
+        task._install_thread_model()
         task._start_own_listeners()
         task._on_graceful_exit()
         task._on_graceful_exit()
     finally:
+        asyncio.set_event_loop(None)
         loop.close()
         for pipes in worker.rpc_task_pipes:
             pipes.close()
@@ -196,23 +210,17 @@ def test_rpc_task_runs_worker_exit_callbacks(monkeypatch, engine_factory):
     assert exc.value.code == 0
 
 
-def test_transport_stop_schedules_site_stop():
-    scheduled = []
+def test_transport_stop_closes_every_listener_once():
+    closed = []
 
-    class _Site:
-        async def stop(self):
-            return None
-
-    class _Loop:
-        def create_task(self, coro):
-            scheduled.append(coro)
-            coro.close()
+    class _Acceptor:
+        def close(self):
+            closed.append(self)
 
     transport = HttpServerTransport()
-    transport.keep_site(_Loop(), _Site())
-    transport.keep_site(_Loop(), _Site())
+    transport._listeners = [StreamListener(acceptor=_Acceptor()), StreamListener(acceptor=_Acceptor())]
 
     transport.stop()
     transport.stop()
 
-    assert len(scheduled) == 2
+    assert len(closed) == 2

@@ -357,6 +357,19 @@ class TestAddressUtilities:
         assert local_addr == ("[::1]", 8080)
         assert peer_addr == ("[2001:db8::1]", 9090)
 
+    def test_parse_addr_info_unix_path(self):
+        """A Unix sockname has no port. An unbound peer is an empty string."""
+        mock_transport = Mock()
+        mock_transport.get_extra_info.side_effect = lambda key: {
+            "sockname": "/tmp/hellostream-separate.sock",
+            "peername": "",
+        }[key]
+
+        local_addr, peer_addr = parse_addr_info_from_bytes(make_addr_info_to_bytes(mock_transport))
+
+        assert local_addr == ("/tmp/hellostream-separate.sock", 0)
+        assert peer_addr == ("0.0.0.0", 0)
+
     def test_parse_addr_info_from_bytes_invalid(self):
         """Verify invalid byte data raises appropriate errors."""
         # Missing separator

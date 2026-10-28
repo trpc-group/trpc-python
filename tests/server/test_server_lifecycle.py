@@ -3,16 +3,20 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-"""Lifecycle-only tests for Server without starting real processes."""
-import multiprocessing
+"""Lifecycle of Server.serve and the worker exit template that replaced the master."""
+
+import os
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-import trpc_sdk.server.server as server_mod
-from trpc_sdk.server.option import ServerOption
-from trpc_sdk.server.server import Server
+from trpc_sdk.runtime import MergeWorker
+from trpc_sdk.server import Server
+from trpc_sdk.server import ServerOption
+from trpc_sdk.server import TrpcServerAdapter
+from trpc_sdk.server import _server as server_mod
 
 
 def _server():
@@ -24,87 +28,118 @@ def _server():
     return Server(opts)
 
 
-def test_serve_logs_set_start_method_runtime_error_and_keyboard_interrupt(monkeypatch):
+def _worker():
+    return MergeWorker(TrpcServerAdapter(ServerOption()))
+
+
+def test_serve_logs_set_start_method_and_runs_the_worker(monkeypatch):
     srv = _server()
-    loop = MagicMock()
-    loop.run_forever.side_effect = KeyboardInterrupt
-    monkeypatch.setattr(server_mod, "get_or_create_event_loop", lambda: loop)
-    monkeypatch.setattr(multiprocessing, "set_start_method", MagicMock(side_effect=RuntimeError("set")))
-    monkeypatch.setattr(multiprocessing, "get_start_method", lambda *_: "fork")
-    monkeypatch.setattr(server_mod.logger, "error", MagicMock())
-    monkeypatch.setattr(server_mod.asyncio, "set_event_loop", MagicMock())
-    monkeypatch.setattr(server_mod, "init_healthy_checker", MagicMock())
-    monkeypatch.setattr(srv, "_handle_sys_signals", MagicMock())
-    srv.server_engine.init_processes = MagicMock()
-    srv.server_engine.start_processes = MagicMock()
-    srv.server_engine.is_dispatcher = MagicMock(return_value=True)
-    srv.server_engine.worker_process_list = []
-    srv.server_engine.task_process_list = []
+    worker = MagicMock()
+    worker.ready_callbacks = []
+    worker.exit_callbacks = []
+    worker.post_drain_callbacks = []
+    worker.master_exit_callbacks = []
+    monkeypatch.setattr(server_mod, "create_worker", lambda mode, adapter: worker)
+    monkeypatch.setattr(server_mod.multiprocessing, "set_start_method", MagicMock(side_effect=RuntimeError("set")))
+    monkeypatch.setattr(server_mod.multiprocessing, "get_start_method", lambda *_: "fork")
+    logged = MagicMock()
+    monkeypatch.setattr(server_mod.logger, "error", logged)
 
     srv.serve()
 
-    server_mod.logger.error.assert_called_once()
-    loop.stop.assert_called_once()
+    logged.assert_called()
+    assert "set" in logged.call_args.args[1]
+    worker._spawn_children.assert_called_once()
+    worker.run.assert_called_once()
+    assert worker.drain_seconds == 0
+    assert srv.worker is worker
 
 
-def test_handle_master_exit_collects_service_close_results(monkeypatch):
+def test_serve_copies_close_wait_time_onto_the_worker(monkeypatch):
     srv = _server()
-    close_result = object()
-    srv.services = {
-        "async": SimpleNamespace(close=MagicMock(return_value=close_result)),
-        "sync": SimpleNamespace(close=MagicMock(return_value=None)),
-    }
-    srv.opt.loop = MagicMock()
-    srv.server_engine.close = MagicMock()
-    srv.kill = MagicMock()
-    ensure_future = MagicMock()
-    monkeypatch.setattr(server_mod.asyncio, "ensure_future", ensure_future)
-    monkeypatch.setattr(server_mod, "run_server_signal_handle", MagicMock())
+    srv.opt.close_wait_time = 2000
+    worker = MagicMock()
+    worker.ready_callbacks = []
+    worker.exit_callbacks = []
+    worker.post_drain_callbacks = []
+    worker.master_exit_callbacks = []
+    monkeypatch.setattr(server_mod, "create_worker", lambda mode, adapter: worker)
 
-    srv.handle_master_exit(15, None)
+    srv.serve()
 
-    assert srv.close is True
-    queued = ensure_future.call_args.args[0]
-    assert queued.cr_frame.f_locals["tasks"] == [close_result]
-    queued.close()
-    srv.server_engine.close.assert_called_once()
-    srv.kill.assert_called_once()
+    assert worker.drain_seconds == 2.0
+    assert worker.io_wait_count == srv.opt.io_wait_count
 
 
-def test_handle_child_exit_reboots_known_child():
-    srv = _server()
-    srv.get_exit_child_pid = MagicMock(return_value=42)
-    srv.server_engine.find_child_process = MagicMock(return_value=True)
-    srv.server_engine.restart_child_process = MagicMock()
+def test_shutdown_runs_exit_then_post_drain_then_master():
+    worker = _worker()
+    worker.loop = None
+    worker.drain_seconds = 0
+    order = []
+    worker.exit_callbacks.append(lambda: order.append("exit"))
+    worker.post_drain_callbacks.append(lambda: order.append("post"))
+    worker.master_exit_callbacks.append(lambda: order.append("master"))
+    worker._on_drained = lambda: order.append("drained")
 
-    srv.handle_child_exit(17, None)
+    with pytest.raises(SystemExit) as raised:
+        worker._handle_sigterm()
 
-    srv.server_engine.restart_child_process.assert_called_once_with(42)
-
-
-def test_handle_child_exit_stops_master_when_reboot_disabled():
-    srv = _server()
-    srv.opt.reboot_child = False
-    srv.get_exit_child_pid = MagicMock(return_value=42)
-    srv.handle_master_exit = MagicMock()
-
-    srv.handle_child_exit(17, "frame")
-
-    srv.handle_master_exit.assert_called_once_with(17, "frame")
+    assert raised.value.code == 0
+    assert order == ["exit", "post", "master", "drained"]
 
 
-def test_handle_child_exit_childprocesserror_stops_master():
-    srv = _server()
-    srv.get_exit_child_pid = MagicMock(side_effect=ChildProcessError)
-    srv.handle_master_exit = MagicMock()
+@pytest.mark.asyncio
+async def test_drain_waits_close_wait_time():
+    worker = _worker()
+    worker.drain_seconds = 0.05
+    worker._drain_cut = __import__("asyncio").Event()
+    started = time.monotonic()
 
-    srv.handle_child_exit(17, None)
+    await worker._shutdown()
 
-    srv.handle_master_exit.assert_called_once_with(17, None)
+    assert time.monotonic() - started >= 0.04
 
 
-def test_kill_uses_os_exit(monkeypatch):
-    exit_mock = MagicMock()
-    monkeypatch.setattr(server_mod.os, "_exit", exit_mock)
-    Server.kill()
-    exit_mock.assert_called_once_with(0)
+def test_dead_child_takes_the_worker_down():
+    worker = _worker()
+    child = SimpleNamespace(name="task", process=SimpleNamespace(pid=42), exited=False)
+    worker._children_by_pid[42] = child
+    called = []
+    worker._handle_sigterm = lambda: called.append("exit")
+
+    worker._replace_child(42)
+
+    assert called == ["exit"]
+    assert worker._exit_code == 1
+    assert child.exited is True
+    assert 42 not in worker._children_by_pid
+
+
+def test_reboot_child_true_restarts_instead_of_exiting():
+    """The flag is ignored in production; the branch still rebuilds the child when forced."""
+    worker = _worker()
+    worker.reboot_child = True
+    started = []
+    child = SimpleNamespace(name="task", process=None, exited=False, factory=lambda: SimpleNamespace(start=lambda: started.append("start"), pid=7))
+    worker._children_by_pid[42] = child
+
+    worker._replace_child(42)
+
+    assert started == ["start"]
+    assert worker._exit_code == 0
+    assert child.exited is True
+
+
+def test_reap_treats_child_process_error_as_gone(monkeypatch):
+    monkeypatch.setattr(os, "waitpid", MagicMock(side_effect=ChildProcessError))
+    assert MergeWorker._reap(42) is True
+
+
+def test_exit_killer_uses_os_exit():
+    worker = _worker()
+    worker._arm_exit_killer()
+    try:
+        assert worker._exit_killer is not None
+        assert worker._exit_killer.daemon is True
+    finally:
+        worker._exit_killer.cancel()

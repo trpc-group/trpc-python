@@ -6,17 +6,15 @@
 
 import pytest
 
-from trpc_sdk.codec.compress import CompressType
-from trpc_sdk.codec.compress import compress
-from trpc_sdk.codec.compress import decompress
-from trpc_sdk.codec.compress import get_compress
-from trpc_sdk.codec.compress_abc import AbstractCompress
-from trpc_sdk.codec.compress_gzip import CompressGZip
-from trpc_sdk.codec.compress_noop import CompressNoop
-from trpc_sdk.codec.compress_snappy import CompressSnappy
-from trpc_sdk.codec.compress_snappy import CompressStreamSnappy
-from trpc_sdk.codec.compress_zlib import CompressZlib
-from trpc_sdk.plugin import PluginType
+from trpc_sdk.compressor import CompressGZip
+from trpc_sdk.compressor import CompressNoop
+from trpc_sdk.compressor import CompressSnappy
+from trpc_sdk.compressor import CompressStreamSnappy
+from trpc_sdk.compressor import CompressType
+from trpc_sdk.compressor import CompressZlib
+from trpc_sdk.compressor import compress
+from trpc_sdk.compressor import decompress
+from trpc_sdk.compressor import get_compress
 
 
 def test_class_attribute_access():
@@ -25,27 +23,25 @@ def test_class_attribute_access():
     assert CompressType.Gzip == 1
     assert CompressType.Snappy == 2
     assert CompressType.ZLib == 3
-    assert CompressType.TRPC_SNAPPY_STREAM_COMPRESS == 4
-    assert CompressType.TRPC_SNAPPY_BLOCK_COMPRESS == 5
-    assert CompressType.TRPC_LZ4_FRAME_COMPRESS == 6
-    assert CompressType.TRPC_LZ4_BLOCK_COMPRESS == 7
+    assert CompressType.SnappyStream == 4
+    assert CompressType.SnappyBlock == 5
+    assert CompressType.Lz4Frame == 6
+    assert CompressType.Lz4Block == 7
+    assert CompressType.Zstd == 8
 
 
 def test_instance_attribute_access():
     """Test accessing instance attributes."""
     compress_type = CompressType()
-    assert compress_type.TRPC_DEFAULT_COMPRESS == 0
-    assert compress_type.TRPC_GZIP_COMPRESS == 1
-    assert compress_type.TRPC_SNAPPY_COMPRESS == 2
-    assert compress_type.TRPC_ZLIB_COMPRESS == 3
     assert compress_type.Noop == 0
     assert compress_type.Gzip == 1
     assert compress_type.Snappy == 2
     assert compress_type.ZLib == 3
-    assert compress_type.TRPC_SNAPPY_STREAM_COMPRESS == 4
-    assert compress_type.TRPC_SNAPPY_BLOCK_COMPRESS == 5
-    assert compress_type.TRPC_LZ4_FRAME_COMPRESS == 6
-    assert compress_type.TRPC_LZ4_BLOCK_COMPRESS == 7
+    assert compress_type.SnappyStream == 4
+    assert compress_type.SnappyBlock == 5
+    assert compress_type.Lz4Frame == 6
+    assert compress_type.Lz4Block == 7
+    assert compress_type.Zstd == 8
 
 
 def test_attribute_not_found():
@@ -62,9 +58,9 @@ def test_get_compress():
     assert isinstance(compressor, CompressGZip)
     compressor = get_compress(CompressType.Snappy)
     assert isinstance(compressor, CompressSnappy)
-    compressor = get_compress(CompressType.TRPC_SNAPPY_STREAM_COMPRESS)
+    compressor = get_compress(CompressType.SnappyStream)
     assert isinstance(compressor, CompressStreamSnappy)
-    compressor = get_compress(CompressType.TRPC_SNAPPY_BLOCK_COMPRESS)
+    compressor = get_compress(CompressType.SnappyBlock)
     assert isinstance(compressor, CompressSnappy)
     compressor = get_compress(CompressType.ZLib)
     assert isinstance(compressor, CompressZlib)
@@ -81,30 +77,33 @@ def test_compress():
     decompress_result = decompress(CompressType.Noop, compress_result)
     assert decompress_result == src
 
-    compress_result = compress(CompressType.Snappy, src)
-    decompress_result = decompress(CompressType.Snappy, compress_result)
-    assert decompress_result == src
-
-    compress_result = compress(CompressType.TRPC_SNAPPY_STREAM_COMPRESS, src)
-    decompress_result = decompress(CompressType.TRPC_SNAPPY_STREAM_COMPRESS, compress_result)
-    assert decompress_result == src
-
-    compress_result = compress(CompressType.TRPC_SNAPPY_BLOCK_COMPRESS, src)
-    decompress_result = decompress(CompressType.TRPC_SNAPPY_BLOCK_COMPRESS, compress_result)
-    assert decompress_result == src
-
     compress_result = compress(CompressType.ZLib, src)
     decompress_result = decompress(CompressType.ZLib, compress_result)
     assert decompress_result == src
 
 
+def test_snappy_compress():
+    """Test snappy compress function when python-snappy is installed."""
+    pytest.importorskip("snappy")
+    src = b'test_data'
+    compress_result = compress(CompressType.Snappy, src)
+    decompress_result = decompress(CompressType.Snappy, compress_result)
+    assert decompress_result == src
+
+    compress_result = compress(CompressType.SnappyStream, src)
+    decompress_result = decompress(CompressType.SnappyStream, compress_result)
+    assert decompress_result == src
+
+    compress_result = compress(CompressType.SnappyBlock, src)
+    decompress_result = decompress(CompressType.SnappyBlock, compress_result)
+    assert decompress_result == src
+
+
 def test_actual_compress_operations():
     """Test actual compress operations."""
-    # unsupported
     unsupport_compress = get_compress(99)
     assert unsupport_compress is None
 
-    # noop
     noop_compress = get_compress(CompressType.Noop)
     assert noop_compress.compress(b'') == b''
     assert noop_compress.decompress(b'') == b''
@@ -113,7 +112,6 @@ def test_actual_compress_operations():
     assert noop_compress.compress(body) == compress_body
     assert noop_compress.decompress(compress_body) == body
 
-    # zlib
     zlib_compress = get_compress(CompressType.ZLib)
     assert zlib_compress.compress(b'') == b''
     assert zlib_compress.decompress(b'') == b''
@@ -122,19 +120,20 @@ def test_actual_compress_operations():
     assert zlib_compress.compress(body) == compress_body
     assert zlib_compress.decompress(compress_body) == body
 
-    # gzip
     gzip_compress = get_compress(CompressType.Gzip)
     assert gzip_compress.compress(b'') == b''
     assert gzip_compress.decompress(b'') == b''
     body = b"this is gzip test data"
-    # pylint: disable=
     compress_body = b"\x1f\x8b\x08\x00\x90R\xce^\x02\xff+\xc9\xc8,V\x00\xa2\xf4\xaa\xcc\x02\x85\x92" \
                     b"\xd4\xe2\x12\x85\x94\xc4\x92D\x00\xf7R\x15<\x16\x00\x00\x00"
     assert gzip_compress.decompress(compress_body) == body
-    # gzip压缩与时间相关，不可重复输出（python3.8以后可以指定mtime）
+    # gzip output includes the current mtime, so a historical blob does not repeat.
     assert gzip_compress.compress(body) != compress_body
 
-    # snappy
+
+def test_actual_snappy_operations():
+    """Test snappy byte layout when python-snappy is installed."""
+    pytest.importorskip("snappy")
     snappy_compress = get_compress(CompressType.Snappy)
     assert snappy_compress.compress(b'') == b''
     assert snappy_compress.decompress(b'') == b''

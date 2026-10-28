@@ -13,26 +13,26 @@ from unittest import mock
 
 import pytest
 
-from trpc_sdk.abc.node import Node
-from trpc_sdk.abc.selector import BaseSelector
-from trpc_sdk.naming.dsn_selector import ResolveSelector
-from trpc_sdk.naming.dsn_selector import ServiceNameExtractor
-from trpc_sdk.naming.dsn_selector import default_selector
-from trpc_sdk.naming.option import SelectorOption
-from trpc_sdk.plugin import DefaultPluginManager
-from trpc_sdk.plugin import PluginType
+from trpc_sdk.abc import BaseSelector
+from trpc_sdk.abc import Node
+from trpc_sdk.abc import PluginType
+from trpc_sdk.abc import SelectorOption
+from trpc_sdk.abc import ServiceNameExtractor
+from trpc_sdk.naming import ResolveSelector
+from trpc_sdk.naming import get_default_selector
+from trpc_sdk.plugin import DEFAULT_PLUGIN_MANAGER
 
 
 @pytest.mark.asyncio
 async def test_dns_selector_report():
-    selector = default_selector()
-    ret = await selector.report(Node(), 1, 1)
+    selector = get_default_selector()
+    ret = await selector.report(Node(service_name="test"), 1, 1)
     assert ret is None
 
 
 @pytest.mark.asyncio
 async def test_dns_selector_select_error():
-    selector = default_selector()
+    selector = get_default_selector()
     opts = SelectorOption()
     with pytest.raises(Exception) as e:
         await selector.select("", opts)
@@ -40,7 +40,7 @@ async def test_dns_selector_select_error():
 
 @pytest.mark.asyncio
 async def test_dns_selector_select():
-    selector = default_selector()
+    selector = get_default_selector()
     opts = SelectorOption()
     node = await selector.select("test", opts)
     assert node.service_name == "test"
@@ -80,29 +80,27 @@ class service_name_extractor(ServiceNameExtractor):
 
 @pytest.mark.asyncio
 async def test_resolve_selector():
-    DefaultPluginManager.set_instance(PluginType.NAMING_SELECTOR, "empty",
-                                      ResolveSelector("", service_name_extractor()))
-    DefaultPluginManager.set_instance(PluginType.NAMING_SELECTOR, "noextractor", ResolveSelector("", None))
-    DefaultPluginManager.set_instance(PluginType.NAMING_SELECTOR, "fake", FakeSelector())
-    DefaultPluginManager.set_instance(PluginType.NAMING_SELECTOR, "dsn+fake",
-                                      ResolveSelector("fake", service_name_extractor()))
+    DEFAULT_PLUGIN_MANAGER.set_instance(PluginType.NAMING_SELECTOR, "empty",
+                                        ResolveSelector("", service_name_extractor()))
+    DEFAULT_PLUGIN_MANAGER.set_instance(PluginType.NAMING_SELECTOR, "noextractor", ResolveSelector("", None))
+    DEFAULT_PLUGIN_MANAGER.set_instance(PluginType.NAMING_SELECTOR, "fake", FakeSelector())
+    DEFAULT_PLUGIN_MANAGER.set_instance(PluginType.NAMING_SELECTOR, "dsn+fake",
+                                        ResolveSelector("fake", service_name_extractor()))
 
-    s = DefaultPluginManager.get_instance(PluginType.NAMING_SELECTOR, "dsn+fake")
+    s = DEFAULT_PLUGIN_MANAGER.get_instance(PluginType.NAMING_SELECTOR, "dsn+fake")
     assert s is not None
     node = await s.select("@abc", SelectorOption())
     assert node.address == "@127.0.0.1:8080"
 
-    ret = await s.report(Node(), 1, 1)
+    ret = await s.report(Node(service_name="test"), 1, 1)
     assert ret is None
 
-    empty_s = DefaultPluginManager.get_instance(PluginType.NAMING_SELECTOR, "empty")
+    empty_s = DEFAULT_PLUGIN_MANAGER.get_instance(PluginType.NAMING_SELECTOR, "empty")
     assert empty_s is not None
-    with pytest.raises(Exception) as excinfo:
+    with pytest.raises(ValueError, match="not instantiated"):
         node = await empty_s.select("@abc", SelectorOption())
-    assert str(excinfo.value) == "resolver selector name can not be empty"
 
-    noextractor_s = DefaultPluginManager.get_instance(PluginType.NAMING_SELECTOR, "noextractor")
+    noextractor_s = DEFAULT_PLUGIN_MANAGER.get_instance(PluginType.NAMING_SELECTOR, "noextractor")
     assert noextractor_s is not None
-    with pytest.raises(Exception) as excinfo:
+    with pytest.raises(ValueError, match="extractor is None"):
         node = await noextractor_s.select("@abc", SelectorOption())
-    assert str(excinfo.value) == "service extractor can not be empty"

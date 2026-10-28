@@ -118,12 +118,29 @@ def test_protocol_factory_defaults_to_cython_connection():
     assert isinstance(_bound(TrpcServerTransport()).protocol_factory()(), TCPConnection)
 
 
-def test_protocol_factory_uses_python_connection_when_msg_handler_overridden():
+class _Echo(TrpcServerTransport):
 
-    class _Echo(TrpcServerTransport):
+    async def _msg_handler(self, conn, data):
+        conn.write(data)
 
-        async def _msg_handler(self, conn, data):
-            conn.write(data)
 
-    conn = _bound(_Echo()).protocol_factory()()
+def test_protocol_factory_ignores_msg_handler_override_without_setter():
+    assert isinstance(_bound(_Echo()).protocol_factory()(), TCPConnection)
+
+
+def test_protocol_factory_uses_python_connection_after_set_io_connection():
+    transport = _bound(_Echo())
+    transport.set_io_connection()
+    conn = transport.protocol_factory()()
     assert isinstance(conn, DefaultIoConnection)
+    assert conn.option.msg_handler == transport._msg_handler
+
+
+def test_set_io_connection_accepts_subclass():
+
+    class _MyConnection(DefaultIoConnection):
+        pass
+
+    transport = _bound(_Echo())
+    transport.set_io_connection(_MyConnection)
+    assert isinstance(transport.protocol_factory()(), _MyConnection)

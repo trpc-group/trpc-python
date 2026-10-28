@@ -11,31 +11,28 @@ import ssl
 import threading
 import time
 
+import pytest
 from aiohttp import web
 
 from tests import helloworld_pb2
 from tests.common_util import unused_port
 from trpc_sdk import client
 from trpc_sdk import codec
-from trpc_sdk import context
 from trpc_sdk import exceptions
-from trpc_sdk import utils
-from trpc_sdk.abc.context import Context  # pylint: disable=no-name-in-module
-from trpc_sdk.client import options
-from trpc_sdk.client.options import with_disable_reuse_http_session
-from trpc_sdk.client.options import with_serialization_type
-from trpc_sdk.client.options import with_short_conn
-from trpc_sdk.client.options import with_timeout
-from trpc_sdk.client.options import with_tls
-from trpc_sdk.codec.serialization import SerializationType
+from trpc_sdk.abc import TrpcContext
+from trpc_sdk.client import Options
+from trpc_sdk.http import Client
+from trpc_sdk.http import SSEClient
 from trpc_sdk.http import get_http_header_in_client
 from trpc_sdk.http import get_http_status_in_client
-from trpc_sdk.http.client import Client
-from trpc_sdk.http.sse_client import SSEClient
-from trpc_sdk.utils.loop_lib import asynclib
+from trpc_sdk.serialization import SerializationType
+from trpc_sdk.utils._loop_lib import asynclib
 
 # https server启动失败
 DISABLE_HTTPS_TEST = False
+
+# Keep one loop for the module so the cached aiohttp session stays bound to it.
+pytestmark = pytest.mark.asyncio(loop_scope="module")
 
 _HOST = "127.0.0.1"
 
@@ -206,45 +203,41 @@ _t2 = threading.Thread(target=_run_https_server, args=(_https_port, ), daemon=Tr
 _t2.start()
 
 
-@utils.trpc_async_pytest
 async def test_http_client_post():
     """Test http client post"""
     cli = Client()
-    ctx = Context()
+    ctx = TrpcContext()
     rsp = await cli.post(ctx, f"http://{_HOST}:{_port}/", data="text")
     body = await rsp.text()
     assert body == "ok"
 
 
-@utils.trpc_async_pytest
 async def test_http_client_post_json():
     """Test http client post json"""
     cli = Client()
-    ctx = Context()
+    ctx = TrpcContext()
     rsp = await cli.post(ctx, f"http://{_HOST}:{_port}/json", json={"key": "value"})
     body = await rsp.json()
     rsp.release()
     assert body["status"] == "ok"
 
 
-@utils.trpc_async_pytest
 async def test_http_client_post_json_context_manager():
     """Test http client post json context manager"""
     cli = Client()
-    ctx = Context()
+    ctx = TrpcContext()
     async with cli.post(ctx, f"http://{_HOST}:{_port}/json", json={"key": "value"}) as rsp:
         body = await rsp.json()
         assert body["status"] == "ok"
 
 
-@utils.trpc_async_pytest
 async def test_http_client_post_pb():
     """Test http client post pb"""
     cli = Client()
-    ctx = Context()
+    ctx = TrpcContext()
     req = helloworld_pb2.HelloRequest()
     req.msg = "hello"
-    opts = [with_serialization_type(SerializationType.PB)]
+    opts = [Options().set_serialization_type(SerializationType.PB)]
     rsp = await cli.post(ctx, f"http://{_HOST}:{_port}/pb", opts, data=req)
     body = helloworld_pb2.HelloReply()
     await rsp.pb(body)
@@ -252,14 +245,17 @@ async def test_http_client_post_pb():
     assert body.msg == "hello_rsp"
 
 
-@utils.trpc_async_pytest
 async def test_http_client_post_pb_with_short_conn():
     """Test http client post pb"""
     cli = Client()
-    ctx = Context()
+    ctx = TrpcContext()
     req = helloworld_pb2.HelloRequest()
     req.msg = "hello"
-    opts = [with_serialization_type(SerializationType.PB), with_short_conn(True), with_disable_reuse_http_session(True)]
+    opts = [
+        Options().set_serialization_type(SerializationType.PB),
+        Options().set_short_conn(True),
+        Options().set_disable_reuse_http_session(True),
+    ]
     rsp = await cli.post(ctx, f"http://{_HOST}:{_port}/pb", opts, data=req)
     body = helloworld_pb2.HelloReply()
     try:
@@ -270,14 +266,13 @@ async def test_http_client_post_pb_with_short_conn():
         pass
 
 
-@utils.trpc_async_pytest
 async def test_http_client_post_stream_pb():
     """Test http client post pb"""
     cli = Client()
-    ctx = Context()
+    ctx = TrpcContext()
     req = helloworld_pb2.HelloRequest()
     req.msg = "hello"
-    opts = [with_serialization_type(SerializationType.PB)]
+    opts = [Options().set_serialization_type(SerializationType.PB)]
     num = 0
     async with cli.post(ctx, f"http://{_HOST}:{_port}/stream_pb", opts, data=req) as rsp:
         header = get_http_header_in_client(rsp)
@@ -290,14 +285,13 @@ async def test_http_client_post_stream_pb():
     assert num == _STREAM_NUM
 
 
-@utils.trpc_async_pytest
 async def test_http_client_post_stream_data():
     """Test http client post pb"""
     cli = Client()
-    ctx = Context()
+    ctx = TrpcContext()
     req = helloworld_pb2.HelloRequest()
     req.msg = "hello"
-    opts = [with_serialization_type(SerializationType.PB)]
+    opts = [Options().set_serialization_type(SerializationType.PB)]
     num = 0
     async with cli.post(ctx, f"http://{_HOST}:{_port}/stream_data", opts, data=req) as rsp:
         async for chunk in rsp.stream_data():
@@ -308,14 +302,13 @@ async def test_http_client_post_stream_data():
     assert num == _STREAM_NUM
 
 
-@utils.trpc_async_pytest
 async def test_http_client_post_pb_timeout():
     """Test http client post pb timeout"""
     cli = Client()
-    ctx = Context()
+    ctx = TrpcContext()
     req = helloworld_pb2.HelloRequest()
     req.msg = "hello"
-    opts = [with_serialization_type(SerializationType.PB), with_timeout(10)]
+    opts = [Options().set_serialization_type(SerializationType.PB), Options().set_timeout(10)]
     err = None
     try:
         async with cli.post(ctx, f"http://{_HOST}:{_port}/timeout", opts, data=req) as rsp:
@@ -327,16 +320,15 @@ async def test_http_client_post_pb_timeout():
     assert err is not None
 
 
-@utils.trpc_async_pytest
 async def test_http_client_post_pb_timeout2():
     """Test http client post timeout"""
     cli = Client()
-    ctx = Context()
+    ctx = TrpcContext()
     ctx.deadline = time.time() * 1000 - 100
 
     req = helloworld_pb2.HelloRequest()
     req.msg = "hello"
-    opts = [with_serialization_type(SerializationType.PB)]
+    opts = [Options().set_serialization_type(SerializationType.PB)]
 
     err = None
     try:
@@ -349,22 +341,20 @@ async def test_http_client_post_pb_timeout2():
     assert err is not None
 
 
-@utils.trpc_async_pytest
 async def test_http_client_get():
     """Test http client get"""
     cli = Client()
-    ctx = Context()
+    ctx = TrpcContext()
     rsp = await cli.get(ctx, f"http://{_HOST}:{_port}/img?id=123")
     body = await rsp.content.read(4)
     rsp.release()
     assert body == b'\xff\xd8\xff\xe0'
 
 
-@utils.trpc_async_pytest
 async def test_http_client_stream_upload():
     """Test http client get"""
     cli = Client()
-    ctx = Context()
+    ctx = TrpcContext()
 
     check_recv_data = []
 
@@ -380,21 +370,20 @@ async def test_http_client_stream_upload():
     assert ''.join(check_recv_data).encode("utf-8") == body
 
 
-@utils.trpc_async_pytest
 async def test_trpc_http_client():
     """Test trpc http client"""
     request = helloworld_pb2.HelloRequest()
     request.msg = "hello"
-    ctx = context.Context()
+    ctx = TrpcContext()
     rsp_cls = helloworld_pb2.HelloReply
     ctx, msg = codec.clone_client_message(ctx)
     msg.set_client_rpc_name('/trpc.trpc_python_group.helloworld.Greeter/SayHello')
     msg.set_callee_service_name('trpc.trpc_python_group.helloworld.Greeter')
     msg.set_callee_method('SayHello')
     opts = [
-        options.with_filter_list([], True),
-        options.with_target("ip://127.0.0.1:" + str(_port)),
-        options.with_protocol("http")
+        Options().set_filter_list([], True),
+        Options().set_target("ip://127.0.0.1:" + str(_port)),
+        Options().set_protocol("http"),
     ]
 
     try:
@@ -403,14 +392,13 @@ async def test_trpc_http_client():
         pass
 
 
-@utils.trpc_async_pytest
 async def test_http_client_invalid_url():
     """Test http client invalid url"""
     cli = Client()
-    ctx = Context()
+    ctx = TrpcContext()
     req = helloworld_pb2.HelloRequest()
     req.msg = "hello"
-    opts = [with_serialization_type(SerializationType.PB), with_timeout(100)]
+    opts = [Options().set_serialization_type(SerializationType.PB), Options().set_timeout(100)]
     err = None
     try:
         async with cli.post(ctx, f"wrong url {_port}/timeout", opts, data=req) as rsp:
@@ -422,14 +410,13 @@ async def test_http_client_invalid_url():
     assert err is not None
 
 
-@utils.trpc_async_pytest
 async def test_https_client_post():
     """Test https client post"""
     cli = Client()
-    ctx = Context()
+    ctx = TrpcContext()
     cert = "./examples/helloworld/cert/domain_srv_localhost.crt"
     opts = [
-        with_tls(cert),
+        Options().set_tls(cert),
     ]
     try:
         rsp = await cli.post(ctx, f"https://{_HOST}:{_https_port}/", data="text", options=opts, ssl=False)
@@ -444,14 +431,13 @@ async def test_https_client_post():
         assert body == "ok"
 
 
-@utils.trpc_async_pytest
 async def test_http_client_naming_service():
     """Test http client naming"""
     cli = Client()
-    ctx = Context()
+    ctx = TrpcContext()
     req = helloworld_pb2.HelloRequest()
     req.msg = "hello"
-    opts = [with_serialization_type(SerializationType.PB), with_timeout(100)]
+    opts = [Options().set_serialization_type(SerializationType.PB), Options().set_timeout(100)]
     err = None
     # trpc://{service_name}/{uri}
     try:
@@ -464,7 +450,6 @@ async def test_http_client_naming_service():
     assert err is not None
 
 
-@utils.trpc_async_pytest
 async def test_http_sse_client():
     """Test basic SSE client functionality
 
@@ -474,9 +459,9 @@ async def test_http_sse_client():
     - Properly handles multiple messages
     """
     cli = SSEClient()
-    ctx = Context()
+    ctx = TrpcContext()
     counter = 0
-    options = [with_timeout(10000)]
+    options = [Options().set_timeout(10000)]
     async for event in cli.request_events(ctx, "GET", f"http://{_HOST}:{_port}/sse", options=options):
         assert event.data == f"message {counter}"
         counter += 1

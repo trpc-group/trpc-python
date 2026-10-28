@@ -4,31 +4,30 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
-from trpc_sdk.trpcpb import RequestProtocol
-from trpc_sdk.trpcpb import ResponseProtocol
-from trpc_sdk.codec import CompressType
+from trpc_sdk._inner.pb import trpc_pb2
+from trpc_sdk.abc import TrpcContext
 from trpc_sdk.codec import FrameHead
 from trpc_sdk.codec import Message
-from trpc_sdk.codec import SerializationType
 from trpc_sdk.codec import clone_message
+from trpc_sdk.codec import create_message
 from trpc_sdk.codec import get_message
-from trpc_sdk.codec import new_message
-from trpc_sdk.context import Context
-from trpc_sdk.exceptions import ErrorCode
-from trpc_sdk.exceptions import NewFrameError
-from trpc_sdk.exceptions import TRPCBaseError
+from trpc_sdk.compressor import CompressType
+from trpc_sdk.exceptions import TrpcErrorCode
+from trpc_sdk.exceptions import TrpcException
+from trpc_sdk.exceptions import create_frame_error
+from trpc_sdk.serialization import SerializationType
 
 
 def test_message():
-    ctx = Context()
+    ctx = TrpcContext()
     msg = get_message(ctx)
     assert msg == ctx.msg
-    ctx, msg = new_message(ctx)
+    ctx, msg = create_message(ctx)
     assert isinstance(msg, Message)
-    assert ctx == msg.context
+    assert get_message(ctx) is msg
 
-    req_head = RequestProtocol()
-    rsp_head = ResponseProtocol()
+    req_head = trpc_pb2.RequestProtocol()
+    rsp_head = trpc_pb2.ResponseProtocol()
     frame_head = FrameHead()
     msg.set_frame_head(frame_head)
     assert frame_head == msg.frame_head
@@ -50,8 +49,8 @@ def test_message():
     assert {"trpc": "test".encode("utf8")} == msg.server_meta_data
     msg.set_client_meta_data({})
     assert {} == msg.client_meta_data
-    msg.set_local_addr("127.0.0.1")
-    assert "127.0.0.1" == msg.local_addr
+    msg.set_local_ip("127.0.0.1")
+    assert "127.0.0.1" == msg.local_ip
     msg.set_remote_addr("127.0.0.1")
     assert "127.0.0.1" == msg.remote_addr
     msg.set_caller_service_name("package.service")
@@ -81,19 +80,19 @@ def test_message():
     msg.set_env_transfer("envTransfer")
     assert "envTransfer" == msg.env_transfer
     msg.set_logger(None)
-    msg.set_server_rsp_err(NewFrameError(ErrorCode.TRPC_INVOKE_SUCCESS, ""))
-    assert isinstance(msg.server_rsp_err, TRPCBaseError)
-    assert ErrorCode.TRPC_INVOKE_SUCCESS == msg.server_rsp_err.code
-    msg.set_client_rsp_err(NewFrameError(ErrorCode.TRPC_INVOKE_SUCCESS, ""))
-    assert isinstance(msg.client_rsp_err, TRPCBaseError)
+    msg.set_server_rsp_err(create_frame_error(TrpcErrorCode.TRPC_INVOKE_SUCCESS, ""))
+    assert isinstance(msg.server_rsp_err, TrpcException)
+    assert TrpcErrorCode.TRPC_INVOKE_SUCCESS == msg.server_rsp_err.code
+    msg.set_client_rsp_err(create_frame_error(TrpcErrorCode.TRPC_INVOKE_SUCCESS, ""))
+    assert isinstance(msg.client_rsp_err, TrpcException)
     msg.set_server_req_head(req_head)
-    assert isinstance(msg.server_req_head, RequestProtocol)
+    assert isinstance(msg.server_req_head, trpc_pb2.RequestProtocol)
     msg.set_client_req_head(req_head)
-    assert isinstance(msg.client_req_head, RequestProtocol)
+    assert isinstance(msg.client_req_head, trpc_pb2.RequestProtocol)
     msg.set_server_rsp_head(rsp_head)
-    assert isinstance(msg.server_rsp_head, ResponseProtocol)
+    assert isinstance(msg.server_rsp_head, trpc_pb2.ResponseProtocol)
     msg.set_client_rsp_head(rsp_head)
-    assert isinstance(msg.client_rsp_head, ResponseProtocol)
+    assert isinstance(msg.client_rsp_head, trpc_pb2.ResponseProtocol)
     msg.set_request_attachment(b"request attachment")
     assert msg.request_attachment == b"request attachment"
     msg.set_response_attachment(b"response attachment")

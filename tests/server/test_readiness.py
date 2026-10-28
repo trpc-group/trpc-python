@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from trpc_sdk.runtime._common import _readiness
+from trpc_sdk.utils import TimerScope
 
 
 class _Host(_readiness.ChildReadiness):
@@ -93,7 +94,11 @@ def test_not_ready_lists_unset_slots(host):
 def test_warn_unnamed_timers_names_copies_and_unit(monkeypatch):
     warnings = []
     monkeypatch.setattr(_readiness.logger, "warning", lambda fmt, *args: warnings.append(fmt % args))
-    timers = [SimpleNamespace(cls=type("Tick", (), {}), name=""), SimpleNamespace(cls=object, name="worker:0")]
+    timers = [
+        SimpleNamespace(cls=type("Tick", (), {}), name="", scope=TimerScope.PROCESS),
+        SimpleNamespace(cls=object, name="worker:0", scope=TimerScope.PROCESS),
+        SimpleNamespace(cls=type("PerLoop", (), {}), name="", scope=TimerScope.THREAD),
+    ]
     monkeypatch.setattr(_readiness, "registered_timer_tasks", lambda: timers)
 
     _readiness.warn_unnamed_timers("worker:0", 3, "peer workers")
@@ -101,3 +106,4 @@ def test_warn_unnamed_timers_names_copies_and_unit(monkeypatch):
 
     assert len(warnings) == 1
     assert "3 peer workers" in warnings[0] and "Tick" in warnings[0]
+    assert "PerLoop" not in warnings[0]

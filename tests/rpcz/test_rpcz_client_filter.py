@@ -9,20 +9,27 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from trpc_sdk.rpcz.filter.client_filter import RpczClientFilter, RPCZ_CLIENT_SPAN_CTX_KEY
-from trpc_sdk.rpcz.storage import RPCZ_CLIENT_REQ_SIZE_CTX_KEY, RPCZ_CLIENT_RSP_SIZE_CTX_KEY, RPCZ_SERVER_SPAN_CTX_KEY
-from trpc_sdk.rpcz.span import Span, SpanType
-from trpc_sdk.rpcz.filter import client_filter as filter_mod
+from trpc_sdk.rpcz import RPCZ_CLIENT_REQ_SIZE_CTX_KEY
+from trpc_sdk.rpcz import RPCZ_CLIENT_RSP_SIZE_CTX_KEY
+from trpc_sdk.rpcz import RPCZ_CLIENT_SPAN_CTX_KEY
+from trpc_sdk.rpcz import RPCZ_SERVER_SPAN_CTX_KEY
+from trpc_sdk.rpcz import RpczClientFilter
+from trpc_sdk.rpcz import Span
+from trpc_sdk.rpcz import SpanType
+from trpc_sdk.rpcz import _storage as storage_mod
+from trpc_sdk.rpcz.filter import _client_filter as filter_mod
 
 
 class _Ctx:
     def __init__(self):
         self.meta_data = {}
         self.timeout = 1000
-        self.client_post_sched_send_msg_us = 111
-        self.client_pre_io_send_msg_us = 112
-        self.client_post_io_send_msg_us = 113
-        self.client_post_sched_recv_msg_us = 114
+        self.rpcz_data = SimpleNamespace(
+            client_post_sched_send_msg_us=111,
+            client_pre_io_send_msg_us=112,
+            client_post_io_send_msg_us=113,
+            client_post_sched_recv_msg_us=114,
+        )
 
     def with_meta_data(self, key, value):
         self.meta_data[key] = value
@@ -32,9 +39,21 @@ class _Ctx:
 
 
 def _reset_storage_state():
-    from trpc_sdk.rpcz import storage as storage_mod
     storage_mod._spans.clear()      # pylint: disable=protected-access
     storage_mod._sub_spans.clear()  # pylint: disable=protected-access
+
+
+def _set_config(monkeypatch, **overrides):
+    values = {
+        "service_whitelist": [],
+        "sample_rate": 1000,
+        "lower_water_level": 0,
+        "high_water_level": 1,
+        "sample_minimum_timecost": 0,
+    }
+    values.update(overrides)
+    rpcz = SimpleNamespace(**values)
+    monkeypatch.setattr(filter_mod.TrpcConfig, "global_config", staticmethod(lambda: SimpleNamespace(rpcz=rpcz)))
 
 
 def test_finalize_client_span_fill_timestamps_and_sizes():
@@ -56,17 +75,7 @@ def test_finalize_client_span_fill_timestamps_and_sizes():
 
 def test_submit_span_route_writes_to_sub_spans(monkeypatch):
     _reset_storage_state()
-    monkeypatch.setattr(
-        "trpc_sdk.rpcz.filter.client_filter.config",
-        SimpleNamespace(
-            global_config_obj=SimpleNamespace(
-                global_config=SimpleNamespace(
-                    rpcz=SimpleNamespace(sample_minimum_timecost=0),
-                ),
-            ),
-        ),
-    )
-    from trpc_sdk.rpcz import storage as storage_mod
+    _set_config(monkeypatch)
 
     ctx = _Ctx()
     ctx.with_meta_data(RPCZ_SERVER_SPAN_CTX_KEY, Span(span_id=999, span_type=SpanType.SERVER))
@@ -79,17 +88,7 @@ def test_submit_span_route_writes_to_sub_spans(monkeypatch):
 
 def test_submit_span_non_route_writes_to_spans(monkeypatch):
     _reset_storage_state()
-    monkeypatch.setattr(
-        "trpc_sdk.rpcz.filter.client_filter.config",
-        SimpleNamespace(
-            global_config_obj=SimpleNamespace(
-                global_config=SimpleNamespace(
-                    rpcz=SimpleNamespace(sample_minimum_timecost=0),
-                ),
-            ),
-        ),
-    )
-    from trpc_sdk.rpcz import storage as storage_mod
+    _set_config(monkeypatch)
 
     ctx = _Ctx()
     span = Span(span_id=11, span_type=SpanType.CLIENT, client_pre_rpc_invoke_us=1, client_post_rpc_invoke_us=100)
@@ -102,29 +101,15 @@ def test_submit_span_non_route_writes_to_spans(monkeypatch):
 async def test_run_route_always_sampled(monkeypatch):
     _reset_storage_state()
     monkeypatch.setattr(
-        "trpc_sdk.rpcz.filter.client_filter.get_message",
+        filter_mod,
+        "get_message",
         lambda _: SimpleNamespace(
             callee_service_name="svc.a",
             client_rpc_name="/pkg.Cli/Call",
             remote_addr="127.0.0.1:9999",
         ),
     )
-    monkeypatch.setattr(
-        "trpc_sdk.rpcz.filter.client_filter.config",
-        SimpleNamespace(
-            global_config_obj=SimpleNamespace(
-                global_config=SimpleNamespace(
-                    rpcz=SimpleNamespace(
-                        sample_minimum_timecost=0,
-                        service_whitelist=[],
-                        sample_rate=1000,
-                        lower_water_level=0,
-                        high_water_level=1,
-                    ),
-                ),
-            ),
-        ),
-    )
+    _set_config(monkeypatch)
     ctx = _Ctx()
     ctx.with_meta_data(RPCZ_SERVER_SPAN_CTX_KEY, Span(span_id=888, span_type=SpanType.SERVER))
     ctx.with_meta_data(RPCZ_CLIENT_REQ_SIZE_CTX_KEY, 12)
@@ -134,7 +119,7 @@ async def test_run_route_always_sampled(monkeypatch):
     async def _handle():
         return "rsp", None
 
-    rsp, err = await flt.run(ctx, req={"a": 1}, handle=_handle)
+    rsp, err = await flt.run(ctx, {"a": 1}, _handle)
     assert err is None
     assert rsp == "rsp"
     out = ctx.get_meta_data(RPCZ_CLIENT_SPAN_CTX_KEY)
@@ -147,29 +132,18 @@ class _SimpleCtx:
     def __init__(self):
         self.meta_data = {}
         self.timeout = 10
+        self.rpcz_data = SimpleNamespace(
+            client_post_sched_send_msg_us=0,
+            client_pre_io_send_msg_us=0,
+            client_post_io_send_msg_us=0,
+            client_post_sched_recv_msg_us=0,
+        )
 
     def with_meta_data(self, key, value):
         self.meta_data[key] = value
 
     def get_meta_data(self, key, default=None):
         return self.meta_data.get(key, default)
-
-
-def _set_config(monkeypatch, **overrides):
-    values = {
-        "service_whitelist": [],
-        "sample_rate": 1000,
-        "lower_water_level": 0,
-        "high_water_level": 1,
-        "sample_minimum_timecost": 0,
-    }
-    values.update(overrides)
-    rpcz = SimpleNamespace(**values)
-    monkeypatch.setattr(
-        filter_mod.config,
-        "global_config_obj",
-        SimpleNamespace(global_config=SimpleNamespace(rpcz=rpcz)),
-    )
 
 
 def test_service_whitelist_and_empty_callee(monkeypatch):

@@ -163,7 +163,7 @@ async def test_msg_handler_fills_real_addresses_and_answers_the_source():
 
     transport = TrpcServerTransport()
     transport.bind(BaseServerTransportOption(parser=_Parser(), rpc_handler=rpc_handler, idle_timeout=1000))
-    factory = transport.datagram_protocol_factory(type("Ctx", (), {"shared_pool": None})())
+    factory = transport.datagram_protocol_factory()
     conn = factory()
     conn.connection_made(_DatagramTransport())
 

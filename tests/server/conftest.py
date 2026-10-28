@@ -18,6 +18,7 @@ import pytest
 from trpc_sdk.abc import BaseServerTransportOption
 from trpc_sdk.http import HttpServerTransport
 from trpc_sdk.runtime import ProcessInfo
+from trpc_sdk.runtime import install_thread_model
 from trpc_sdk.transport import TrpcServerTransport
 from trpc_sdk.transport import resolve_server_transport
 
@@ -48,16 +49,12 @@ def make_engine(endpoints: List[Tuple[str, str]], worker_num: int = 2, worker_th
         transport_opt.set_address(("127.0.0.1", 20000 + i))
         transport_opt.set_network(network)
         transport_opt.set_parser(_ParserFactory() if protocol == "trpc" else None)
+        transport_opt.set_idle_timeout(1000)
+        transport_opt.set_service_adapter(SimpleNamespace(opt=SimpleNamespace(protocol=protocol,
+                                                                              service_name=f"svc{i}")))
         transport = resolve_server_transport(protocol,
                                              HttpServerTransport() if protocol == "http" else TrpcServerTransport())
         transport.bind(transport_opt)
-        info.addresses.append(transport_opt.address)
-        info.socket_types.append("")
-        info.networks.append(network)
-        info.parsers.append(transport_opt.parser)
-        info.handlers.append(None)
-        info.timeouts.append(1000)
-        info.services.append(SimpleNamespace(opt=SimpleNamespace(protocol=protocol, service_name=f"svc{i}")))
         info.transport_opt.append(transport_opt)
         info.transports.append(transport)
     fields = dict(io_thread_num=1,
@@ -76,6 +73,13 @@ def make_engine(endpoints: List[Tuple[str, str]], worker_num: int = 2, worker_th
 @pytest.fixture
 def engine_factory():
     return make_engine
+
+
+@pytest.fixture(autouse=True)
+def uninstall_thread_model():
+    """Drop the thread model a worker under test installed, so the next test starts without one."""
+    yield
+    install_thread_model(None)
 
 
 @pytest.fixture

@@ -21,14 +21,15 @@ import traceback
 
 import pytest
 
-from trpc_sdk import context
-from trpc_sdk.config import config
+from trpc_sdk.abc import TrpcContext
+from trpc_sdk.config import TrpcConfig
 from trpc_sdk.log import CTX_FIELDS_IN_EXTRA_KEY
+from trpc_sdk.log import META_DATA_KEY_LOG_FIELDS
 from trpc_sdk.log import NoopFormatterWithCtx
-from trpc_sdk.log import TRPCFormatterWithCtx
+from trpc_sdk.log import TrpcFormatterWithCtx
+from trpc_sdk.log import TrpcJsonFormatterWithCtx
 from trpc_sdk.log import get_logger_formatter
 from trpc_sdk.log import logger
-from trpc_sdk.log import logger_format
 
 
 def test_get_default_logger():
@@ -76,16 +77,16 @@ def test_log_fatal():
 
 def test_new_logging_logger():
     """Test creating a new logging logger from configuration."""
-    config.load_global_config('./examples/helloworld/trpc_python.yaml', 'utf-8')
-    log_config = config.global_plugins_config["log"]["default"]
-    new_logger = logger.new_logging_logger(log_config)
+    TrpcConfig.load('./examples/helloworld/trpc_python.yaml', 'utf-8')
+    log_config = TrpcConfig.plugins_config()["log"]["default"]
+    new_logger = logger.create_logging_logger(log_config)
     assert new_logger is not None, "New logger should be created successfully"
 
 
 class MockLogger:
     """Mock logger for testing context-aware logging methods."""
 
-    def debug_context(self, ctx: context.Context, format_str: str, *args, **kwargs) -> None:
+    def debug_context(self, ctx: TrpcContext, format_str: str, *args, **kwargs) -> None:
         """Mock debug logging with context.
 
         Args:
@@ -96,7 +97,7 @@ class MockLogger:
         """
         pass
 
-    def info_context(self, ctx: context.Context, format_str: str, *args, **kwargs) -> None:
+    def info_context(self, ctx: TrpcContext, format_str: str, *args, **kwargs) -> None:
         """Mock info logging with context.
 
         Args:
@@ -107,7 +108,7 @@ class MockLogger:
         """
         pass
 
-    def warning_context(self, ctx: context.Context, format_str: str, *args, **kwargs) -> None:
+    def warning_context(self, ctx: TrpcContext, format_str: str, *args, **kwargs) -> None:
         """Mock warning logging with context.
 
         Args:
@@ -118,7 +119,7 @@ class MockLogger:
         """
         pass
 
-    def error_context(self, ctx: context.Context, format_str: str, *args, **kwargs) -> None:
+    def error_context(self, ctx: TrpcContext, format_str: str, *args, **kwargs) -> None:
         """Mock error logging with context.
 
         Args:
@@ -144,7 +145,7 @@ def mock_set_log_name(name: str) -> MockLogger:
 
 def test_with_context_fields():
     """Test adding custom fields to context for logging."""
-    ctx = context.TrpcContext()
+    ctx = TrpcContext()
 
     # Test exception when fields is not a dict
     with pytest.raises(Exception, match="with_context_fields param fields must be type of dict"):
@@ -153,14 +154,14 @@ def test_with_context_fields():
     # Test normal case
     expected_fields = {"uin": "123"}
     logger.with_context_fields(ctx, expected_fields)
-    actual_fields = ctx.get_meta_data(context.META_DATA_KEY_LOG_FIELDS, None)
+    actual_fields = ctx.get_meta_data(META_DATA_KEY_LOG_FIELDS, None)
     assert expected_fields == actual_fields, "Context fields should match expected fields"
 
 
 def test_get_ctx_fields():
     """Test retrieving custom log fields from context."""
     expected_fields = {"uin": "123"}
-    ctx = context.TrpcContext()
+    ctx = TrpcContext()
     logger.with_context_fields(ctx, expected_fields)
     actual_fields = logger.get_ctx_fields(ctx)
     assert actual_fields == expected_fields, "Retrieved fields should match set fields"
@@ -169,7 +170,7 @@ def test_get_ctx_fields():
 def test_debug_context(mocker):
     """Test debug level logging with context fields."""
     fields = {"uin": "123"}
-    ctx = context.TrpcContext()
+    ctx = TrpcContext()
     logger.with_context_fields(ctx, fields)
     msg = "hello"
 
@@ -177,14 +178,14 @@ def test_debug_context(mocker):
     logger.debug_context(ctx, msg)
 
     # Test case when default logger has debug_context method
-    mocker.patch("trpc_sdk.log._logger.set_log_name", mock_set_log_name)
+    mocker.patch("trpc_sdk.log._logger.get_logger", mock_set_log_name)
     logger.debug_context(ctx, msg)
 
 
 def test_info_context(mocker):
     """Test info level logging with context fields."""
     fields = {"uin": "123"}
-    ctx = context.TrpcContext()
+    ctx = TrpcContext()
     logger.with_context_fields(ctx, fields)
     msg = "hello"
 
@@ -192,14 +193,14 @@ def test_info_context(mocker):
     logger.info_context(ctx, msg)
 
     # Test case when default logger has info_context method
-    mocker.patch("trpc_sdk.log._logger.set_log_name", mock_set_log_name)
+    mocker.patch("trpc_sdk.log._logger.get_logger", mock_set_log_name)
     logger.info_context(ctx, msg)
 
 
 def test_warning_context(mocker):
     """Test warning level logging with context fields."""
     fields = {"uin": "123"}
-    ctx = context.TrpcContext()
+    ctx = TrpcContext()
     logger.with_context_fields(ctx, fields)
     msg = "hello"
 
@@ -207,14 +208,14 @@ def test_warning_context(mocker):
     logger.warning_context(ctx, msg)
 
     # Test case when default logger has warning_context method
-    mocker.patch("trpc_sdk.log._logger.set_log_name", mock_set_log_name)
+    mocker.patch("trpc_sdk.log._logger.get_logger", mock_set_log_name)
     logger.warning_context(ctx, msg)
 
 
 def test_error_context(mocker):
     """Test error level logging with context fields."""
     fields = {"uin": "123"}
-    ctx = context.TrpcContext()
+    ctx = TrpcContext()
     logger.with_context_fields(ctx, fields)
     msg = "hello"
 
@@ -222,14 +223,14 @@ def test_error_context(mocker):
     logger.error_context(ctx, msg)
 
     # Test case when default logger has error_context method
-    mocker.patch("trpc_sdk.log._logger.set_log_name", mock_set_log_name)
+    mocker.patch("trpc_sdk.log._logger.get_logger", mock_set_log_name)
     logger.error_context(ctx, msg)
 
 
 def test_fatal_context():
     """Test fatal level logging with context fields."""
     fields = {"uin": "123"}
-    ctx = context.TrpcContext()
+    ctx = TrpcContext()
     logger.with_context_fields(ctx, fields)
     msg = "hello"
     logger.fatal_context(ctx, msg)
@@ -240,7 +241,7 @@ def test_trpc_formatter_with_ctx():
     record = logging.LogRecord("", logging.INFO, "", 0, "test log", None, None)
     setattr(record, CTX_FIELDS_IN_EXTRA_KEY, {"uin": "124"})
 
-    formatter = logger_format.TRPCFormatterWithCtx()
+    formatter = TrpcFormatterWithCtx()
     formatted_msg = formatter.format(record)
 
     expected_msg = 'test log[{"uin": "124"}]'
@@ -269,7 +270,7 @@ def test_trpc_json_formatter_with_ctx():
     )
 
     setattr(record, CTX_FIELDS_IN_EXTRA_KEY, {"uin": "124"})
-    formatter = logger_format.TRPCJsonFormatterWithCtx()
+    formatter = TrpcJsonFormatterWithCtx()
     formatted_msg = formatter.format(record)
     parsed_msg = json.loads(formatted_msg)
 
@@ -292,10 +293,10 @@ def test_logger_formatter():
     """Test logger formatter retrieval and instantiation."""
     # Test default TRPC formatter
     json_formatter = get_logger_formatter()
-    assert issubclass(json_formatter, TRPCFormatterWithCtx), \
-        "Default formatter should be subclass of TRPCFormatterWithCtx"
-    assert isinstance(json_formatter(), TRPCFormatterWithCtx), \
-        "Default formatter instance should be TRPCFormatterWithCtx"
+    assert issubclass(json_formatter, TrpcFormatterWithCtx), \
+        "Default formatter should be subclass of TrpcFormatterWithCtx"
+    assert isinstance(json_formatter(), TrpcFormatterWithCtx), \
+        "Default formatter instance should be TrpcFormatterWithCtx"
 
     # Test noop formatter
     noop_formatter = get_logger_formatter('noop')

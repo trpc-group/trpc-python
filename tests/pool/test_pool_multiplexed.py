@@ -4,24 +4,20 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
-import asyncio
 import socket
-import time
 
-from asyncio import Future
 from threading import Event
 from threading import Thread
 
 import pytest
 
 from tests.common_util import unused_port
-from trpc_sdk.client.options import *
+from trpc_sdk.abc import BaseClientTransportOption
+from trpc_sdk.config import SocketType
 from trpc_sdk.exceptions import ClientPoolConnClosedError
-from trpc_sdk.pool.multiplexed import Connection
-from trpc_sdk.pool.multiplexed import Connections
-from trpc_sdk.pool.multiplexed import VirtualConnection
-from trpc_sdk.pool.multiplexed import default_multiplexed_pool
-from trpc_sdk.utils import get_or_create_event_loop
+from trpc_sdk.transport import ConnPoolOptions
+from trpc_sdk.transport import ConnectionPoolManager
+from trpc_sdk.transport._pool import ConnectionPool
 
 
 class ThreadTcpServer(object):
@@ -46,108 +42,80 @@ class ThreadTcpServer(object):
 
         while self._running:
             try:
-                ss, addr = self.sock.accept()
+                client, addr = self.sock.accept()
             except socket.timeout:
                 continue
             except OSError:
                 break
-            print("accept", ss, addr)
             if self.handle:
-                self.handle(ss, addr)
-            # ss.send('byebye')
-            # ss.recv(512)
-            self.actives.append(ss)
+                self.handle(client, addr)
+            self.actives.append(client)
 
     def stop(self):
         self._running = False
         self.thread.join(timeout=1)
-        for s in self.actives:
-            s.close()
+        for client in self.actives:
+            client.close()
         self.sock.close()
-        print("after tcp server sock close")
 
 
-class TestMultiplexed():
-
-    def get_conn(self):
-        opts = Options()
-        o = with_protocol('trpc')
-        o(opts)
-        conns = Connections(("127.0.0.1", self.port), default_multiplexed_pool, opts.call_options.parser, opts.codec)
-        conn = Connection(("127.0.0.1", self.port), conns, opts.call_options.parser, opts.codec,
-                          default_multiplexed_pool.opts)
-        vconn = VirtualConnection(1, conn, None)
-        return conns, conn, vconn
+class TestMultiplexed:
+    """Pooled connections replaced the removed multiplexed pool."""
 
     def setup_class(self):
-
-        def HandlerRead(sock, addr):
-            pass
-
         self.port = unused_port()
-        self.tcpsrv = ThreadTcpServer(self.port, HandlerRead)
+        self.tcpsrv = ThreadTcpServer(self.port)
         print("start simple tcpserver")
 
     def teardown_class(self):
         print("stop simple tcpserver")
         self.tcpsrv.stop()
-        print("stop simple tcpserver end")
+
+    def _pool(self) -> ConnectionPool:
+        trans_opt = BaseClientTransportOption()
+        trans_opt.address = ("127.0.0.1", self.port)
+        trans_opt.socket_type = SocketType.NET
+        options = ConnPoolOptions(max_idle=2, max_active=4)
+        return ConnectionPool(dial=ConnectionPoolManager.dial, trans_opt=trans_opt, options=options)
 
     @pytest.mark.asyncio
     async def test_get_conn(self):
-        opts = Options()
-        o = with_protocol('trpc')
-        o(opts)
-        res = await default_multiplexed_pool.get_conn("", ("127.0.0.1", self.port), 1, None, opts.call_options.parser,
-                                                      opts.codec, 3.0)
-        assert res
-        res.write(bytes('hi： ', encoding="utf8"))
+        pool = self._pool()
+        conn = await pool.get(3.0)
+        assert conn
+        conn.write(bytes('hi： ', encoding="utf8"))
 
         try:
-            res.write("hi: ")
-        except Exception as e:  # pylint: disable=broad-except
-            assert "data argument must be" in str(e)
-            assert "not 'str'" in str(e)
-
-        res.close()
-
-    async def send_future(self, f):
-        f.done()
-        f.set_result((None, None, ClientPoolConnClosedError("err")))
+            conn.write("hi: ")
+        except Exception as err:  # pylint: disable=broad-except
+            assert "data argument must be" in str(err)
+            assert "not 'str'" in str(err)
+        finally:
+            conn.close()
+            pool.close()
 
     @pytest.mark.asyncio
-    async def test_read(self):
-        conns, conn, vconn = self.get_conn()
-        future = Future()
-        vconn.future = future
-        get_or_create_event_loop().create_task(self.send_future(future))
-        try:
-            await vconn.read()
-        except Exception as e:  # pylint: disable=broad-except
-            assert str(e) == "err"
+    async def test_read_after_close(self):
+        pool = self._pool()
+        conn = await pool.get(3.0)
+        conn.force_close()
+        with pytest.raises(ClientPoolConnClosedError):
+            await conn.read(1)
+        pool.close()
 
     @pytest.mark.asyncio
     async def test_close(self):
-        conns, conn, vconn = self.get_conn()
-        vconn.future = Future()
-        conn.future_dict[1] = vconn
-        conns.cs = []
-        await conns.get_connection()
+        pool = self._pool()
+        conn = await pool.get(3.0)
         conn.close()
+        assert pool.idle_conns_num == 1
+        pool.close()
 
     @pytest.mark.asyncio
-    async def test_send_rsp(self):
-        conns, conn, vconn = self.get_conn()
-        vconn.future = Future()
-        conn.future_dict[1] = vconn
-        await conn.send_rsp(None, 1, "", None)
-        await conn.send_rsp(None, 2, "", None)
-
-    @pytest.mark.asyncio
-    async def test_start_conns(self):
-        conns, conn, vconn = self.get_conn()
-        try:
-            conns.cs.append(None)
-            await conns.start_connections()
-        except Exception as e:  # pylint: disable=broad-except
-            assert "'NoneType' object has no attribute 'state'" in str(e)
+    async def test_write_empty_payload(self):
+        """An empty payload is still accepted by the pooled stream."""
+        pool = self._pool()
+        conn = await pool.get(3.0)
+        conn.write(b"")
+        conn.close()
+        pool.close()
