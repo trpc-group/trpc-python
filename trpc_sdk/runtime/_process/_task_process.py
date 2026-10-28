@@ -206,7 +206,7 @@ class TaskIpcMesh:
 
 _task_ipc_mesh: Optional[TaskIpcMesh] = None
 
-# TODO：删除
+
 def set_task_ipc_mesh(mesh: Optional[TaskIpcMesh]) -> None:
     """Publish the mesh so forked children inherit it.
 
@@ -275,7 +275,7 @@ class TaskProcess(BaseTaskProcess):
     :meth:`_on_graceful_exit` lets the consumers finish their batch.
     """
 
-    def __init__(self, task_info: TaskInfo, engine) -> None:
+    def __init__(self, task_info: TaskInfo, adapter) -> None:
         """Record name, pipes, handler and queue opts; no sockets are bound yet.
 
         Runs in the master **before fork**. The event loop, plugin setup and
@@ -285,12 +285,12 @@ class TaskProcess(BaseTaskProcess):
             task_info: Master-side task record. ``task_handle`` is
                 ``(initializer, handler)``; ``task_pipe_conn`` is index-aligned
                 with the sender list.
-            engine: Master engine. The child inherits this object through fork
+            adapter: Server adapter. The child inherits this object through fork
                 and reads ``opts.task_*`` defaults from it.
         """
         super().__init__(task_info.name, ProcessType.TASK)
-        # Master engine that forked this child; used for task_* option defaults.
-        self.server_adapter = engine
+        # Server adapter that forked this child; used for task_* option defaults.
+        self.server_adapter = adapter
         # Master-side task record this process was spawned for.
         self.task_info: TaskInfo = task_info
         # This task's end of each sender <-> task IPC pipe, index-aligned
@@ -306,14 +306,14 @@ class TaskProcess(BaseTaskProcess):
         # User handler invoked by each :class:`TaskConsumer` (sync or async).
         self.task_handle: Callable[..., Any] = task_info.task_handle[1]
         # Milliseconds a consumer sleeps when the inbound queue is empty.
-        self.wait_interval: int = engine.opts.task_wait_interval
+        self.wait_interval: int = adapter.opts.task_wait_interval
         if self.task_info.batch_size <= 0:
-            self.task_info.batch_size = engine.opts.task_batch_size
+            self.task_info.batch_size = adapter.opts.task_batch_size
 
         # Capacity of the global C task queue created in ``_init_plugins``.
-        self.queue_size: int = engine.opts.task_queue_size
+        self.queue_size: int = adapter.opts.task_queue_size
         # Number of :class:`TaskConsumer` threads started by this task.
-        self.consumer_num: int = engine.opts.task_consumer_num
+        self.consumer_num: int = adapter.opts.task_consumer_num
         # If True, registry heartbeats were paused at registration and must be
         # resumed in ``_prepare_to_serve`` after the initializer returns.
         self.pause_heartbeat: bool = task_info.pause_heartbeat

@@ -64,8 +64,6 @@ from ._common import WorkerExit
 from ._common._shutdown import _run_callbacks
 from ._constants import CHILD_EXIT_POLL_INTERVAL
 from ._constants import IO_WAIT_POLL_INTERVAL
-from ._threadmodel import MainLoopReactor
-from ._threadmodel import ReactorGroup
 from ._threadmodel import ThreadModel
 from ._threadmodel import install_thread_model
 from ._types import ChildProcessInfo
@@ -113,6 +111,10 @@ class BaseWorker(WorkerExit):
 
     # Only assigned when memory inspection is enabled
     memory_inspector: MemoryInspector
+
+    # Set by the multi-process roles: their thread model must serve on the
+    # main loop alone, which :meth:`_install_thread_model` enforces.
+    _main_loop_only: bool = False
 
     def __init__(self, name: str, process_type: ProcessType) -> None:
         """Record identity only; no loop, socket or pipe exists yet.
@@ -655,7 +657,6 @@ class BaseWorker(WorkerExit):
         self._close_unowned_task_pipes()
         self._connect_tasks()
 
-        # TODO： 删除
         _run_callbacks(self.name, "ready", self.ready_callbacks)
         self.start_worker_process()
         self._start_timers()
@@ -664,25 +665,38 @@ class BaseWorker(WorkerExit):
         """Build this process's thread model and install it; runs after fork, before any loop thread starts.
 
         Never uninstalled: the process exits right after serving.
+
+        Raises:
+            RuntimeError: A role with ``_main_loop_only`` built a model with
+                loop threads.
         """
-        self.thread_model = self._build_thread_model()
-        install_thread_model(self.thread_model)
+        model = self._build_thread_model()
+        if self._main_loop_only and not model.is_single_thread:
+            raise RuntimeError(f"{type(self).__name__} is a multi-process role and must serve on its main loop only")
+        self.thread_model = model
+        install_thread_model(model)
 
     def _build_thread_model(self) -> ThreadModel:
         """Describe where this process serves its endpoints. Default: everything on the main loop.
 
+        The rule this default encodes:
+
+        * Multi-process roles (separate I/O process, rpc task, peer worker,
+          task process) serve on their main loop only, and no reactor ever
+          crosses a thread. Only the main thread can install signal handlers,
+          and a dead process is seen by its parent (SIGCHLD, sentinels),
+          which a dead thread is not. These roles set ``_main_loop_only``.
+        * Loop threads exist only inside a single serving process
+          (:class:`~trpc_sdk.runtime._merge_worker.MergeWorker`,
+          :class:`~trpc_sdk.runtime._threadmodel.SeparateThread`). There the
+          only multi-process state is the task mesh, created only when a
+          task is registered. A loop thread that dies there takes the process
+          down with status 1.
+
         Subclasses that run loop threads create the thread objects here, so the
         model can name them before they start.
         """
-        main = MainLoopReactor(self.loop)
-        # TODO： 多进程单线程的，是否需要起新线程，原因是守护线程退出控制台用户无法感知
-        # TODO： 单进程多线程，不要有任何多进程操作，进程间通信和进程间变量应该尽量减少或者直接不声明
-        # 多进程下没有任何跨线程操作
-        return ThreadModel(acceptor=main,
-                           io=ReactorGroup([main]),
-                           handle=ReactorGroup([main]),
-                           reuse_port=getattr(self, "tcp_reuse_port", False),
-                           worker=self)
+        return ThreadModel.main_loop(self.loop, worker=self, reuse_port=getattr(self, "tcp_reuse_port", False))
 
     def _start_timers(self) -> None:
         """Start this process's timer executor, labelled ``worker:<id>``.

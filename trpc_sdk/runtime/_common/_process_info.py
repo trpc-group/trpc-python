@@ -22,7 +22,7 @@ from trpc_sdk.utils import PipeConnection
 
 @dataclass
 class ProcessTaskInfo:
-    """Per-process task IPC metadata held by the master engine."""
+    """Per-process task IPC metadata held by the server adapter."""
 
     # Task names paired with ``task_pipe_conn``.
     task_name: List[str] = field(default_factory=list)

@@ -56,7 +56,7 @@ from ._constants import ACCEPT_BURST
 from ._constants import ACCEPT_RETRY_DELAY
 
 if TYPE_CHECKING:
-    from trpc_sdk.runtime import Reactor
+    from trpc_sdk.runtime import BaseReactor
     from trpc_sdk.runtime import ReactorGroup
     from trpc_sdk.runtime import ThreadModel
 
@@ -281,7 +281,7 @@ class StreamListener:
 def serve_stream(model: ThreadModel,
                  group: ReactorGroup,
                  sock: socket.socket,
-                 factory_for: Callable[[Reactor], Callable[[], asyncio.BaseProtocol]],
+                 factory_for: Callable[[BaseReactor], Callable[[], asyncio.BaseProtocol]],
                  backlog: int,
                  ssl_context: Optional[ssl.SSLContext] = None,
                  address: Optional[Tuple[str, int]] = None) -> StreamListener:

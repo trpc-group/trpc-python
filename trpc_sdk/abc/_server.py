@@ -94,7 +94,7 @@ class BaseTrpcServerAdapter(ABC):
 
     @abstractmethod
     def set_process_info(self, process_type: ProcessType) -> None:
-        """Initialize process-role specific engine state.
+        """Initialize process-role specific server adapter state.
 
         Args:
             process_type: Role of the current process.
@@ -103,7 +103,7 @@ class BaseTrpcServerAdapter(ABC):
 
     @abstractmethod
     def close(self) -> None:
-        """Shut down the engine and release owned resources."""
+        """Shut down the server adapter and release owned resources."""
         ...
 
 

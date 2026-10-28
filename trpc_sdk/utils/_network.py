@@ -4,7 +4,7 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
-"""IP, port, and socket helpers used by the server engine and connection pool.
+"""IP, port, and socket helpers used by the server adapter and connection pool.
 
 Port probes here are *availability* checks, not format-only validators:
 :func:`is_tcp_port_available` fails if something already accepts TCP on

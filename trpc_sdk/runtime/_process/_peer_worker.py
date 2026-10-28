@@ -79,19 +79,21 @@ class PeerWorker(MergeWorker):
         worker_num: Number of peer workers, worker-0 included.
     """
 
-    def __init__(self, engine, index: int, worker_num: int, name: str) -> None:
-        """Copy the endpoint tables out of the engine; nothing is bound yet.
+    _main_loop_only = True
+
+    def __init__(self, adapter, index: int, worker_num: int, name: str) -> None:
+        """Copy the endpoint tables out of the server adapter; nothing is bound yet.
 
         Constructed in worker-0 for every worker, before any fork, so nothing
         here may hold a loop or a socket.
 
         Args:
-            engine: Engine holding ``process_info`` and ``opts``.
+            adapter: Server adapter holding ``process_info`` and ``opts``.
             index: Position of this worker among the peer workers.
             worker_num: Number of peer workers, worker-0 included.
             name: Process name shown in logs and process listings.
         """
-        super().__init__(engine, name)
+        super().__init__(adapter, name)
         self.index: int = index
         # Timers run as ``worker:<index>``.
         self.worker_id = index
@@ -105,7 +107,7 @@ class PeerWorker(MergeWorker):
         """One serving loop, the main one: peer runs no loop threads.
 
         Args:
-            opts: The engine's :class:`~trpc_sdk.server.ServerOption`; unused.
+            opts: The server adapter's :class:`~trpc_sdk.server.ServerOption`; unused.
         """
         del opts
         return 1
@@ -140,19 +142,19 @@ class PeerWorkerProcess(PeerWorker, Process):
     ``Server.serve`` filled.
     """
 
-    def __init__(self, engine, index: int, worker_num: int, ready_flags: Any) -> None:
+    def __init__(self, adapter, index: int, worker_num: int, ready_flags: Any) -> None:
         """Record this child's index and the shared ready flags; runs in worker-0, before fork.
 
         Args:
-            engine: Engine holding ``process_info`` and ``opts``.
+            adapter: Server adapter holding ``process_info`` and ``opts``.
             index: Position of this worker, 1 .. ``worker_num`` - 1.
             worker_num: Number of peer workers, worker-0 included.
             ready_flags: worker-0's shared array; this child sets slot ``index``.
         """
-        super().__init__(engine, index, worker_num, f"worker:{index}")
+        super().__init__(adapter, index, worker_num, f"worker:{index}")
         self._ready_flags = ready_flags
         self._controlled = True
-        self.drain_seconds = max(0, int(getattr(engine.opts, "close_wait_time", 0) or 0)) / 1000.0
+        self.drain_seconds = max(0, int(getattr(adapter.opts, "close_wait_time", 0) or 0)) / 1000.0
 
     def _init_plugins(self) -> None:
         """Initialize every plugin; exit with status 1 on failure."""
@@ -213,17 +215,17 @@ class PeerMainWorker(ChildReadiness, PeerWorker):
     the four callback lists are set by ``Server.serve``.
     """
 
-    def __init__(self, engine, name: str = "worker:0") -> None:
-        """Read ``worker_num`` from the engine; nothing is forked yet.
+    def __init__(self, adapter, name: str = "worker:0") -> None:
+        """Read ``worker_num`` from the server adapter; nothing is forked yet.
 
         Args:
-            engine: Engine holding ``process_info`` and ``opts``.
+            adapter: Server adapter holding ``process_info`` and ``opts``.
             name: Process name shown in logs and process listings.
         """
         # Already resolved by ``server._option_resolver``; the fallback only
         # guards options built by hand.
-        configured = int(engine.opts.worker_num)
-        super().__init__(engine, 0, configured if configured > 0 else default_worker_num(), name)
+        configured = int(adapter.opts.worker_num)
+        super().__init__(adapter, 0, configured if configured > 0 else default_worker_num(), name)
         # worker-1 .. worker-(N-1), in fork order.
         self._worker_children: List[ChildProcessInfo] = []
 

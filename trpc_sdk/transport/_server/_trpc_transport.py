@@ -7,7 +7,7 @@
 """tRPC server transport: record options before fork, listen after it.
 
 :meth:`TrpcServerTransport.bind` runs in ``ServiceAdapter.init_transport`` and only keeps the
-options; ``ServiceAdapter.init_transport`` then registers the transport on the engine, and every
+options; ``ServiceAdapter.init_transport`` then registers the transport on the server adapter, and every
 forked worker inherits it through ``process_info.transports``.
 
 :meth:`TrpcServerTransport.listen` runs in each serving process after fork.
@@ -70,7 +70,7 @@ from ._stream_connection import ServerConnection
 from ._stream_connection import TcpConnectionOption
 
 if TYPE_CHECKING:
-    from trpc_sdk.runtime import Reactor
+    from trpc_sdk.runtime import BaseReactor
     from trpc_sdk.runtime import ReactorGroup
     from trpc_sdk.runtime import ThreadModel
 
@@ -320,7 +320,7 @@ class TrpcServerTransport(BaseServerTransport):
     def _serve_stream(self,
                       model: ThreadModel,
                       group: ReactorGroup,
-                      factory_for: Callable[[Reactor], Callable[[], asyncio.BaseProtocol]],
+                      factory_for: Callable[[BaseReactor], Callable[[], asyncio.BaseProtocol]],
                       ssl_context: Optional[ssl.SSLContext] = None) -> StreamListener:
         """Bind one listen socket and serve it on ``group``; kept for :meth:`stop`.
 

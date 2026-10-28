@@ -60,8 +60,8 @@ from .._merge_worker import MergeWorker
 from ._handler_pool import HandleSlot
 from ._handler_pool import SharedHandlerPool
 from ._loop_thread import LoopThread
-from ._loop_thread import MainLoopReactor
 from ._loop_thread import stop_loop_threads
+from ._thread_model import MainLoopReactor
 from ._thread_model import ReactorGroup
 from ._thread_model import ResourceKind
 from ._thread_model import ThreadModel
@@ -84,15 +84,15 @@ class SeparateThread(MergeWorker):
     _thread_name_prefix = "trpc-handle"
     _http_schedule_target = SCHEDULE_TARGET_HANDLE_CONN
 
-    def __init__(self, engine, name: str = "separate_thread_worker") -> None:
-        """Copy the endpoint tables out of the engine; nothing is bound yet.
+    def __init__(self, adapter, name: str = "separate_thread_worker") -> None:
+        """Copy the endpoint tables out of the server adapter; nothing is bound yet.
 
         Args:
-            engine: Engine holding ``process_info`` and ``opts``.
+            adapter: Server adapter holding ``process_info`` and ``opts``.
             name: Process name shown in logs and process listings.
         """
-        super().__init__(engine, name)
-        self.io_thread_num: int = max(1, engine.opts.io_thread_num)
+        super().__init__(adapter, name)
+        self.io_thread_num: int = max(1, adapter.opts.io_thread_num)
         self.io_threads: List[LoopThread] = []
         self.shared_pool: Optional[SharedHandlerPool] = None
         self._warn_io_threads_without_tls()
@@ -136,8 +136,8 @@ class SeparateThread(MergeWorker):
         filled by :meth:`_start_loop_threads`, once the handle loops run.
         """
         main = MainLoopReactor(self.loop)
-        self.loop_threads = [LoopThread(i, name_prefix=self._thread_name_prefix) for i in range(self.thread_num)]
-        self.io_threads = [LoopThread(i, name_prefix="trpc-io") for i in range(1, self.io_thread_num)]
+        self.loop_threads = self._new_loop_threads(range(self.thread_num), self._thread_name_prefix)
+        self.io_threads = self._new_loop_threads(range(1, self.io_thread_num), "trpc-io")
         return ThreadModel(acceptor=main,
                            io=ReactorGroup([main, *self.io_threads], SCHEDULE_TARGET_IO_CONN),
                            handle=ReactorGroup(list(self.loop_threads), SCHEDULE_TARGET_HANDLE_CONN),

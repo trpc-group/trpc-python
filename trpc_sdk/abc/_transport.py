@@ -150,7 +150,7 @@ class BaseServerTransport(BasePlugin):
     """Define server transport lifecycle operations.
 
     The lifecycle is split around the fork. :meth:`bind` runs once in the
-    parent, from ``ServiceAdapter.init_transport``, and only records the options; the engine
+    parent, from ``ServiceAdapter.init_transport``, and only records the options; the server adapter
     then checks the endpoint with :meth:`check_endpoint` and registers the
     transport so every forked worker inherits it. :meth:`listen` runs after
     fork, in each process that serves the endpoint. :meth:`stop` and
@@ -173,7 +173,7 @@ class BaseServerTransport(BasePlugin):
     def check_endpoint(self) -> bool:
         """Check, before fork, that the endpoint can be served. Default: True.
 
-        Called by the engine right after :meth:`bind`. Logs the reason
+        Called by the server adapter right after :meth:`bind`. Logs the reason
         itself; the server exits with status 1 on False.
 
         Returns:

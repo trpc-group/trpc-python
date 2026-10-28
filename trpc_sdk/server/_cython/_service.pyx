@@ -468,12 +468,12 @@ cdef class ServiceAdapter(BaseServiceAdapter):
                 self.stream_handlers[stream_handler.name] = stream_handler
 
     cpdef void init_transport(self):
-        """Resolve and bind this service's transport, then register it on the engine.
+        """Resolve and bind this service's transport, then register it on the server adapter.
 
         Runs before fork, from ``Server.serve``. The transport is resolved
         here rather than in ``create_server`` because a protocol starter may
         be registered after ``create_server`` and before ``serve``. ``bind``
-        only records the options; the engine then checks the endpoint and
+        only records the options; the server adapter then checks the endpoint and
         appends it to ``process_info`` so the worker can listen on it after
         fork.
         """
@@ -485,7 +485,7 @@ cdef class ServiceAdapter(BaseServiceAdapter):
         """Stop naming-service registration if this service has a service_register.
 
         Always returns ``None``. The registry thread still deregisters and
-        then releases ``registry_semaphore`` so the engine can wait.
+        then releases ``registry_semaphore`` so the server adapter can wait.
 
         Returns:
             ``None``.

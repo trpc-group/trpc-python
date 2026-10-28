@@ -29,8 +29,6 @@ from .._listeners import classify_address
 from .._listeners import create_http_msg_handle
 from .._listeners import http_runner_factory
 from .._threadmodel import HandlerThreadInfo
-from .._threadmodel import MainLoopReactor
-from .._threadmodel import ReactorGroup
 from .._threadmodel import ThreadModel
 from .._threadmodel import run_start_hooks
 from .._threadmodel import run_stop_hooks
@@ -53,10 +51,12 @@ class RpcTaskProcess(BaseWorker, Process):
     ``USER`` addresses are listened on in this process with ``SO_REUSEPORT``.
     """
 
-    def __init__(self, index: int, pipes: List[RpcTaskPipes], ready_flags: Any, engine) -> None:
+    _main_loop_only = True
+
+    def __init__(self, index: int, pipes: List[RpcTaskPipes], ready_flags: Any, adapter) -> None:
         """Record this child's index and pre-fork pipes; bind nothing yet."""
         super().__init__(f"rpc_task-{index}", ProcessType.WORKER)
-        self._bind_process_info(engine)
+        self._bind_process_info(adapter)
 
         self.index: int = index
         self.worker_id = index
@@ -65,7 +65,7 @@ class RpcTaskProcess(BaseWorker, Process):
         self.worker_pipe_conn, self.rpcz_pipe_conn = pipes[index].endpoints(PipeEnd.LEFT)
         self._ready_flags = ready_flags
         self._controlled = True
-        self.drain_seconds = max(0, int(getattr(engine.opts, "close_wait_time", 0) or 0)) / 1000.0
+        self.drain_seconds = max(0, int(getattr(adapter.opts, "close_wait_time", 0) or 0)) / 1000.0
         # User protocol transports, destroyed after ``on_stop``.
         self._user_transports: List[BaseServerTransport] = []
         self._thread_info: Optional[HandlerThreadInfo] = None
@@ -101,12 +101,7 @@ class RpcTaskProcess(BaseWorker, Process):
 
     def _build_thread_model(self) -> ThreadModel:
         """Main loop only; every rpc task binds the same addresses, so ``SO_REUSEPORT`` is always on."""
-        main = MainLoopReactor(self.loop)
-        return ThreadModel(acceptor=main,
-                           io=ReactorGroup([main]),
-                           handle=ReactorGroup([main]),
-                           reuse_port=True,
-                           worker=self)
+        return ThreadModel.main_loop(self.loop, worker=self, reuse_port=True)
 
     def _fail_startup(self, what: str, err: BaseException) -> None:
         """Log a startup failure and exit with status 1."""

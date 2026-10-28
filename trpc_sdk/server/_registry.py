@@ -9,7 +9,7 @@
 :func:`start_service_registry` gives every service with a configured
 registry a :class:`ServiceRegister`, which runs register / heartbeat /
 deregister on a :class:`RegistryThread` with its own event loop, not the
-worker's. The engine's ``registry_semaphore`` (initialised to
+worker's. The server adapter's ``registry_semaphore`` (initialised to
 ``service_num``) is the handshake that lets ``TrpcServerAdapter.close``
 wait for deregister before SIGTERM.
 """
@@ -44,7 +44,7 @@ class RegistryThread(threading.Thread):
     pauses, and the coroutine is started again. That retry cadence is how
     heartbeat / re-register is driven, not a one-shot register.
 
-    ``deregister_done`` is the engine's ``registry_semaphore``, initialised
+    ``deregister_done`` is the server adapter's ``registry_semaphore``, initialised
     to ``service_num`` (see ``TrpcServerAdapter.__init__``). :meth:`run`
     ``acquire``s one permit at start and ``release``s it after
     ``deregister_coro_func`` finishes, so ``TrpcServerAdapter.close`` can
@@ -70,7 +70,7 @@ class RegistryThread(threading.Thread):
                 and stays alive for heartbeat / retry.
             deregister_coro_func: Coroutine factory that deregisters this
                 service; run once after the retry loop exits.
-            deregister_done: Engine ``registry_semaphore``. Acquired at the
+            deregister_done: Server adapter ``registry_semaphore``. Acquired at the
                 start of :meth:`run`, released after deregister.
             daemon: Passed through to ``threading.Thread.daemon``.
         """
