@@ -4,12 +4,14 @@
 #
 # tRPC-Python is licensed under Apache-2.0.
 
-"""User-registered HTTP routes and static-file prefixes.
+"""User-registered HTTP routes, static-file prefixes and the ``@route`` decode callback.
 
 ``@route`` writes into :data:`RegisteredRoutes`; :func:`register_static`
-fills :data:`StaticFileRouters`. The worker reads both when it builds
-the aiohttp app: precise user routes first, then static prefixes, then
-the RPC catch-all.
+fills :data:`StaticFileRouters`. :class:`~trpc_sdk.http.HttpServerTransport`
+reads both when it builds the aiohttp app, after fork: precise user routes
+first, then static prefixes, then the RPC catch-all.
+:func:`register_user_http_decode_func` replaces how a ``@route`` request is
+decoded; the transport reads it on every request.
 """
 
 from __future__ import annotations
@@ -27,8 +29,8 @@ from trpc_sdk.abc import TrpcContext
 class HttpRoute:
     """One user-registered HTTP callback.
 
-    Stored in :data:`RegisteredRoutes` and later bound onto aiohttp
-    via :meth:`~trpc_sdk.http.HttpMessageHandle.handle_user_http_request`.
+    Stored in :data:`RegisteredRoutes` and later bound onto aiohttp by
+    :class:`~trpc_sdk.http.HttpServerTransport`.
     ``service_name`` limits the route to one HTTP service when set.
     """
 
@@ -47,6 +49,27 @@ class HttpRoute:
 
 RegisteredRoutes: Dict[str, HttpRoute] = {}
 StaticFileRouters = {}
+
+HttpDecodeCallback = Callable[[TrpcContext], None]
+_user_http_decode_cb: Optional[HttpDecodeCallback] = None
+
+
+def register_user_http_decode_func(user_http_decode: HttpDecodeCallback) -> None:
+    """Replace the default header-only decode used by ``@route`` handlers.
+
+    A registered callback fully replaces the default, including tRPC header
+    parsing. It takes effect for requests served after the call.
+
+    Args:
+        user_http_decode: Callback that receives the tRPC context.
+    """
+    global _user_http_decode_cb
+    _user_http_decode_cb = user_http_decode
+
+
+def get_user_http_decode_func() -> Optional[HttpDecodeCallback]:
+    """Return the callback set by :func:`register_user_http_decode_func`, or ``None`` for the default decode."""
+    return _user_http_decode_cb
 
 
 def route(path: str, method: str = hdrs.METH_ANY, service_name: Optional[str] = None):

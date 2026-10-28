@@ -12,15 +12,15 @@ import ...``.
 The package is split by responsibility:
 
 - :mod:`~trpc_sdk.http._codec` — server/client HTTP codec and parsers
-- :mod:`~trpc_sdk.http._http_transport` — server listen registration
-- :mod:`~trpc_sdk.http._message_handle` — :class:`HttpMessageHandle`, the
-  aiohttp-to-tRPC bridge
+- :mod:`~trpc_sdk.http._http_transport` — :class:`HttpServerTransport`: the
+  aiohttp application of one endpoint and its aiohttp-to-tRPC bridge
 - :mod:`~trpc_sdk.http._client_transport` — aiohttp client round trip
 - :mod:`~trpc_sdk.http._client` — :class:`Client` with naming and filters
 - :mod:`~trpc_sdk.http._sse_client` — Server-Sent Events on top of Client
 - :mod:`~trpc_sdk.http._sse_event` — :class:`SSEEvent` model
 - :mod:`~trpc_sdk.http._sse_parser` — incremental event-stream decoder
-- :mod:`~trpc_sdk.http._routes` — ``@route`` and static-file prefixes
+- :mod:`~trpc_sdk.http._routes` — ``@route``, static-file prefixes and the
+  ``@route`` decode callback
 - :mod:`~trpc_sdk.http._serialization_form` — form / query-string serializer
 - :mod:`~trpc_sdk.http._context` — HTTP request/response accessors on context
 - :mod:`~trpc_sdk.http._options` — HTTP client option assembly for invoke
@@ -71,14 +71,13 @@ from ._http_response import TrpcHttpResponse
 from ._http_response import create_rsp_object
 from ._http_transport import HttpServerTransport
 from ._http_transport import HttpServerTransportFactory
-from ._message_handle import HttpDecodeCallback
-from ._message_handle import HttpMessageHandle
-from ._message_handle import register_user_http_decode_func
 from ._options import get_options
+from ._routes import HttpDecodeCallback
 from ._routes import HttpRoute
 from ._routes import RegisteredRoutes
 from ._routes import StaticFileRouters
 from ._routes import register_static
+from ._routes import register_user_http_decode_func
 from ._routes import route
 from ._serialization_form import FormSerializer
 from ._sse_client import SSEClient
@@ -108,7 +107,6 @@ __all__ = [
     # Server transport
     "HttpServerTransport",
     "HttpServerTransportFactory",
-    "HttpMessageHandle",
     "HttpDecodeCallback",
     "register_user_http_decode_func",
     # Client transport

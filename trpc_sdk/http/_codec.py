@@ -76,7 +76,7 @@ class ServerHttpCodec(BaseCodec):
         """Write status, Content-Type and tRPC headers onto the response.
 
         Does not wrap ``body``; aiohttp sends it as-is after
-        :class:`~trpc_sdk.http.HttpMessageHandle` assigns it to
+        :class:`~trpc_sdk.http.HttpServerTransport` assigns it to
         ``response.body``.
 
         Args:

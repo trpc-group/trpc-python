@@ -186,8 +186,8 @@ class BaseWorker(WorkerExit):
         # Idle/request timeout (ms).
         self.timeouts: List[int] = []
         self.tran_opts: List[BaseServerTransportOption] = []
-        # ``transports[i].opts`` is ``tran_opts[i]``; ``classify_address``
-        # decides which process and loop calls ``listen()`` on each.
+        # ``transports[i].opts`` is ``tran_opts[i]``. Each mode walks this
+        # list and decides which process and loop calls ``listen()`` on each.
         self.transports: List[BaseServerTransport] = []
         # Transports this process listened on, each with the loop whose thread
         # must call its ``stop``. Filled after fork only.
@@ -759,22 +759,23 @@ class BaseWorker(WorkerExit):
             self.loop.add_signal_handler(signal.SIGUSR2, self.memory_inspector.dump_to_file)
         self._watch_children()
 
-    def _listen_on(self, index: int, loop: Optional[asyncio.AbstractEventLoop] = None) -> BaseServerTransport:
-        """Call ``listen`` on the transport of address ``index`` and remember it.
+    def _listen_on(self, transport: BaseServerTransport,
+                   loop: Optional[asyncio.AbstractEventLoop] = None) -> BaseServerTransport:
+        """Call ``listen`` on ``transport`` and remember it.
 
         Recorded before the call, so a ``listen`` that fails halfway still
         gets its ``stop`` when startup is undone. The transport reads where to
         serve from the installed thread model.
 
         Args:
-            index: Position of the address in ``transports``.
+            transport: Transport of one endpoint, from ``transports`` or a
+                replacement bound to the same options.
             loop: Loop of the calling thread, where ``stop`` must run; the
                 main loop by default.
 
         Returns:
             The transport.
         """
-        transport = self.transports[index]
         self._listening.append((transport, loop or self.loop))
         transport.listen()
         return transport

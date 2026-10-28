@@ -51,11 +51,9 @@ from typing import List
 from typing import Optional
 
 from trpc_sdk.log import logger
-from .._constants import AddressKind
 from .._constants import LOOP_THREAD_STOP_TIMEOUT
 from .._constants import SCHEDULE_TARGET_HANDLE_CONN
 from .._constants import SCHEDULE_TARGET_IO_CONN
-from .._listeners import classify_address
 from .._merge_worker import MergeWorker
 from ._handler_pool import HandleSlot
 from ._handler_pool import SharedHandlerPool
@@ -115,19 +113,10 @@ class SeparateThread(MergeWorker):
         """
         if self.io_thread_num <= 1:
             return
-        tcp = [i for i, _ in enumerate(self.addresses) if self._is_stream(i)]
-        if any(self.tran_opts[i].tls_cert and self.tran_opts[i].tls_key for i in tcp):
+        if any(t.ipc_forwardable and t.opts.tls_cert and t.opts.tls_key for t in self.transports):
             return
         logger.warning("[separate thread worker] io_thread_num=%s, but no tRPC TCP endpoint uses TLS; "
                        "extra I/O loops only pay off for TLS", self.io_thread_num)
-
-    def _is_stream(self, index: int) -> bool:
-        """Whether address ``index`` is a ``TCP`` one.
-
-        Args:
-            index: Position of the address in ``addresses``.
-        """
-        return classify_address(self, index) is AddressKind.TCP
 
     def _build_thread_model(self) -> ThreadModel:
         """I/O on the main loop plus ``io_thread_num - 1`` I/O threads; handlers on the handle threads.
@@ -162,31 +151,6 @@ class SeparateThread(MergeWorker):
             thread.start()
         if self.io_threads:
             self._wait_threads_ready(self.io_threads, "I/O")
-
-    def _start_stream(self, index: int) -> None:
-        """Serve tRPC over TCP on one address from the I/O loops.
-
-        With the main loop as the only I/O loop the transport serves it with
-        ``create_server``; otherwise it accepts on the main loop and hands
-        each connection to an I/O loop. Either way the connections hand their
-        requests to the handle threads through the shared pool.
-
-        Args:
-            index: Position of the address in ``addresses``.
-        """
-        self._listen_on(index)
-
-    def _start_datagram(self, index: int) -> None:
-        """Serve tRPC over UDP on one address, once per I/O loop.
-
-        Several sockets on one address need ``SO_REUSEPORT``, which the
-        transport sets; a single one does not get it, so a second instance
-        fails to bind instead of sharing.
-
-        Args:
-            index: Position of the address in ``addresses``.
-        """
-        self._listen_on(index)
 
     async def _release_main_loop(self) -> None:
         """Release the main loop's user protocol transports and aiohttp runners; idempotent.

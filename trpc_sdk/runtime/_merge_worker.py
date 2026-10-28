@@ -13,26 +13,25 @@ request therefore never crosses a process boundary, which is what removes the
 IPC hop that ``separate`` mode pays.
 
 Every endpoint is served by its own transport; this worker only decides on
-which loops. It asks :func:`~trpc_sdk.runtime._listeners.classify_address`,
-the same function ``separate`` mode uses, for the address's
-:class:`~trpc_sdk.runtime._constants.AddressKind`. The serving loops are named
-in the :class:`~trpc_sdk.runtime.ThreadModel` this worker installs after
-fork, and each transport's ``listen()`` reads them from there:
+which loops. The serving loops are named in the
+:class:`~trpc_sdk.runtime.ThreadModel` this worker installs after fork, and
+each transport's ``listen()`` reads them from there:
 
-* ``TCP`` and ``HTTP`` are served by the loop threads: the transport binds
+* tRPC over TCP and HTTP are served by the loop threads: the transport binds
   once, accepts on the main thread, and hands each connection to a loop
   thread picked by :func:`~trpc_sdk.transport.get_next_worker`.
-* ``UDP`` has nothing to accept, so each loop thread binds its own
+* tRPC over UDP has nothing to accept, so each loop thread binds its own
   ``SO_REUSEPORT`` socket on the same address and the kernel spreads
   datagrams over them. That spreading is a Linux behaviour; BSD-derived
   kernels (macOS) deliver to the most recently bound socket instead, which
   makes UDP effectively single threaded there. It still serves correctly,
   just without the parallelism. ``register_dispatcher_worker_func`` does not
   apply to UDP.
-* ``USER`` protocol starters and the timer executor run on serving thread 0,
-  so every piece of user code runs on a serving thread and none on the main
-  one. The user worker-exit callbacks are the exception: they run on the main
-  thread, after every serving loop has finished draining.
+* User protocols (a :class:`~trpc_sdk.transport.UserProtocolTransport`) and
+  the timer executor run on serving thread 0, so every piece of user code
+  runs on a serving thread and none on the main one. The user worker-exit
+  callbacks are the exception: they run on the main thread, after every
+  serving loop has finished draining.
 
 Every serving thread is set up completely — task pipes, ``on_start``
 hooks — before any address is bound, so no request can arrive on
@@ -64,14 +63,10 @@ from typing import Sequence
 
 from trpc_sdk.abc import BaseServerTransport
 from trpc_sdk.abc import ProcessType
-from trpc_sdk.http import HttpMessageHandle
 from trpc_sdk.log import logger
+from trpc_sdk.transport import UserProtocolTransport
 from trpc_sdk.utils import TimerExecutor
-from ._constants import AddressKind
 from ._constants import LOOP_THREAD_STOP_TIMEOUT
-from ._listeners import classify_address
-from ._listeners import create_http_msg_handle
-from ._listeners import http_runner_factory
 from ._threadmodel import HandlerThreadInfo
 from ._threadmodel import LoopThread
 from ._threadmodel import MainLoopReactor
@@ -130,10 +125,6 @@ class MergeWorker(BaseWorker):
         self.ready_timeout: float = max(0, adapter.opts.ready_timeout) / 1000.0
         self.loop_threads: List[LoopThread] = []
 
-        # Bridge between aiohttp requests and the tRPC handler, one per HTTP
-        # address index. Shared by every thread serving that address: it holds
-        # no loop state, only the address index and this worker.
-        self._http_msg_handles: Dict[int, HttpMessageHandle] = {}
         # The main loop's identity when it is the serving loop; set once its
         # start hooks ran, so only then do its stop hooks run.
         self._main_thread_info: Optional[HandlerThreadInfo] = None
@@ -233,40 +224,33 @@ class MergeWorker(BaseWorker):
         Called by :meth:`~trpc_sdk.runtime._worker.BaseWorker._prepare_to_serve`
         once plugins, task connections and every serving thread are up.
 
-        Each address is served according to its kind, read by
-        :func:`~trpc_sdk.runtime._listeners.classify_address`. An address no
-        listener matches (an unsupported network) is a configuration error
-        with no sane fallback, so the process exits with status 1 rather than
-        starting up half-listening.
+        User protocols are started from the serving loop itself: here on a
+        single loop, from :meth:`_init_service_thread` on a threaded worker.
+        Every other transport is just told to ``listen``; where it serves is
+        its own business, read from the thread model. Unsupported networks
+        were already rejected by ``check_endpoint`` before fork. A transport
+        that fails to listen aborts startup with status 1 rather than
+        leaving the process half-listening.
         """
         logger.info("[merge worker] %s start_worker_process(), serving loops: %s", type(self).__name__,
                     self.thread_num)
-        # TODO：addresses 用 基类 tran_opts
-        for i, _ in enumerate(self.addresses):
+        for transport in self.transports:
             try:
-                kind = classify_address(self, i)
-                if kind is AddressKind.USER:
-                    # On a threaded worker, serving thread 0 already started it.
+                if isinstance(transport, UserProtocolTransport):
                     if not self.loop_threads:
-                        self._listen_user(i, self.thread_model.acceptor)
-                elif kind is AddressKind.TCP:
-                    self._start_stream(i)
-                elif kind is AddressKind.UDP:
-                    self._start_datagram(i)
-                elif kind is AddressKind.HTTP:
-                    self._http_msg_handles[i] = create_http_msg_handle(self, i)
-                    self._start_http(i)
-                else:
-                    raise ValueError(f"unsupported network {self.networks[i]!r}")
+                        self._listen_user(transport, self.thread_model.acceptor)
+                    continue
+                self._listen_on(transport)
             except ValueError as err:
-                logger.error("[merge worker] cannot serve %s: %s", self.addresses[i], err)
+                # A TLS certificate path that does not exist, for instance.
+                logger.error("[merge worker] cannot serve %s: %s", transport.opts.address, err)
                 self._abort_startup()
             except OSError as err:
                 # Typically EADDRINUSE: another instance holds the port and
                 # tcp_reuse_port is off. Also TimeoutError (an OSError) from a
                 # serving thread that did not set its listener up in time.
                 # Serving half the addresses would be worse than not starting.
-                logger.error("[merge worker] failed to bind %s: %s", self.addresses[i], repr(err))
+                logger.error("[merge worker] failed to bind %s: %s", transport.opts.address, repr(err))
                 self._abort_startup()
 
     def _abort_startup(self) -> None:
@@ -395,63 +379,20 @@ class MergeWorker(BaseWorker):
         self._thread_infos[index] = info
 
         if index == 0:
-            for i, _ in enumerate(self.addresses):
-                if classify_address(self, i) is AddressKind.USER:
-                    self._listen_user(i, self.loop_threads[index])
+            for transport in self.transports:
+                if isinstance(transport, UserProtocolTransport):
+                    self._listen_user(transport, self.loop_threads[index])
 
-    def _listen_user(self, index: int, reactor: Any) -> None:
+    def _listen_user(self, transport: BaseServerTransport, reactor: Any) -> None:
         """Start one user protocol on ``reactor``'s thread and remember where to destroy its transport.
 
         Args:
-            index: Position of the address in ``addresses``.
+            transport: The endpoint's
+                :class:`~trpc_sdk.transport.UserProtocolTransport`.
             reactor: The serving reactor whose thread is calling; the
                 starter sees the worker as viewed from its loop.
         """
-        self._user_transports.setdefault(id(reactor), []).append(self._listen_on(index, reactor.loop))
-
-    def _start_stream(self, index: int) -> None:
-        """Serve tRPC over TCP on one address.
-
-        With a single loop the transport serves it with ``create_server`` on
-        the main loop. Peer mode takes this path too, with ``tcp_reuse_port``
-        forced on by the worker. With loop threads the transport binds once,
-        accepts on the main loop and hands each connection to a thread.
-
-        Args:
-            index: Position of the address in ``addresses``.
-        """
-        self._listen_on(index)
-
-    def _start_datagram(self, index: int) -> None:
-        """Serve tRPC over UDP on one address, once per serving loop.
-
-        Datagrams cannot be handed over the way accepted sockets can, so each
-        loop binds its own ``SO_REUSEPORT`` socket on the same address and lets
-        the kernel do the spreading. The transport sets ``SO_REUSEPORT`` with
-        several serving loops whatever ``tcp_reuse_port`` says: this process
-        binds the address N times. See the module docstring for what that
-        means outside Linux. Each endpoint is kept on the thread model as soon
-        as it is bound, so one bound before a failure is released too.
-
-        Args:
-            index: Position of the address in ``addresses``.
-        """
-        self._listen_on(index)
-
-    def _start_http(self, index: int) -> None:
-        """Serve one HTTP endpoint, one aiohttp application per serving loop.
-
-        The transport builds every runner on the loop that will serve it,
-        from the factory given here, and keeps them on the thread model to be
-        cleaned up on their own loops.
-
-        Args:
-            index: Position of the address in ``addresses``. Its entry in
-                ``_http_msg_handles`` must already exist.
-        """
-        self.transports[index].set_runner_factory(
-            http_runner_factory(self, index, self._http_msg_handles[index]))
-        self._listen_on(index)
+        self._user_transports.setdefault(id(reactor), []).append(self._listen_on(transport, reactor.loop))
 
     def _start_timers(self) -> None:
         """Start the timer executor, on serving thread 0 when there are threads.

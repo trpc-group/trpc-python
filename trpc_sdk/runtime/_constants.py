@@ -26,28 +26,6 @@ class Network(str, Enum):
     HTTP = "http"
 
 
-@unique
-class AddressKind(Enum):
-    """Which listener serves one listen address.
-
-    Decided by :func:`~trpc_sdk.runtime._listeners.classify_address`, in the
-    order the members are listed: a registered user protocol first, then the
-    network type. Every mode uses the same decision; they differ only in
-    *which process* listens on each kind.
-    """
-
-    # A starter registered with ``register_protocol_handle`` binds it.
-    USER = "user"
-    # tRPC frames over a stream socket; cut into frames by a parser.
-    TCP = "tcp"
-    # tRPC over datagrams; each serving loop binds with SO_REUSEPORT.
-    UDP = "udp"
-    # aiohttp application.
-    HTTP = "http"
-    # No listener matches; a configuration error.
-    UNKNOWN = "unknown"
-
-
 # Process models for ServerOption.mode, translated from YAML `global.processmodel`.
 # merge: the worker accepts and runs handlers in one process. Its thread model
 # comes from `io_thread_num` / `handle_thread_num`; see `trpc_sdk/server/_option_resolver.py`.

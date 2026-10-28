@@ -45,8 +45,9 @@ mode. Subpackages hold the pieces those workers are built from:
 - :mod:`~trpc_sdk.runtime._worker` — ``BaseWorker``: the lifecycle template
   every serving process follows, and the fork and supervision of children
 - :mod:`~trpc_sdk.runtime._merge_worker` — merge mode (trpc-cpp
-  ``merge_runtime``); every mode listens through the services' transports
-  (:mod:`trpc_sdk.transport._server`), dispatching on ``classify_address``
+  ``merge_runtime``); every mode listens by walking the services' transports
+  (:mod:`trpc_sdk.transport._server`) and asking each one what it is:
+  ``UserProtocolTransport`` or not, ``ipc_forwardable`` or not
 - :mod:`~trpc_sdk.runtime._threadmodel` — the :class:`ThreadModel` every
   server transport reads in ``listen``, loop threads, the handle-thread
   pool, per-serving-loop hooks, and
@@ -55,9 +56,6 @@ mode. Subpackages hold the pieces those workers are built from:
   ``runtime/threadmodel`` and ``separate_runtime``); responses cross back
   to the I/O loops through :class:`~trpc_sdk.protocol.ConnWriter`,
   re-exported here
-- :mod:`~trpc_sdk.runtime._listeners` — address classification and the aiohttp
-  application every mode serves HTTP with. Sockets and serving are the
-  transports' (:mod:`trpc_sdk.transport._server`)
 - :mod:`~trpc_sdk.runtime._common` — SIGTERM callbacks, process metadata and the exit template every mode shares (trpc-cpp
   ``runtime/common``)
 - :mod:`~trpc_sdk.runtime._process` — task children and the pre-fork
