@@ -29,6 +29,7 @@ from typing import List
 from typing import Optional
 
 from trpc_sdk.log import logger
+from trpc_sdk.utils import TimerScope
 from trpc_sdk.utils import registered_timer_tasks
 from .._constants import CHILD_EXIT_POLL_INTERVAL
 from .._types import ChildProcessInfo
@@ -43,17 +44,22 @@ class _StartupInterrupted(Exception):
 
 
 def warn_unnamed_timers(owner: str, copies: int, unit: str) -> None:
-    """Warn that timers without a name run once per serving process.
+    """Warn that process-scope timers without a name run once per serving process.
 
     Called before the fork, because it depends on what the application
-    registered at import time.
+    registered at import time. Thread-scope timers are left out: running
+    once per handler loop is what they ask for.
 
     Args:
         owner: Process name, for the log line.
         copies: How many processes run each unnamed timer.
         unit: What those processes are called ("rpc tasks", "peer workers").
     """
-    unnamed = [info.cls.__name__ for info in registered_timer_tasks() if not info.name]
+    unnamed = [
+        info.cls.__name__
+        for info in registered_timer_tasks()
+        if not info.name and info.scope is TimerScope.PROCESS
+    ]
     if unnamed and copies > 1:
         logger.warning("[%s] timers %s have no name, so each of the %s %s runs them; "
                        "name one 'worker:<index>' to run it once", owner, unnamed, copies, unit)

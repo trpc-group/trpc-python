@@ -20,8 +20,8 @@ The package is split by responsibility:
 - :mod:`~trpc_sdk.utils._network` — IP conversion, port-availability probes,
   and post-fork listen-socket constructors (:func:`create_new_socket`)
 - :mod:`~trpc_sdk.utils._loop_lib` — event-loop policy via :func:`get_async_lib`
-- :mod:`~trpc_sdk.utils._timer` — :class:`TimerType`, :class:`TimerTaskInfo`,
-  timer tasks and executors
+- :mod:`~trpc_sdk.utils._timer` — :class:`TimerType`, :class:`TimerScope`,
+  :class:`TimerTaskInfo`, timer tasks and per-process / per-thread executors
 - :mod:`~trpc_sdk.utils._queue` — async hand-off queue
 - :mod:`~trpc_sdk.utils._time_utils` — millisecond / microsecond clocks
 - :mod:`~trpc_sdk.utils._str_utils` — :func:`str2bool`
@@ -120,6 +120,7 @@ from ._str_utils import str2bool
 from ._time_utils import now_ms
 from ._time_utils import now_us
 from ._timer import TimerExecutor
+from ._timer import TimerScope
 from ._timer import TimerTask
 from ._timer import TimerTaskInfo
 from ._timer import TimerType
@@ -138,6 +139,7 @@ __all__ = [
     "UNIX_TYPE",
     "TcpState",
     "TimerType",
+    "TimerScope",
     "TimerTaskInfo",
     "convert_address_to_str",
     "get_addr_from_transport",

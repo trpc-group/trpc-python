@@ -157,9 +157,7 @@ class RpcTaskProcess(BaseWorker, Process):
         call does nothing.
         """
         self._stop_listening()
-        timer, self.timer = self.timer, None
-        if timer is not None:
-            timer.stop()
+        self._stop_timers()
         info, self._thread_info = self._thread_info, None
         try:
             if info is not None:

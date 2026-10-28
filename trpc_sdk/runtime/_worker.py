@@ -176,7 +176,10 @@ class BaseWorker(WorkerExit):
         self.parsers: List[Optional[BaseServerProtocolParser]] = []
         self.services: List[Any] = []
 
+        # Runs the process-scope timers, on handler loop 0.
         self.timer: Optional[TimerExecutor] = None
+        # One per handler loop, running the thread-scope timers there.
+        self.thread_timers: List[TimerExecutor] = []
 
         # This worker's end of the dispatcher req/rsp pipe and the RPCZ pipe.
         self.worker_pipe_conn: Optional[PipeConnection] = None
@@ -699,13 +702,40 @@ class BaseWorker(WorkerExit):
         return ThreadModel.main_loop(self.loop, worker=self, reuse_port=getattr(self, "tcp_reuse_port", False))
 
     def _start_timers(self) -> None:
-        """Start this process's timer executor, labelled ``worker:<id>``.
+        """Start this process's timer executors, labelled ``worker:<id>``.
 
-        A process that runs no business code overrides it with a no-op, so an
+        One process executor on handler loop 0, and one thread executor per
+        handler loop (``thread_model.handle``), so I/O-only loops run none.
+        Each executor must start on its loop's own thread, hence
+        ``reactor.submit``; on the main loop that runs it directly. A process
+        that runs no business code overrides this with a no-op, so an
         untargeted timer runs once per handler process only.
+
+        Raises:
+            Exception: An executor failed to start on its loop.
         """
-        self.timer = TimerExecutor(loop=self.loop, name=f"worker:{self.worker_id}")
-        self.timer.run()
+        name = f"worker:{self.worker_id}"
+        model = self.thread_model
+        reactors = model.handle.reactors
+        self.timer = TimerExecutor.for_process(reactors[0].loop, name)
+        reactors[0].submit(self.timer.run, timeout=model.ready_timeout)
+        for reactor in reactors:
+            timer = TimerExecutor.for_thread(reactor.loop, name, reactor.index)
+            self.thread_timers.append(timer)
+            reactor.submit(timer.run, timeout=model.ready_timeout)
+
+    def _stop_timers(self) -> None:
+        """Stop the process executor and every thread executor; idempotent.
+
+        For a process serving on its main loop alone. With loop threads, each
+        thread stops its own executors before its loop stops.
+        """
+        timer, self.timer = self.timer, None
+        thread_timers, self.thread_timers = self.thread_timers, []
+        if timer is not None:
+            timer.stop()
+        for each in thread_timers:
+            each.stop()
 
     def _bind_process_instance(self) -> None:
         """Point this worker's record at the live process, so ``WorkerInfo.pid`` is this pid."""

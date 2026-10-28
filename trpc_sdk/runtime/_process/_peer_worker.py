@@ -115,14 +115,11 @@ class PeerWorker(MergeWorker):
         return HandlerThreadInfo(index=self.index, count=self.worker_num, loop=self.loop)
 
     def _on_graceful_exit(self) -> None:
-        """Stop the timers, then run merge mode's exit: ``on_stop``, the HTTP runners, the UDP endpoints.
+        """Run merge mode's exit: the timers, ``on_stop``, the HTTP runners, the UDP endpoints.
 
         Runs after the loop stopped. Every step takes what it releases out of
         ``self`` first, so a second call does nothing.
         """
-        timer, self.timer = self.timer, None
-        if timer is not None:
-            timer.stop()
         try:
             super()._on_graceful_exit()
         except Exception as err:  # pylint: disable=broad-except
