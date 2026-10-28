@@ -1,0 +1,33 @@
+# Several serving threads share one listen socket. io_num and handle_num
+# must match; a mismatch is rewritten to handle_num. Each thread loads
+# its own ResNet50. One task process batches SayHi.
+global:
+  namespace: Development
+  env_name: test
+  processmodel:
+    mode: single_process
+    io_handle_type: merge
+    io_num: 3
+    handle_num: 3
+    task_num: 1
+
+server:
+  app: test
+  server: Greeter
+  close_wait_time: 2000
+  tcp_reuse_port: false
+  check_timeout: false
+  io_wait_count: 1
+  service:
+    - name: trpc.trpc_python_group.hellotrt.Greeter
+      ip: 127.0.0.1
+      port: 8110
+      network: tcp
+      protocol: trpc
+      timeout: 100000
+
+plugins:
+  log:
+    default:
+      - writer: console
+        level: info

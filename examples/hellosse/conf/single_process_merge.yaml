@@ -1,0 +1,33 @@
+# Several serving threads share one listen socket. The main thread accepts
+# and hands each HTTP connection to a serving thread, which runs the SSE route.
+# io_num and handle_num must match; a mismatch is rewritten to handle_num.
+# One SSE connection stays on the thread that took it.
+global:
+  namespace: Development
+  env_name: test
+  processmodel:
+    mode: single_process
+    io_handle_type: merge
+    io_num: 3
+    handle_num: 3
+
+server:
+  app: test
+  server: test_python
+  close_wait_time: 2000
+  tcp_reuse_port: false
+  check_timeout: false
+  service:
+    - name: trpc.test.trpc_python.TestSse
+      ip: 127.0.0.1
+      port: 8081
+      network: tcp
+      protocol: http
+      timeout: 1000000
+      disable_request_timeout: true
+
+plugins:
+  log:
+    default:
+      - writer: console
+        level: info

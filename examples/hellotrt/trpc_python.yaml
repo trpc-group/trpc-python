@@ -1,0 +1,42 @@
+# Single-loop merge. The other four layouts live under conf/.
+# task_num starts one task process. io_wait_count keeps the port closed
+# until that process has loaded its ResNet50.
+global:
+  namespace: Development
+  env_name: test
+  processmodel:
+    mode: single_process
+    io_handle_type: merge
+    io_num: 1
+    handle_num: 1
+    task_num: 1
+
+server:
+  app: test
+  server: Greeter
+  close_wait_time: 2000
+  tcp_reuse_port: false
+  check_timeout: false
+  io_wait_count: 1
+  service:
+    - name: trpc.trpc_python_group.hellotrt.Greeter
+      ip: 127.0.0.1
+      port: 8000
+      network: tcp
+      protocol: trpc
+      timeout: 100000
+
+client:
+  timeout: 30000
+  namespace: Development
+  service:
+    - name: trpc.trpc_python_group.hellotrt.Greeter
+      network: tcp
+      protocol: trpc
+      timeout: 30000
+
+plugins:
+  log:
+    default:
+      - writer: console
+        level: info

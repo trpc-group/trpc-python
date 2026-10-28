@@ -1,0 +1,49 @@
+# Single process, separate thread model (single_process + separate).
+# One process. io_num I/O loops (the main thread plus trpc-io-*) read and
+# write. handle_num handle threads (trpc-handle-*) run handlers. One TCP
+# listen socket. protocol trpc UDP follows the I/O loops, not the handle
+# threads. protocol user binds once, on trpc-handle-0.
+# Multi-process (multi_process + separate) is examples/helloworld/features/separate.
+global:
+  namespace: Development
+  env_name: test
+  processmodel:
+    mode: single_process
+    io_handle_type: separate
+    io_num: 2
+    handle_num: 3
+
+server:
+  app: test
+  server: Greeter
+  close_wait_time: 100
+  tcp_reuse_port: false
+  check_timeout: false
+  service:
+    - name: trpc.trpc_python_group.helloworld.GreeterTcp
+      ip: 127.0.0.1
+      port: 18110
+      network: tcp
+      protocol: trpc
+      timeout: 10000
+      disable_request_timeout: true
+    - name: trpc.trpc_python_group.helloworld.GreeterUdp
+      ip: 127.0.0.1
+      port: 18111
+      network: udp
+      protocol: trpc
+      timeout: 10000
+      disable_request_timeout: true
+    - name: trpc.trpc_python_group.helloworld.GreeterUser
+      ip: 127.0.0.1
+      port: 18113
+      network: udp
+      protocol: user
+      timeout: 10000
+      disable_request_timeout: true
+
+plugins:
+  log:
+    default:
+      - writer: console
+        level: info

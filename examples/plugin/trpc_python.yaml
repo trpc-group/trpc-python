@@ -1,0 +1,31 @@
+# User-defined plugin example. Single process, one event loop.
+# The Greeter stub is helloworld's. This port is not 8000, so both
+# examples can listen at once.
+global:
+  namespace: Development
+  env_name: test
+  processmodel:
+    mode: single_process
+    io_handle_type: merge
+
+server:
+  app: test
+  server: Greeter
+  service:
+    - name: trpc.trpc_python_group.helloworld.Greeter
+      ip: 127.0.0.1
+      port: 8200
+      network: tcp
+      protocol: trpc
+      timeout: 5000
+      disable_request_timeout: true
+
+plugins:
+  log:
+    default:
+      - writer: console
+        level: info
+  # Read by BusinessPlugin.init via get_plugins_config. The framework
+  # does not build a plugin from this key.
+  business:
+    token: secret

@@ -1,0 +1,32 @@
+# Single process, separate thread model, HTTP only.
+# The main thread accepts and hands each connection to a trpc-handle-* thread.
+# I/O threads (trpc-io-*) do not run HTTP handlers. One LISTEN socket.
+global:
+  namespace: Development
+  env_name: test
+  processmodel:
+    mode: single_process
+    io_handle_type: separate
+    io_num: 2
+    handle_num: 3
+
+server:
+  app: test
+  server: Greeter
+  close_wait_time: 100
+  tcp_reuse_port: false
+  check_timeout: false
+  service:
+    - name: trpc.trpc_python_group.helloworld.GreeterHttp
+      ip: 127.0.0.1
+      port: 18112
+      network: tcp
+      protocol: http
+      timeout: 10000
+      disable_request_timeout: true
+
+plugins:
+  log:
+    default:
+      - writer: console
+        level: info

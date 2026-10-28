@@ -1,0 +1,52 @@
+global: # global settings
+  namespace: Development            # environment type: production or development
+  env_name: test                    # environment name used when namespace is not production
+  container_name:                   # container name
+  local_ip:                         # host IP
+  # Single-loop merge. The other four layouts live under conf/.
+  processmodel:
+    mode: single_process
+    io_handle_type: merge
+    io_num: 1
+    handle_num: 1
+
+server: # server settings
+  app: test                                        # application name
+  server: test_python                                   # server process name
+  bin_path: /usr/local/trpc/bin/                   # path of the binary and framework config
+  conf_path: /usr/local/trpc/conf/                 # path of business config files
+  data_path: /usr/local/trpc/data/                 # path of business data files
+  service: # services exposed by this process; more than one is allowed
+    - name: trpc.test.trpc_python.TestSse      # service route name
+      ip: 127.0.0.1                                # listen IP; ${ip} is allowed; set either ip or nic, and ip wins
+      port: 8080                # listen port; ${port} is allowed
+      network: tcp                                 # transport: tcp or udp
+      protocol: http                   # application protocol: trpc or http
+      timeout: 1000000                                # max request processing time, in milliseconds
+
+
+client: # client backend settings
+  timeout: 1000                                    # max processing time for every backend
+  namespace: Development                           # namespace for every backend
+  service: # per-backend settings
+    - name: trpc.test.test_python.TestPython      # backend service name
+      network: tcp                                 # backend transport, tcp or udp; this config takes priority
+      timeout: 1000                                 # max request processing time
+      protocol: trpc               # application protocol: trpc or http
+
+
+
+plugins: # plugin settings
+  log: # log settings
+    default: # default logger; multiple outputs are allowed
+      - writer: console                           # stdout; this is the default writer
+        level: debug                              # level for this stdout writer
+      - writer: file                              # local file log
+        level: info                               # level for the rotating file log
+        formatter: json                           # format of this writer
+        writer_config:
+          filename: ./trpc.log                      # path of the rotating log file
+          max_size: 10                              # max size of the rotating log file, in MB
+          max_backups: 10                           # max number of log files
+          max_age: 7                                # max age of log files, in days
+          compress: false                          # whether to compress log files

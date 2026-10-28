@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package trpc.trpc_python_group.hellotrt;
+import "predict.proto";
+
+message HelloRequest {
+  TensorData msg = 1;
+}
+
+message HelloReply {
+  TensorData msg = 1;
+}
+
+service Greeter {
+  rpc SayHello (HelloRequest) returns (HelloReply) {}
+  rpc SayHi (HelloRequest) returns (HelloReply) {}
+}

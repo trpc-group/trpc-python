@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package trpc.trpc_python_group.helloworld;
+
+service Greeter {
+  rpc SayHello (HelloRequest) returns (HelloReply) {}
+  rpc SayHi (HelloRequest) returns (HelloReply) {}
+}
+
+message HelloRequest {
+  string msg = 1;
+  repeated bytes msg_list = 2;
+}
+
+message HelloReply {
+  string msg = 1;
+  repeated bytes msg_list = 2;
+}

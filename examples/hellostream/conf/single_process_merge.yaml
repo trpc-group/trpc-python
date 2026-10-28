@@ -1,0 +1,38 @@
+# Several serving threads. Each thread reads and runs handlers.
+# io_num and handle_num must match; a mismatch is rewritten to handle_num.
+global:
+  namespace: Development
+  env_name: test
+  processmodel:
+    mode: single_process
+    io_handle_type: merge
+    io_num: 3
+    handle_num: 3
+
+server:
+  app: py_stream
+  server: helloworld
+  close_wait_time: 2000
+  tcp_reuse_port: false
+  check_timeout: false
+  service:
+    - name: trpc.py_stream.helloworld.Greeter
+      ip: 127.0.0.1
+      port: 8010
+      network: tcp
+      protocol: trpc
+      timeout: 10000
+      disable_request_timeout: true
+    - name: trpc.py_stream.helloworld.UnixGreeter
+      unix_path: /tmp/hellostream-threads.sock
+      network: tcp
+      protocol: trpc
+      timeout: 10000
+      disable_request_timeout: true
+      socket_type: unix
+
+plugins:
+  log:
+    default:
+      - writer: console
+        level: info
