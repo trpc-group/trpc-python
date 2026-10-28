@@ -181,6 +181,18 @@ class BaseServerTransport(BasePlugin):
         """
         return True
 
+    @property
+    def ipc_forwardable(self) -> bool:
+        """Whether another process can cut this endpoint's byte stream into frames and forward them. Default: False.
+
+        Only ``separate`` mode reads it. An endpoint answering True is
+        listened on by the I/O process, which cuts its tRPC frames with
+        ``opts.parser`` and forwards them to the rpc tasks over a pipe. Every
+        other endpoint is listened on by each rpc task itself, with
+        ``SO_REUSEPORT``.
+        """
+        return False
+
     @abstractmethod
     def listen(self) -> None:
         """Start serving the endpoint on the calling thread's event loop.

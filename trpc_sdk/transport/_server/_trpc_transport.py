@@ -144,10 +144,19 @@ class TrpcServerTransport(BaseServerTransport):
         network = self.opts.network
         return network.find("tcp") == -1 and network.find("udp") != -1
 
-    def check_endpoint(self) -> bool:
-        """Check, before fork, that the configured address can be bound.
+    @property
+    def ipc_forwardable(self) -> bool:
+        """True for tRPC over TCP: its frames are self-delimiting, so ``opts.parser`` can cut them anywhere.
 
-        A UNIX path is unlinked when stale. An inet address is probed: a
+        Datagrams carry no connection to forward over a pipe.
+        """
+        return not self._is_datagram()
+
+    def check_endpoint(self) -> bool:
+        """Check, before fork, that the network is served and the configured address can be bound.
+
+        A network containing neither ``tcp`` nor ``udp`` is rejected, in every
+        mode. A UNIX path is unlinked when stale. An inet address is probed: a
         stream endpoint with a connect, a datagram endpoint with a bind.
 
         Returns:
@@ -155,6 +164,9 @@ class TrpcServerTransport(BaseServerTransport):
         """
         opts = self.opts
         address = opts.address
+        if opts.network.find("tcp") == -1 and opts.network.find("udp") == -1:
+            logger.error("[server transport] unsupported network %r for address %s", opts.network, address)
+            return False
         if is_unix_socket(opts.socket_type):
             if not unix_path_valid(address[0]):
                 logger.error("[server transport] cannot unlink unix address %s", address[0])

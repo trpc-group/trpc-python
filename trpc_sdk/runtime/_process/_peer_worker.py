@@ -55,10 +55,8 @@ from trpc_sdk.telemetry import report_attr
 from trpc_sdk.transport import has_custom_scheduler
 from .._common import ChildReadiness
 from .._common import warn_unnamed_timers
-from .._constants import AddressKind
 from .._constants import CHILD_EXIT_GRACE_SECONDS
 from .._constants import PEER_STARTUP_WARNING
-from .._listeners import classify_address
 from .._merge_worker import MergeWorker
 from .._threadmodel import HandlerThreadInfo
 from .._types import ChildProcessInfo
@@ -246,16 +244,16 @@ class PeerMainWorker(ChildReadiness, PeerWorker):
     def _check_before_fork(self) -> None:
         """Fail on what peer mode cannot serve, warn about what behaves differently; nothing is forked yet.
 
+        Unsupported networks never get here: ``check_endpoint`` rejects them
+        when the endpoint is added.
+
         Raises:
-            ValueError: A Task is registered, or an address matches no listener.
+            ValueError: A Task is registered.
         """
         tasks = [task.name for task in get_registered_tasks()]
         if tasks:
             logger.warning("[%s] peer mode does not support Task; registered: %s", self.name, tasks)
             raise ValueError(f"peer mode does not support Task (registered: {tasks})")
-        for i, address in enumerate(self.addresses):
-            if classify_address(self, i) is AddressKind.UNKNOWN:
-                raise ValueError(f"peer mode: unsupported network {self.networks[i]!r} for address {address}")
         warn_unnamed_timers(self.name, self.worker_num, "peer workers")
         if has_custom_scheduler():
             logger.warning("[%s] register_dispatcher_worker_func only applies to separate mode; ignored in peer mode",

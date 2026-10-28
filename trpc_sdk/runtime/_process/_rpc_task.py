@@ -22,12 +22,9 @@ from trpc_sdk.abc import ProcessType
 from trpc_sdk.log import flush_logs
 from trpc_sdk.log import logger
 from trpc_sdk.transport import RpcTaskConnection
+from trpc_sdk.transport import UserProtocolTransport
 from trpc_sdk.utils import PipeEnd
-from .._constants import AddressKind
 from .._constants import RPC_TASK_SENDER_PREFIX
-from .._listeners import classify_address
-from .._listeners import create_http_msg_handle
-from .._listeners import http_runner_factory
 from .._threadmodel import HandlerThreadInfo
 from .._threadmodel import ThreadModel
 from .._threadmodel import run_start_hooks
@@ -47,8 +44,9 @@ def rpc_task_sender_name(index: int) -> str:
 class RpcTaskProcess(BaseWorker, Process):
     """Decode frames and run handlers for a separate-mode I/O worker.
 
-    ``TCP`` frames arrive over the request pipe. ``UDP``, ``HTTP`` and
-    ``USER`` addresses are listened on in this process with ``SO_REUSEPORT``.
+    Frames of the endpoints whose transport is ``ipc_forwardable`` (tRPC over
+    TCP) arrive over the request pipe. Every other endpoint (UDP, HTTP, user
+    protocols) is listened on in this process with ``SO_REUSEPORT``.
     """
 
     _main_loop_only = True
@@ -135,22 +133,18 @@ class RpcTaskProcess(BaseWorker, Process):
         self._thread_info = info
 
     def _start_own_listeners(self) -> None:
-        """Listen on every address but the ``TCP`` ones, on this process's loop.
+        """Listen on every endpoint but the ``ipc_forwardable`` ones, on this process's loop.
 
-        ``TCP`` addresses are the worker's, which forwards their frames here.
-        The rest are served with ``SO_REUSEPORT``, since every rpc task binds
-        them.
+        ``ipc_forwardable`` endpoints are the worker's, which forwards their
+        frames here. The rest are served with ``SO_REUSEPORT``, since every
+        rpc task binds them.
         """
-        for i, _ in enumerate(self.addresses):
-            kind = classify_address(self, i)
-            if kind in (AddressKind.TCP, AddressKind.UNKNOWN):
+        for transport in self.transports:
+            if transport.ipc_forwardable:
                 continue
-            if kind is AddressKind.USER:
-                self._user_transports.append(self._listen_on(i))
-                continue
-            if kind is AddressKind.HTTP:
-                self.transports[i].set_runner_factory(http_runner_factory(self, i, create_http_msg_handle(self, i)))
-            self._listen_on(i)
+            self._listen_on(transport)
+            if isinstance(transport, UserProtocolTransport):
+                self._user_transports.append(transport)
 
     def _stop_accepting(self) -> None:
         """Stop the transports this process listens with from accepting."""

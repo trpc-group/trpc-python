@@ -55,14 +55,14 @@ connections, then SIGUSR1 to the task processes. Should this process die
 instead, the children notice through ``PDEATHSIG`` (SIGUSR1, told apart from
 a shutdown request by the changed parent pid) or the parent sentinel.
 
-Only addresses whose bytes the I/O process can cut into self-delimiting tRPC
-frames go through it: the ones
-:func:`~trpc_sdk.runtime._listeners.classify_address` calls TCP. Every other
-kind is served by each rpc task directly, on its own ``SO_REUSEPORT`` socket:
+Only endpoints whose bytes the I/O process can cut into self-delimiting tRPC
+frames go through it: the ones whose transport is ``ipc_forwardable``, i.e.
+tRPC over TCP. Every other endpoint is served by each rpc task directly, on
+its own ``SO_REUSEPORT`` socket:
 
-* USER — a protocol registered with
+* User protocols — registered with
   :func:`~trpc_sdk.server.register_protocol_handle`; the I/O process has no
-  parser that could frame it.
+  parser that could frame them.
 * UDP — datagrams carry no connection to forward over a pipe.
 * HTTP — aiohttp parses and answers requests itself.
 
@@ -102,10 +102,8 @@ from trpc_sdk.utils import PipeKind
 from trpc_sdk.utils import create_pipe
 from .._common import ChildReadiness
 from .._common import warn_unnamed_timers
-from .._constants import AddressKind
 from .._constants import CHILD_EXIT_GRACE_SECONDS
 from .._constants import SCHEDULE_TARGET_RPC_TASK
-from .._listeners import classify_address
 from .._types import ChildProcessInfo
 from .._worker import BaseWorker
 from ._rpc_task import RpcTaskProcess
@@ -331,19 +329,20 @@ class SeparateWorker(ChildReadiness, BaseWorker):
             task_info.separate_mode = True
 
     def _validate_addresses(self) -> None:
-        """Fail before the fork on an address no process here could serve.
+        """Fail before the fork on an endpoint the I/O process should forward but cannot frame.
+
+        Unsupported networks never get here: ``check_endpoint`` rejects them
+        when the endpoint is added.
 
         Raises:
-            ValueError: An address matches no listener, or a TCP address has
-                no parser factory to cut its byte stream into frames.
+            ValueError: An ``ipc_forwardable`` endpoint has no parser factory
+                to cut its byte stream into frames.
         """
-        for i, address in enumerate(self.addresses):
-            kind = classify_address(self, i)
-            if kind is AddressKind.UNKNOWN:
-                raise ValueError(f"separate mode: unsupported network {self.networks[i]!r} for address {address}")
-            if kind is AddressKind.TCP and not hasattr(self.parsers[i], "create"):
-                raise ValueError(f"separate mode: no protocol parser for TCP address {address} "
-                                 f"(protocol {self.services[i].opt.protocol!r}), so its frames cannot be forwarded")
+        for transport in self.transports:
+            opts = transport.opts
+            if transport.ipc_forwardable and not hasattr(opts.parser, "create"):
+                raise ValueError(f"separate mode: no protocol parser for TCP address {opts.address} "
+                                 f"(protocol {opts.service_adapter.opt.protocol!r}), so its frames cannot be forwarded")
 
     def _check_before_fork(self) -> None:
         """Warn about registrations that behave differently across rpc tasks.
@@ -398,9 +397,9 @@ class SeparateWorker(ChildReadiness, BaseWorker):
             self.loop.run_until_complete(self.loop.create_connection(rpcz_handle, sock=rpcz.get_socket()))
 
     def _listen(self) -> None:
-        """Serve every ``TCP`` address on the main loop, forwarding its frames.
+        """Serve every ``ipc_forwardable`` endpoint on the main loop, forwarding its frames.
 
-        Other kinds are left to the rpc tasks, which listen on them
+        Other endpoints are left to the rpc tasks, which listen on them
         themselves. Each transport is replaced by a
         :class:`SeparateForwardTransport` bound to the same options: frames
         are cut here and forwarded, not handled. The replacement happens after
@@ -410,16 +409,17 @@ class SeparateWorker(ChildReadiness, BaseWorker):
         port. A bind failure aborts startup, since serving half the addresses
         would be worse than not starting.
         """
-        for i, address in enumerate(self.addresses):
-            if classify_address(self, i) is not AddressKind.TCP:
+        for i, transport in enumerate(self.transports):
+            if not transport.ipc_forwardable:
                 continue
-            forward = SeparateForwardTransport(self, i, self.parsers[i], SCHEDULE_TARGET_RPC_TASK)
-            forward.bind(self.transports[i].opts)
+            forward = SeparateForwardTransport(self, i, transport.opts.parser, SCHEDULE_TARGET_RPC_TASK)
+            forward.bind(transport.opts)
             self.transports[i] = forward
             try:
-                self._listen_on(i)
+                self._listen_on(forward)
             except OSError as err:
-                logger.error("[separate worker] failed to bind TCP %s (errno %s): %s", address, err.errno, err)
+                logger.error("[separate worker] failed to bind TCP %s (errno %s): %s", transport.opts.address,
+                             err.errno, err)
                 self._exit_now(1)
 
     def _replace_child(self, pid: int) -> None:

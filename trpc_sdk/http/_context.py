@@ -105,7 +105,7 @@ def get_http_rsp_header(ctx: TrpcContext) -> Dict:
 def pop_http_rsp_header(ctx: TrpcContext) -> Dict:
     """Pop extra response headers off ``ctx``.
 
-    :class:`~trpc_sdk.http.HttpMessageHandle` calls this after the handler
+    :class:`~trpc_sdk.http.HttpServerTransport` calls this after the handler
     returns so the extra headers can be merged into the aiohttp
     response exactly once.
 

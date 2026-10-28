@@ -46,6 +46,9 @@ from trpc_sdk.common import execute_before_in_parent
 from trpc_sdk.config import SocketType
 from trpc_sdk.config import TrpcConfig
 from trpc_sdk.filters import get_server_filter
+# Registers the built-in ``http`` server transport, codec and parser plugins,
+# which ``get_server_transport`` looks up by protocol.
+from trpc_sdk import http as _  # noqa: F401  # pylint: disable=unused-import
 from trpc_sdk.log import logger
 from trpc_sdk.plugin import PluginInitError
 from trpc_sdk.runtime import BaseWorker, create_worker
