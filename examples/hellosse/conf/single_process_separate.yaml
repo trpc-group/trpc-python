@@ -1,0 +1,32 @@
+# One process. The main thread accepts HTTP and hands each connection to a
+# handle thread, which runs the SSE route. I/O threads do not serve HTTP.
+# One SSE connection stays on the handle thread that took it.
+global:
+  namespace: Development
+  env_name: test
+  processmodel:
+    mode: single_process
+    io_handle_type: separate
+    io_num: 2
+    handle_num: 3
+
+server:
+  app: test
+  server: test_python
+  close_wait_time: 2000
+  tcp_reuse_port: false
+  check_timeout: false
+  service:
+    - name: trpc.test.trpc_python.TestSse
+      ip: 127.0.0.1
+      port: 8082
+      network: tcp
+      protocol: http
+      timeout: 1000000
+      disable_request_timeout: true
+
+plugins:
+  log:
+    default:
+      - writer: console
+        level: info

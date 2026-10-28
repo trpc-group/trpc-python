@@ -1,0 +1,34 @@
+# Worker-0 forks handle_num-1 siblings. Every worker binds this address
+# with SO_REUSEPORT. tcp_reuse_port stays false; peer sets the option itself.
+# macOS does not balance those sockets, so a client may always hit one worker.
+global:
+  namespace: Development
+  env_name: test
+  processmodel:
+    mode: multi_process
+    io_handle_type: merge
+    handle_num: 2
+
+server:
+  app: py_stream
+  server: helloworld
+  close_wait_time: 2000
+  tcp_reuse_port: false
+  check_timeout: false
+  service:
+    - name: trpc.py_stream.helloworld.Greeter
+      ip: 127.0.0.1
+      port: 8040
+      network: tcp
+      protocol: trpc
+      timeout: 10000
+      disable_request_timeout: true
+    # Peer workers each bind every address. create_unix_socket unlinks the
+    # path before bind and does not set SO_REUSEPORT, so a later worker would
+    # delete the socket file of the worker that bound first.
+
+plugins:
+  log:
+    default:
+      - writer: console
+        level: info

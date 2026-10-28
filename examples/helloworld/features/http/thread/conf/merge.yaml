@@ -1,0 +1,32 @@
+# Single process, merge thread model, HTTP only.
+# One LISTEN socket on the main thread. Accepted connections are handed to
+# trpc-loop-* serving threads, which run both HTTP RPC and @route.
+global:
+  namespace: Development
+  env_name: test
+  processmodel:
+    mode: single_process
+    io_handle_type: merge
+    io_num: 3
+    handle_num: 3
+
+server:
+  app: test
+  server: Greeter
+  close_wait_time: 100
+  tcp_reuse_port: false
+  check_timeout: false
+  service:
+    - name: trpc.trpc_python_group.helloworld.GreeterHttp
+      ip: 127.0.0.1
+      port: 18102
+      network: tcp
+      protocol: http
+      timeout: 10000
+      disable_request_timeout: true
+
+plugins:
+  log:
+    default:
+      - writer: console
+        level: info

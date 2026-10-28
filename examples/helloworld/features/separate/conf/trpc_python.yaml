@@ -1,0 +1,63 @@
+# Multi-process separate mode: this process does I/O, handle_num children
+# run handlers. Not features/thread/conf/separate.yaml, which is
+# single_process + separate (threads inside one process).
+# TCP is bound once, here. UDP, HTTP and the user protocol are bound by
+# every rpc task with SO_REUSEPORT. macOS does not balance those sockets.
+global:
+  namespace: Development
+  env_name: test
+  processmodel:
+    mode: multi_process
+    io_handle_type: separate
+    io_num: 1
+    handle_num: 2
+
+server:
+  app: test
+  server: Greeter
+  close_wait_time: 2000
+  io_wait_count: 1
+  tcp_reuse_port: false
+  check_timeout: false
+  service:
+    - name: trpc.trpc_python_group.helloworld.GreeterA
+      ip: 127.0.0.1
+      port: 18220
+      network: tcp
+      protocol: trpc
+      timeout: 10000
+      disable_request_timeout: true
+    - name: trpc.trpc_python_group.helloworld.GreeterB
+      ip: 127.0.0.1
+      port: 18221
+      network: tcp
+      protocol: trpc
+      timeout: 10000
+      disable_request_timeout: true
+    - name: trpc.trpc_python_group.helloworld.GreeterUdp
+      ip: 127.0.0.1
+      port: 18222
+      network: udp
+      protocol: trpc
+      timeout: 10000
+      disable_request_timeout: true
+    - name: trpc.trpc_python_group.helloworld.GreeterHttp
+      ip: 127.0.0.1
+      port: 18223
+      network: tcp
+      protocol: http
+      timeout: 10000
+      disable_request_timeout: true
+    - name: trpc.trpc_python_group.helloworld.GreeterUser
+      ip: 127.0.0.1
+      port: 18224
+      network: udp
+      protocol: user
+      timeout: 10000
+      disable_request_timeout: true
+
+plugins:
+  log:
+    default:
+      - writer: console
+        level: info

@@ -1,0 +1,33 @@
+# The process started here only cuts tRPC frames and forwards them.
+# handle_num rpc-task processes run the handlers. Each loads one ResNet50.
+# One extra task process batches SayHi.
+global:
+  namespace: Development
+  env_name: test
+  processmodel:
+    mode: multi_process
+    io_handle_type: separate
+    io_num: 1
+    handle_num: 2
+    task_num: 1
+
+server:
+  app: test
+  server: Greeter
+  close_wait_time: 2000
+  tcp_reuse_port: false
+  check_timeout: false
+  io_wait_count: 1
+  service:
+    - name: trpc.trpc_python_group.hellotrt.Greeter
+      ip: 127.0.0.1
+      port: 8130
+      network: tcp
+      protocol: trpc
+      timeout: 100000
+
+plugins:
+  log:
+    default:
+      - writer: console
+        level: info

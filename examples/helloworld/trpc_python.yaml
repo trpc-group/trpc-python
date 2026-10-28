@@ -1,0 +1,128 @@
+global: # global settings
+  namespace: Development # environment type: production or development
+  env_name: test # environment name used when namespace is not production
+  processmodel: # process/thread model; omitting mode means one process and one event loop
+    mode: single_process # single_process: one process; multi_process: multiple processes
+    io_handle_type: merge # merge runs I/O and handlers together; separate splits them
+    io_num: 1 # I/O thread count; under merge it must match handle_num, otherwise a warning is logged and handle_num is used
+    handle_num: 1 # handler thread count
+    task_num: 1 # default task process count for tasks that do not set their own task_num; 0 or omitted means 1
+
+    # Multi-process example:
+    # mode: multi_process
+    # io_handle_type: separate # separate: one I/O process plus handle_num rpc-task processes; merge (peer): handle_num peer processes
+    # io_num: 1 # separate accepts only 1; other values log a warning and are treated as 1; ignored under merge (peer)
+    # handle_num: 0 # rpc-task or peer process count; 0 means the CPU count
+    # task_num: 1
+
+server: # server settings
+  app: test # application name
+  server: Greeter # server process name
+  bin_path: /usr/local/trpc/bin/ # path of the binary and framework config
+  conf_path: /usr/local/trpc/conf/ # path of business config files
+  data_path: /usr/local/trpc/data/ # path of business data files
+
+    
+  # The process/thread model is configured under global.processmodel.
+  # handler_max_concurrency: 0 # single_process + separate only: in-flight unary requests per handler thread; 0 means unlimited
+  # handler_queue_size: 1024 # single_process + separate only: queue length when every handler thread is full
+  tcp_reuse_port: false
+  check_timeout: false
+  queue_wait_policy: 1
+  queue_wait_timeout: 10
+  registry_after_fork: false
+  # heartbeat_interval: 1 # process heartbeat interval in seconds
+  memory_inspection:
+    enabled: false
+    filename_prefix: test
+    line_limit: -1
+  queue_cb:
+    threshold: 10
+    ratio: 0.5
+  service: # services exposed by this process; more than one is allowed
+    - name: trpc.trpc_python_group.helloworld.Greeter # service route name
+      ip: 127.0.0.1 # listen IP; ${ip} is allowed; set either ip or nic, and ip wins
+      port: 8000 # listen port; ${port} is allowed
+      network: tcp # transport: tcp or udp
+      protocol: trpc # application protocol: trpc or http
+      timeout: 5000 # max request processing time, in milliseconds
+      disable_request_timeout: true # do not inherit the upstream timeout
+    # User protocol. One UDP socket on the main loop; reply is user:0:<pid>.
+    - name: trpc.trpc_python_group.helloworld.GreeterUser
+      ip: 127.0.0.1
+      port: 8090
+      network: udp
+      protocol: user
+      timeout: 5000
+      disable_request_timeout: true
+    # Unix sockets are in examples/hellostream, which covers unary calls and server streaming.
+    # - name: trpc.trpc_python_group.helloworld.TrpcGreeter # service route name
+    #   ip: 127.0.0.1 # listen IP; ${ip} is allowed; set either ip or nic, and ip wins
+    #   port: 8001 # listen port; ${port} is allowed
+    #   network: tcp # transport: tcp or udp
+    #   protocol: trpc # application protocol: trpc or http
+    #   timeout: 5000 # max request processing time, in milliseconds
+    # - name: trpc.trpc_python_group.helloworld.Greeter1 # service route name
+    #   ip: 127.0.0.1 # listen IP; ${ip} is allowed; set either ip or nic, and ip wins
+    #   port: 8002 # listen port; ${port} is allowed
+    #   network: tcp # transport: tcp or udp
+    #   protocol: http # application protocol: trpc or http
+    #   timeout: 5000 # max request processing time, in milliseconds
+    #   #tls_key: ./domain_srv.key
+    #   #tls_cert: ./domain_srv.crt
+    # - name: trpc.trpc_python_group.helloworld.Greeter2           # service route name
+    #   ip: 127.0.0.1                                # listen IP; ${ip} is allowed; set either ip or nic, and ip wins
+    #   network: tcp                                 # transport: tcp or udp
+    #   protocol: http                              # application protocol: trpc or http
+    #   timeout: 5000                                # max request processing time, in milliseconds
+    #   port: 8003 # listen port; ${port} is allowed
+    # - name: trpc.trpc_python_group.helloworld.Greeter3           # service route name
+    #   ip: 127.0.0.1                                # listen IP; ${ip} is allowed; set either ip or nic, and ip wins
+    #   network: tcp                                 # transport: tcp or udp
+    #   protocol: http                              # application protocol: trpc or http
+    #   timeout: 5000                                # max request processing time, in milliseconds
+
+client: # client backend settings
+  timeout: 1000 # max processing time for every backend
+  namespace: Development # namespace for every backend
+  service: # per-backend settings
+    - name: trpc.test.helloworld.Greeter # backend service name
+      network: tcp # backend transport, tcp or udp; this config takes priority
+      protocol: trpc # application protocol: trpc or http
+      timeout: 800 # max request processing time
+    - name: trpc.test.helloworld.Greeter2 # backend service name
+      network: tcp # backend transport, tcp or udp; this config takes priority
+      protocol: trpc # application protocol: trpc or http
+      timeout: 1000 # max request processing time
+
+plugins: # plugin settings
+  # Loguru is the only log backend; a backend selector is no longer required.
+  # The old block is kept as a migration reference:
+  # log_backend:
+  #   loguru: {}
+  log: # log settings
+    default: # default logger; multiple outputs are allowed
+      - writer: console # stdout; this is the default writer
+        level: info # level for this stdout writer
+        format_config:
+          # timestamps include milliseconds
+          fmt: "[%(asctime)s.%(msecs)03d][%(levelname)s][%(filename)s:%(lineno)s][%(process)d][%(message)s]"
+          time_fmt: "%Y-%m-%d %H:%M:%S"
+      # - writer: file # local file log
+      #   level: info # level for the rotating file log
+      #   formatter: json # format of this writer
+      #   # Also capture stdlib and third-party logs into this output. Off by default.
+      #   # When several outputs enable this, third-party logs go to every one of them.
+      #   # Write a YAML boolean true/false. A quoted "false" is treated as true.
+      #   capture_third_party: true
+      #   # Level threshold for third-party logs. When omitted, this output's level is used.
+      #   third_party_level: warning
+      #   writer_config:
+      #     filename: ./hello_loguru.log # path of the rotating log file
+      #     max_size: 10 # max size of the rotating log file, in MB
+      #     max_backups: 10 # max number of log files
+      #     max_age: 7 # max age of log files, in days
+      #     compress: false # whether to compress log files
+      #   format_config:
+      #     fmt: "[%(asctime)s][%(levelname)s][%(filename)s:%(lineno)s][%(process)d][%(message)s]"
+      #     time_fmt: "%Y-%m-%d %H:%M:%S"

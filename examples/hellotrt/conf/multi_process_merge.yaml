@@ -1,0 +1,33 @@
+# Worker-0 forks handle_num-1 siblings. Every worker binds this address
+# with SO_REUSEPORT and loads its own ResNet50. tcp_reuse_port stays false;
+# peer sets the option itself. macOS does not balance those sockets.
+# This layout does not call register_task. Peer rejects a registered task
+# before the fork; that rejection is the helloworld features/peer TASK=1
+# case, not this server.
+global:
+  namespace: Development
+  env_name: test
+  processmodel:
+    mode: multi_process
+    io_handle_type: merge
+    handle_num: 2
+
+server:
+  app: test
+  server: Greeter
+  close_wait_time: 2000
+  tcp_reuse_port: false
+  check_timeout: false
+  service:
+    - name: trpc.trpc_python_group.hellotrt.Greeter
+      ip: 127.0.0.1
+      port: 8140
+      network: tcp
+      protocol: trpc
+      timeout: 100000
+
+plugins:
+  log:
+    default:
+      - writer: console
+        level: info

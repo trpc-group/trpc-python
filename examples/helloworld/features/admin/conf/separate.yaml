@@ -1,0 +1,32 @@
+# Separate mode: this process does I/O and forks handle_num children
+# that run handlers. The I/O process and every rpc task connect to admin,
+# so /cmds/whoami reports 1 + handle_num pids. Task processes do not.
+global:
+  namespace: Development
+  env_name: test
+  processmodel:
+    mode: multi_process
+    io_handle_type: separate
+    handle_num: 2
+
+server:
+  app: test
+  server: Greeter
+  close_wait_time: 2000
+  admin:
+    ip: 127.0.0.1
+    port: 19422
+  service:
+    - name: trpc.trpc_python_group.helloworld.Greeter
+      ip: 127.0.0.1
+      port: 18422
+      network: tcp
+      protocol: trpc
+      timeout: 10000
+      disable_request_timeout: true
+
+plugins:
+  log:
+    default:
+      - writer: console
+        level: info

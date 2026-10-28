@@ -1,0 +1,33 @@
+# The process started here does not serve HTTP. Each rpc task binds this
+# address with SO_REUSEPORT and runs the SSE route on its own loop.
+# macOS accepts SO_REUSEPORT but does not balance, so a client may always
+# hit one rpc task. One SSE connection stays on the task that accepted it.
+global:
+  namespace: Development
+  env_name: test
+  processmodel:
+    mode: multi_process
+    io_handle_type: separate
+    io_num: 1
+    handle_num: 2
+
+server:
+  app: test
+  server: test_python
+  close_wait_time: 2000
+  tcp_reuse_port: false
+  check_timeout: false
+  service:
+    - name: trpc.test.trpc_python.TestSse
+      ip: 127.0.0.1
+      port: 8083
+      network: tcp
+      protocol: http
+      timeout: 1000000
+      disable_request_timeout: true
+
+plugins:
+  log:
+    default:
+      - writer: console
+        level: info

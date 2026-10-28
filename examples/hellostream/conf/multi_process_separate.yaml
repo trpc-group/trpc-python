@@ -1,0 +1,39 @@
+# The process started here only cuts tRPC frames and forwards them.
+# handle_num rpc-task processes run the stream handlers. One stream stays
+# on one rpc task.
+global:
+  namespace: Development
+  env_name: test
+  processmodel:
+    mode: multi_process
+    io_handle_type: separate
+    io_num: 1
+    handle_num: 2
+
+server:
+  app: py_stream
+  server: helloworld
+  close_wait_time: 2000
+  tcp_reuse_port: false
+  check_timeout: false
+  service:
+    - name: trpc.py_stream.helloworld.Greeter
+      ip: 127.0.0.1
+      port: 8030
+      network: tcp
+      protocol: trpc
+      timeout: 10000
+      disable_request_timeout: true
+    - name: trpc.py_stream.helloworld.UnixGreeter
+      unix_path: /tmp/hellostream-separate.sock
+      network: tcp
+      protocol: trpc
+      timeout: 10000
+      disable_request_timeout: true
+      socket_type: unix
+
+plugins:
+  log:
+    default:
+      - writer: console
+        level: info

@@ -1,0 +1,48 @@
+# Single process, merge thread model.
+# The main thread only accepts. io_num (= handle_num) serving threads
+# (trpc-loop-*) each read, decode and run handlers. One TCP listen socket.
+# protocol trpc UDP: one socket per serving thread (SO_REUSEPORT).
+# protocol user: one socket, started on trpc-loop-0.
+global:
+  namespace: Development
+  env_name: test
+  processmodel:
+    mode: single_process
+    io_handle_type: merge
+    io_num: 3
+    handle_num: 3
+
+server:
+  app: test
+  server: Greeter
+  close_wait_time: 100
+  tcp_reuse_port: false
+  check_timeout: false
+  service:
+    - name: trpc.trpc_python_group.helloworld.GreeterTcp
+      ip: 127.0.0.1
+      port: 18100
+      network: tcp
+      protocol: trpc
+      timeout: 10000
+      disable_request_timeout: true
+    - name: trpc.trpc_python_group.helloworld.GreeterUdp
+      ip: 127.0.0.1
+      port: 18101
+      network: udp
+      protocol: trpc
+      timeout: 10000
+      disable_request_timeout: true
+    - name: trpc.trpc_python_group.helloworld.GreeterUser
+      ip: 127.0.0.1
+      port: 18103
+      network: udp
+      protocol: user
+      timeout: 10000
+      disable_request_timeout: true
+
+plugins:
+  log:
+    default:
+      - writer: console
+        level: info

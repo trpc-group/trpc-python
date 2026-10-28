@@ -1,0 +1,33 @@
+# One process. I/O threads cut frames; handle threads run handlers and
+# each load a ResNet50. SayHi is issued from a handle thread, which owns
+# the task pipe. One task process batches those calls.
+global:
+  namespace: Development
+  env_name: test
+  processmodel:
+    mode: single_process
+    io_handle_type: separate
+    io_num: 2
+    handle_num: 3
+    task_num: 1
+
+server:
+  app: test
+  server: Greeter
+  close_wait_time: 2000
+  tcp_reuse_port: false
+  check_timeout: false
+  io_wait_count: 1
+  service:
+    - name: trpc.trpc_python_group.hellotrt.Greeter
+      ip: 127.0.0.1
+      port: 8120
+      network: tcp
+      protocol: trpc
+      timeout: 100000
+
+plugins:
+  log:
+    default:
+      - writer: console
+        level: info

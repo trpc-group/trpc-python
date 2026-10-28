@@ -1,0 +1,62 @@
+# Peer mode (multi_process + merge): this process is worker-0. It forks
+# handle_num-1 siblings. Every worker, worker-0 included, binds every
+# endpoint itself with SO_REUSEPORT. tcp_reuse_port is false on purpose:
+# peer ignores it and still sets SO_REUSEPORT.
+# macOS does not balance SO_REUSEPORT, so more than one worker there is
+# for the process tree, not for spreading traffic.
+global:
+  namespace: Development
+  env_name: test
+  processmodel:
+    mode: multi_process
+    io_handle_type: merge
+    handle_num: 2
+
+server:
+  app: test
+  server: Greeter
+  close_wait_time: 2000
+  tcp_reuse_port: false
+  check_timeout: false
+  service:
+    - name: trpc.trpc_python_group.helloworld.GreeterA
+      ip: 127.0.0.1
+      port: 18320
+      network: tcp
+      protocol: trpc
+      timeout: 10000
+      disable_request_timeout: true
+    - name: trpc.trpc_python_group.helloworld.GreeterB
+      ip: 127.0.0.1
+      port: 18321
+      network: tcp
+      protocol: trpc
+      timeout: 10000
+      disable_request_timeout: true
+    - name: trpc.trpc_python_group.helloworld.GreeterUdp
+      ip: 127.0.0.1
+      port: 18322
+      network: udp
+      protocol: trpc
+      timeout: 10000
+      disable_request_timeout: true
+    - name: trpc.trpc_python_group.helloworld.GreeterHttp
+      ip: 127.0.0.1
+      port: 18323
+      network: tcp
+      protocol: http
+      timeout: 10000
+      disable_request_timeout: true
+    - name: trpc.trpc_python_group.helloworld.GreeterUser
+      ip: 127.0.0.1
+      port: 18324
+      network: udp
+      protocol: user
+      timeout: 10000
+      disable_request_timeout: true
+
+plugins:
+  log:
+    default:
+      - writer: console
+        level: info

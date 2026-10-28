@@ -1,0 +1,32 @@
+# Worker-0 forks handle_num-1 siblings. Every worker binds this address
+# itself with SO_REUSEPORT. tcp_reuse_port stays false; peer sets the option.
+# macOS does not balance those sockets, so a client may always hit one worker.
+# One SSE connection stays on the worker that accepted it.
+global:
+  namespace: Development
+  env_name: test
+  processmodel:
+    mode: multi_process
+    io_handle_type: merge
+    handle_num: 2
+
+server:
+  app: test
+  server: test_python
+  close_wait_time: 2000
+  tcp_reuse_port: false
+  check_timeout: false
+  service:
+    - name: trpc.test.trpc_python.TestSse
+      ip: 127.0.0.1
+      port: 8084
+      network: tcp
+      protocol: http
+      timeout: 1000000
+      disable_request_timeout: true
+
+plugins:
+  log:
+    default:
+      - writer: console
+        level: info

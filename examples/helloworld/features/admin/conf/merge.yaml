@@ -1,0 +1,30 @@
+# Merge mode: this process accepts connections and runs handlers itself.
+# It is the only worker, so /cmds/whoami reports exactly one pid.
+global:
+  namespace: Development
+  env_name: test
+  processmodel:
+    mode: single_process
+    io_handle_type: merge
+
+server:
+  app: test
+  server: Greeter
+  close_wait_time: 2000
+  admin:
+    ip: 127.0.0.1
+    port: 19420
+  service:
+    - name: trpc.trpc_python_group.helloworld.Greeter
+      ip: 127.0.0.1
+      port: 18420
+      network: tcp
+      protocol: trpc
+      timeout: 10000
+      disable_request_timeout: true
+
+plugins:
+  log:
+    default:
+      - writer: console
+        level: info
