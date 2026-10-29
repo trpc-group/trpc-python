@@ -1,7 +1,3 @@
-# cSpell:ignore addopts agui asyncio boundscheck cimport cython dataclasses deepseek fastapi hatchling
-# cSpell:ignore langchain langgraph llm mcp mypy pxd pyi pyparsing pytest pyyaml raylchen setuptools
-# cSpell:ignore snappy testpaths trpc unittest uvloop venv wraparound xmlrunner yapf
-
 [build-system]
 requires = [
     "hatchling",
@@ -51,42 +47,37 @@ exclude = [
     # Header-only inline helpers and their package cimport entry; nothing to build.
     ".*/utils/_cython/.*\\.pxd$",
     ".*/utils/__init__\\.pxd$",
-    # C driver headers are not in this repo; compiling these would look for
-    # trpc_sdk/driver/*.h and fail the build.
-    ".*/_transport/_c_(ipc_codec|dispatcher)\\.(pyx|pxd)$",
-    ".*/_task/_(ctask|task_driver|c_task_util)\\.(pyx|pxd)$",
 ]
 
 [project]
 name = "trpc-python"
 dynamic = ["version"]
-description = "Python LLM agent framework with multi-model support (OpenAI, Anthropic, Gemini, DeepSeek), tool calling, session management, A2A/MCP/AGUI protocols, and FastAPI server integration"
+description = "A pluggable, high-performance RPC framework written in python"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "Apache-2.0"}
-authors = [{ name = "Tencent", email = "raylchen@tencent.com" }]
-keywords = ["trpc", "agent", "llm", "ai", "langchain", "langgraph", "mcp", "a2a", "fastapi", "multi-agent", "tool-calling"]
+authors = [{ name = "tRPC Group"}]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
     "loguru",
-    "protobuf>=3.19.4,<3.20",
+    "protobuf>=3.19.4",
     "packaging",
     "PyYAML",
-    "dataclasses>=0.8; python_version < '3.7'",
-    # Imported at process startup; requirements.txt alone is not installed by `pip install -e .`.
     "aiohttp>3.6.2",
     "aiocron>=1.6",
-    "netifaces==0.10.9",
+    "netifaces>=0.10.9",
     "portalocker>=1.4.0",
-    "six==1.15.0",
+    "six>=1.15.0",
 ]
 
 [project.urls]
@@ -110,10 +101,8 @@ fast = [
 test = [
     "pytest-mock",
     "pytest-asyncio",
-    "pyparsing==2.2.0",
     "pytest>=6.1.0",
     "pytest-cov",
-    "automaxprocs==2.0.0",
     "xmlrunner; python_version < '3.12'",
     "unittest-xml-reporting; python_version >= '3.12'",
 ]
@@ -128,7 +117,7 @@ package = true
 # 可选：添加工具配置
 [tool.black]
 line-length = 120
-target-version = ['py310']
+target-version = ['py38']
 exclude = '''
 /(
   # directories
