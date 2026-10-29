@@ -1,18 +1,15 @@
 # proxy pypi
 --index-url https://mirrors.cloud.tencent.com/pypi/simple/
-# private pypi
---extra-index-url https://mirrors.tencent.com/repository/pypi/tencent_pypi/simple/
 
 wheel
 setuptools
 setproctitle
 
-protobuf>=3.19.4,<3.20
+protobuf>=3.19.4
 PyYAML==6.0.2
 aiohttp>3.6.2
 netifaces==0.10.9
 uvloop>=0.10.2
-# concurrent-log-asyncio==0.10.1
 portalocker>=1.4.0
 Cython>=0.29.21,<3.1; python_version < "3.8"
 Cython>=3.1.0; python_version >= "3.8"
@@ -23,8 +20,4 @@ python-snappy>=0.5.4
 psutil>=5.9.0
 py-spy>=0.3.14
 
-# 用于管理 protobuf 的包
 trpc-pb>=0.3.0
-# proxy pypi
-
-#trpc_driver

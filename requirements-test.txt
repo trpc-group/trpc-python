@@ -1,10 +1,7 @@
-
 pytest-mock
 pytest-asyncio
 pyparsing==2.2.0
 pytest>=6.1.0
 pytest-cov
-# Reference implementation for tests/common/test_maxprocs_parity.py only.
-automaxprocs==2.0.0
-# xmlrunner
-unittest-xml-reporting
+xmlrunner; python_version < '3.12'
+unittest-xml-reporting; python_version >= '3.12'
