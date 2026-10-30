@@ -13,7 +13,7 @@ from typing import List
 from tests.protocol._fakes import ParserFactory
 from tests.protocol._fakes import FakeTransport
 from trpc_sdk.abc import BaseServerTransportOption
-from trpc_sdk.protocol import TCPConnection
+from trpc_sdk.transport import TCPConnection
 from trpc_sdk.transport import ConnectionOption
 from trpc_sdk.transport import DefaultIoConnection
 from trpc_sdk.transport import TrpcServerTransport

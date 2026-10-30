@@ -15,7 +15,7 @@ protocol hung on the INIT frame's context, and :meth:`send` only calls its
 business:
 
 - merge mode (every thread model): the connection's
-  :class:`~trpc_sdk.protocol.ConnWriter`, which writes the raw frame on the
+  :class:`~trpc_sdk.transport.ConnWriter`, which writes the raw frame on the
   client TCP from whichever thread the stream runs on, and drops writes once
   the connection is closed;
 - ``server.mode: separate``: an :class:`IpcStreamWriter` on the rpc task's

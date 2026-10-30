@@ -47,7 +47,6 @@ from trpc_sdk.abc import BaseServerTransportOption
 from trpc_sdk.abc import TrpcContext
 from trpc_sdk.abc import get_message
 from trpc_sdk.log import logger
-from trpc_sdk.protocol import TCPConnection
 from trpc_sdk.rpcz import RPCZ_SERVER_REQ_SIZE_CTX_KEY
 from trpc_sdk.rpcz import RPCZ_SERVER_RSP_SIZE_CTX_KEY
 from trpc_sdk.rpcz import submit_server_span_on_executor_post_io
@@ -63,6 +62,7 @@ from trpc_sdk.utils import unix_path_valid
 from ._acceptor import StreamListener
 from ._acceptor import serve_stream
 from ._constants import SERVER_CONN_KEY
+from ._cython import TCPConnection  # pylint: disable=no-name-in-module
 from ._datagram_connection import DefaultDatagramConnection
 from ._stream_connection import ConnectionOption
 from ._stream_connection import DefaultIoConnection

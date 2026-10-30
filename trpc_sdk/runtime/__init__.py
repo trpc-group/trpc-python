@@ -54,7 +54,7 @@ mode. Subpackages hold the pieces those workers are built from:
   :class:`~trpc_sdk.runtime._threadmodel._separate_thread.SeparateThread`
   for merge mode with the separate thread model (trpc-cpp
   ``runtime/threadmodel`` and ``separate_runtime``); responses cross back
-  to the I/O loops through :class:`~trpc_sdk.protocol.ConnWriter`,
+  to the I/O loops through :class:`~trpc_sdk.transport.ConnWriter`,
   re-exported here
 - :mod:`~trpc_sdk.runtime._common` — SIGTERM callbacks, process metadata and the exit template every mode shares (trpc-cpp
   ``runtime/common``)
@@ -77,7 +77,7 @@ itself starts from :func:`trpc_sdk.server.create_server`, which also
 re-exports :func:`register_protocol_handle`.
 """
 
-from trpc_sdk.protocol import ConnWriter
+from trpc_sdk.transport import ConnWriter
 from trpc_sdk.transport import register_protocol_handle
 
 from ._common import ProcessInfo

@@ -17,8 +17,8 @@ from tests.protocol._fakes import FakeTransport
 from tests.protocol._fakes import stream_frame
 from tests.protocol._fakes import unary_frame
 from trpc_sdk.abc import STREAM_WRITER_CTX_KEY
-from trpc_sdk.protocol import ConnWriter
-from trpc_sdk.protocol import TCPConnection
+from trpc_sdk.transport import ConnWriter
+from trpc_sdk.transport import TCPConnection
 from trpc_sdk.server._server import Server
 from trpc_sdk.transport import TcpConnectionOption
 
