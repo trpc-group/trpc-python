@@ -21,11 +21,10 @@ asyncio protocols in this package then run *inside* those children:
   accepts the client TCP, splits frames, and writes them to an rpc task
   pipe; :class:`RpcTaskConnection` on the rpc task runs the handler and
   writes the response back
-- merge mode: :class:`DefaultDatagramConnection` and the re-exported
-  :class:`TCPConnection` listen on the merge worker. The TCP Protocol is
-  owned by :mod:`trpc_sdk.protocol`; this package only forwards the name
-  so :class:`~trpc_sdk.runtime.MergeWorker` can import both listen
-  protocols from here.
+- merge mode: :class:`DefaultDatagramConnection` and
+  :class:`TCPConnection` listen on the merge worker. Both live in
+  :mod:`trpc_sdk.transport._server`, so a merge worker imports them from
+  here.
 
 The package is split by responsibility:
 
@@ -44,9 +43,11 @@ The package is split by responsibility:
   ``UserProtocolTransport`` with the ``register_protocol_handle`` registry,
   the plugin factory (``DefaultServerTransport*``,
   :func:`get_server_transport`), and the accepted connections:
-  ``TcpConnectionOption`` for the Cython ``TCPConnection``,
-  ``DefaultIoConnection`` with its ``ConnectionOption`` for subclasses
-  calling ``set_io_connection``, ``DefaultDatagramConnection`` for UDP listen
+  ``TcpConnectionOption`` and the Cython ``TCPConnection``
+  (:mod:`~trpc_sdk.transport._server._cython`), ``ConnWriter`` for
+  cross-thread writes, ``DefaultIoConnection`` with its ``ConnectionOption``
+  for subclasses calling ``set_io_connection``,
+  ``DefaultDatagramConnection`` for UDP listen
   sockets (built from the same ``ConnectionOption``), and
   ``ServerConnection``, the peer view both hand to ``_msg_handler``
 - :mod:`~trpc_sdk.transport._separate` — the asyncio protocols on both ends
@@ -67,8 +68,6 @@ Symbols renamed or dropped relative to the pre-rewrite package are listed in
 """
 
 from __future__ import annotations
-
-from importlib import import_module
 
 from trpc_sdk.abc import BaseServerTransportOption
 
@@ -103,6 +102,7 @@ from ._client import RoundTripOptions
 from ._client import get_client_transport
 from ._client import get_default_client_transport
 from ._client import open_datagram_endpoint
+from ._server import ConnWriter
 from ._server import ConnectionCloseHandler
 from ._server import ConnectionIdleCleanHandler
 from ._server import ConnectionInitHandler
@@ -115,6 +115,7 @@ from ._server import IpcStreamWriter
 from ._server import MsgHandler
 from ._server import ProtocolStarter
 from ._server import ServerConnection
+from ._server import TCPConnection
 from ._server import TcpConnectionOption
 from ._server import TrpcServerStreamTransport
 from ._server import TrpcServerTransport
@@ -152,6 +153,8 @@ __all__ = [
     "TrpcServerStreamTransport",
     "UserProtocolTransport",
     "IpcStreamWriter",
+    "ConnWriter",
+    "TCPConnection",
     "TcpConnectionOption",
     "DefaultIoConnection",
     "ConnectionOption",
@@ -177,8 +180,6 @@ __all__ = [
     "SeparateRpczConnection",
     # Separate-mode rpc task protocol
     "RpcTaskConnection",
-    # Executor / merge-worker listen protocols
-    "TCPConnection",
     # Shared types and hooks
     "ClientConnectionInfo",
     "SchedulerParams",
@@ -192,24 +193,3 @@ __all__ = [
     "InnerStreamParser",
     "encode_worker_msg_req",
 ]
-
-
-_LAZY_EXPORTS = {
-    "TCPConnection": ("trpc_sdk.protocol", "TCPConnection"),
-}
-
-
-def __getattr__(name: str):
-    """Lazily export symbols that would otherwise load too early.
-
-    :class:`TCPConnection` is owned by :mod:`trpc_sdk.protocol` and is only
-    needed once a merge worker is already serving. Resolving it on first
-    access is enough.
-    """
-    spec = _LAZY_EXPORTS.get(name)
-    if spec is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    module_name, attr_name = spec
-    value = getattr(import_module(module_name, package=__name__), attr_name)
-    globals()[name] = value
-    return value

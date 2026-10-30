@@ -27,7 +27,7 @@ per loop. Transports in particular are owned by the loop that created them:
 ``transport.write()`` from another thread is not safe. That is why every
 serving loop opens its own connections to the task processes, and why the
 separate thread model hands responses back through
-:class:`~trpc_sdk.protocol.ConnWriter`.
+:class:`~trpc_sdk.transport.ConnWriter`.
 
 A loop thread that dies while the worker is serving is not left behind
 silently: its ``on_exit`` callback tells the worker, which shuts the process

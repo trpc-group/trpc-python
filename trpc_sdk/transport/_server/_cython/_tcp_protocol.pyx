@@ -43,7 +43,7 @@ from trpc_sdk.abc import TrpcContext
 from trpc_sdk.abc import get_message
 from trpc_sdk.exceptions import ServerDecodeError
 from trpc_sdk.log import logger
-from trpc_sdk.protocol._conn_writer import ConnWriter
+from .._conn_writer import ConnWriter
 from trpc_sdk.rpcz import RPCZ_SERVER_REQ_SIZE_CTX_KEY
 from trpc_sdk.rpcz import RPCZ_SERVER_RSP_SIZE_CTX_KEY
 from trpc_sdk.rpcz import submit_server_span_on_executor_post_io
@@ -178,8 +178,9 @@ cdef class TCPConnection:
         """Copy the listener's options into this connection's C-level slots.
 
         ``option`` is read by attribute name only, so this module does not
-        import :mod:`trpc_sdk.transport`. It is not kept: the hot path reads
-        the copied slots.
+        import :mod:`trpc_sdk.transport`. That package's ``__init__`` loads
+        this module; a back-import would run while it is still loading.
+        The option is not kept: the hot path reads the copied slots.
 
         Args:
             option: A :class:`~trpc_sdk.transport.ConnectionOption`.

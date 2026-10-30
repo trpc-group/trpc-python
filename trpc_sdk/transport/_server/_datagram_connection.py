@@ -28,9 +28,9 @@ from typing import Tuple
 
 from trpc_sdk.exceptions import ServerDecodeError
 from trpc_sdk.log import logger
-from trpc_sdk.protocol import ConnWriter
 from trpc_sdk.telemetry import report_attr
 
+from ._conn_writer import ConnWriter
 from ._stream_connection import ConnectionOption
 from ._stream_connection import _to_host_port
 

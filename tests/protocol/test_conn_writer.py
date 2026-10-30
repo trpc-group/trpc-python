@@ -11,8 +11,8 @@ import asyncio
 import threading
 
 from tests.protocol._fakes import FakeTransport
-from trpc_sdk.protocol import ConnWriter
-from trpc_sdk.protocol import _conn_writer
+from trpc_sdk.transport import ConnWriter
+from trpc_sdk.transport._server import _conn_writer
 
 
 def test_still_importable_from_runtime_package():

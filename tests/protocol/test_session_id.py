@@ -17,8 +17,8 @@ from tests.protocol._fakes import FakeTransport
 from tests.protocol._fakes import stream_frame
 from tests.protocol._fakes import unary_frame
 from trpc_sdk.abc import get_message
-from trpc_sdk.protocol import TCPConnection
-from trpc_sdk.protocol._cython import _tcp_protocol
+from trpc_sdk.transport import TCPConnection
+from trpc_sdk.transport._server._cython import _tcp_protocol
 from trpc_sdk.transport import TcpConnectionOption
 
 

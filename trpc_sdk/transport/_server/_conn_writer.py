@@ -22,8 +22,10 @@ Two users:
   keep writing (DATA, CLOSE, RESET) after the client left, and the writer's
   ``closed`` flag is what drops those writes.
 
-It lives in the protocol package because the TCP protocol builds it itself;
-the protocol package does not import the server package.
+It lives beside the TCP protocol because that protocol builds the writer
+itself. The Cython module imports it with a relative import and does not
+import :mod:`trpc_sdk.transport`: that package's ``__init__`` loads this
+module.
 
 Every cross-thread write costs one ``call_soon_threadsafe``; wake-ups are not
 coalesced in this version.

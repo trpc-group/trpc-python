@@ -33,6 +33,11 @@ The package is split by responsibility:
   ``set_io_connection``, with its :class:`ConnectionOption` and the
   ``MsgHandler`` / ``Connection*Handler`` callback types it holds; and
   :class:`ServerConnection`, the peer view ``_msg_handler`` reads
+- :mod:`~trpc_sdk.transport._server._cython` — :class:`TCPConnection`, the
+  Cython asyncio Protocol for one accepted client TCP socket, and
+  :func:`handle_request`
+- :mod:`~trpc_sdk.transport._server._conn_writer` — :class:`ConnWriter`, the
+  handle that writes on a connection's transport from any thread
 - :mod:`~trpc_sdk.transport._server._datagram_connection` —
   :class:`DefaultDatagramConnection`, the datagram protocol of a
   tRPC-over-UDP listen socket, which builds one peer view per datagram
@@ -53,6 +58,8 @@ from ._acceptor import AcceptTarget
 from ._acceptor import Acceptor
 from ._acceptor import StreamListener
 from ._acceptor import serve_stream
+from ._conn_writer import ConnWriter
+from ._cython import TCPConnection  # pylint: disable=no-name-in-module
 from ._datagram_connection import DefaultDatagramConnection
 from ._stream_connection import BaseConnection
 from ._stream_connection import ConnectionCloseHandler
@@ -81,6 +88,7 @@ __all__ = [
     "AcceptTarget",
     "Acceptor",
     "BaseConnection",
+    "ConnWriter",
     "ConnectionCloseHandler",
     "ConnectionIdleCleanHandler",
     "ConnectionInitHandler",
@@ -92,6 +100,7 @@ __all__ = [
     "MsgHandler",
     "ServerConnection",
     "StreamListener",
+    "TCPConnection",
     "TcpConnectionOption",
     "TrpcServerTransport",
     "TrpcServerStreamTransport",

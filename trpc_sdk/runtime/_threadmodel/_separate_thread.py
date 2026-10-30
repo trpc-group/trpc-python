@@ -23,7 +23,7 @@ A tRPC unary request crosses threads twice: the I/O loop hands it to a handle
 thread through
 :class:`~trpc_sdk.runtime._threadmodel._handler_pool.SharedHandlerPool`, and
 the handle thread hands the response back through the connection's
-:class:`~trpc_sdk.protocol.ConnWriter`. Requests of one connection
+:class:`~trpc_sdk.transport.ConnWriter`. Requests of one connection
 may therefore run on several handle threads and complete out of order, which
 tRPC already allows: responses are matched by request id.
 
