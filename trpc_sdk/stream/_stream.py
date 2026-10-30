@@ -8,7 +8,7 @@
 
 ``Stream`` is the public ``trpc_sdk.stream`` protocol transport.
 
-Build instances through :func:`trpc_sdk.client.create_stream`. ``opts`` stays
+Build instances through :func:`trpc_sdk.stream.create_stream`. ``opts`` stays
 ``None`` until :meth:`Stream.start` injects the per-call transport,
 codec and deadline.
 """
@@ -19,12 +19,12 @@ from typing import Optional
 
 from trpc_sdk.abc import BaseClientStreamConnection
 from trpc_sdk.abc import TrpcContext
+from trpc_sdk.client import Options
+from trpc_sdk.client import select_node
+from trpc_sdk.client import set_timeout
 from trpc_sdk.compressor import compress
 from trpc_sdk.serialization import serialize
 from trpc_sdk.utils import now_ms
-from ._client import select_node
-from ._client import set_timeout
-from ._options import Options
 
 
 class Stream(BaseClientStreamConnection):

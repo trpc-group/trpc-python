@@ -12,6 +12,8 @@ import ...``.
 The package is split by responsibility:
 
 - :mod:`~trpc_sdk.stream._client` — :class:`ClientStream` and the client factory
+- :mod:`~trpc_sdk.stream._stream` — transport connection used by :class:`ClientStream`
+- :mod:`~trpc_sdk.stream._stream_factory` — one fresh :class:`Stream` per call
 - :mod:`~trpc_sdk.stream._server` — :class:`ServerStream` and :class:`StreamDispatcher`
 - :mod:`~trpc_sdk.stream._flow_control` — send / receive window
 - :mod:`~trpc_sdk.stream._constants`, :mod:`~trpc_sdk.stream._options`,
@@ -36,6 +38,8 @@ from ._server import ServerStreamHandle
 from ._server import StreamDispatcher
 from ._server import create_server_stream
 from ._server import create_stream_dispatcher
+from ._stream import Stream
+from ._stream_factory import create_stream
 from ._types import ClientStreamDesc
 
 __all__ = [
@@ -52,6 +56,8 @@ __all__ = [
     "ClientStream",
     "ClientStreamDesc",
     "Client",
+    "Stream",
+    "create_stream",
     "create_stream_client",
     "default_stream_client",
     # Server
