@@ -13,8 +13,6 @@ The package is split by responsibility:
 
 - :mod:`~trpc_sdk.client._options` — ``Options`` container and per-request construction
 - :mod:`~trpc_sdk.client._client` — unary invoke path: message, node select, timeout
-- :mod:`~trpc_sdk.client._stream` — client-side stream implementations
-- :mod:`~trpc_sdk.client._stream_factory` — stream factories; each call needs a fresh stream
 - :mod:`~trpc_sdk.client._config` — deprecated shim over :class:`trpc_sdk.config.TrpcConfig`
 """
 
@@ -28,14 +26,10 @@ from ._client import get_client
 from ._client import select_node
 from ._client import set_timeout
 from ._client import update_message
-from ._stream import Stream
-from ._stream_factory import create_stream
 
 __all__ = [
     "Client",
     "Options",
-    "Stream",
-    "create_stream",
     "get_client",
     "get_options",
     "normalize_options",

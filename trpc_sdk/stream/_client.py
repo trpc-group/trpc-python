@@ -28,7 +28,6 @@ from trpc_sdk.abc import TrpcMessage
 from trpc_sdk.abc import clone_context_and_message
 from trpc_sdk.abc import create_frame_head
 from trpc_sdk.client import Options
-from trpc_sdk.client import create_stream
 from trpc_sdk.client import get_options
 from trpc_sdk.client import update_message
 from trpc_sdk.common import get_or_create_event_loop
@@ -45,6 +44,7 @@ from ._constants import STREAM_ID
 from ._flow_control import ReceiveControl
 from ._flow_control import SendControl
 from ._options import get_window_size
+from ._stream_factory import create_stream
 from ._types import ClientStreamDesc
 
 

@@ -7,7 +7,7 @@
 """Client stream factories.
 
 Each outbound stream call needs a fresh object: :attr:`Stream.opts` stays
-``None`` until :meth:`~trpc_sdk.client.Stream.start` fills in the per-call
+``None`` until :meth:`~trpc_sdk.stream.Stream.start` fills in the per-call
 transport, codec and deadline. A shared instance would leak one call's
 options into the next.
 """
