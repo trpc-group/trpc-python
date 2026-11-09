@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """tRPC-Python transport package: how bytes travel, not what they mean.
 
 The package holds both halves of the wire path.
