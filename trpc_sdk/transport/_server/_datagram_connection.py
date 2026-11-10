@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Datagram protocol of a tRPC-over-UDP listen socket.
 
 :meth:`~trpc_sdk.transport.TrpcServerTransport.datagram_protocol_factory`
@@ -50,12 +49,8 @@ class DatagramPeer:
 
     __slots__ = ("aio_conn", "local_addr", "remote_addr", "_writer")
 
-    def __init__(self,
-                 loop: asyncio.AbstractEventLoop,
-                 aio_conn: asyncio.DatagramTransport,
-                 local_addr: Tuple[str, int],
-                 remote_addr: Tuple[str, int],
-                 source: Any) -> None:
+    def __init__(self, loop: asyncio.AbstractEventLoop, aio_conn: asyncio.DatagramTransport,
+                 local_addr: Tuple[str, int], remote_addr: Tuple[str, int], source: Any) -> None:
         """Bind the peer to one datagram's source.
 
         Args:
@@ -141,8 +136,10 @@ class DefaultDatagramConnection(asyncio.DatagramProtocol):
                 return
             except Exception as err:  # pylint: disable=broad-except
                 report_attr("trpc_datagram_connection_read_fatal_err", 1)
-                logger.error(f"[datagram_connection] fatal err while decoding datagram, remote_addr: {addr}, "
-                             f"err: {err}", exc_info=True)
+                logger.error(
+                    f"[datagram_connection] fatal err while decoding datagram, remote_addr: {addr}, "
+                    f"err: {err}",
+                    exc_info=True)
                 self.parser.reset()
                 return
             if not frames:

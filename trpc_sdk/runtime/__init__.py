@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """tRPC-Python runtime: the process and thread model behind a server.
 
 There are two kinds of process. The **worker** is the process the application
@@ -30,7 +29,8 @@ translated from YAML ``global.processmodel`` and is one of ``merge``,
   what a CPU-bound service needs; ``merge`` will not scale it across cores.
   Only tRPC-over-TCP addresses pass through the worker; UDP, HTTP and
   user-protocol addresses are bound by every rpc task with ``SO_REUSEPORT``.
-- ``peer`` (``multi_process`` with ``io_handle_type: merge``) — the worker forks ``worker_num - 1`` equal workers; every one,
+- ``peer`` (``multi_process`` with ``io_handle_type: merge``) — the worker
+  forks ``worker_num - 1`` equal workers; every one,
   itself included, binds every address with ``SO_REUSEPORT`` and serves it
   like a single-loop ``merge`` worker. Nothing is forwarded between
   processes; the kernel spreads connections. Tasks are not supported.
@@ -56,7 +56,8 @@ mode. Subpackages hold the pieces those workers are built from:
   ``runtime/threadmodel`` and ``separate_runtime``); responses cross back
   to the I/O loops through :class:`~trpc_sdk.transport.ConnWriter`,
   re-exported here
-- :mod:`~trpc_sdk.runtime._common` — SIGTERM callbacks, process metadata and the exit template every mode shares (trpc-cpp
+- :mod:`~trpc_sdk.runtime._common` — SIGTERM callbacks, process metadata
+  and the exit template every mode shares (trpc-cpp
   ``runtime/common``)
 - :mod:`~trpc_sdk.runtime._process` — task children and the pre-fork
   socketpair mesh (trpc-cpp ``runtime/task``), plus the multi-process
@@ -116,9 +117,9 @@ from ._worker import BaseWorker
 
 # Called by Server.serve. Absent from __all__ on purpose: application code
 # uses set_signal_handle, register_handler_thread_hook, and create_server.
-from ._common import run_server_signal_handle
-from ._modes import create_worker
-from ._threadmodel import freeze_handler_thread_hooks
+from ._common import run_server_signal_handle  # noqa: F401
+from ._modes import create_worker  # noqa: F401
+from ._threadmodel import freeze_handler_thread_hooks  # noqa: F401
 
 __all__ = [
     # Process model

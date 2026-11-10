@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Worker of ``server.mode: merge`` with ``handle_thread_num > 0`` (``io_handle_type: separate``).
 
 inside one process; not to be confused with ``server.mode: separate`` in
@@ -115,8 +114,9 @@ class SeparateThread(MergeWorker):
             return
         if any(t.ipc_forwardable and t.opts.tls_cert and t.opts.tls_key for t in self.transports):
             return
-        logger.warning("[separate thread worker] io_thread_num=%s, but no tRPC TCP endpoint uses TLS; "
-                       "extra I/O loops only pay off for TLS", self.io_thread_num)
+        logger.warning(
+            "[separate thread worker] io_thread_num=%s, but no tRPC TCP endpoint uses TLS; "
+            "extra I/O loops only pay off for TLS", self.io_thread_num)
 
     def _build_thread_model(self) -> ThreadModel:
         """I/O on the main loop plus ``io_thread_num - 1`` I/O threads; handlers on the handle threads.

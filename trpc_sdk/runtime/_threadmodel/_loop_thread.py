@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Event-loop threads that a merge-mode worker spreads its work over.
 
 In ``merge`` mode one process both accepts connections and runs handlers.
@@ -331,8 +330,7 @@ class LoopThread:
         return not self._thread.is_alive()
 
 
-def stop_loop_threads(threads: Sequence[LoopThread],
-                      before_stop: Optional[Callable[[int], Awaitable[None]]],
+def stop_loop_threads(threads: Sequence[LoopThread], before_stop: Optional[Callable[[int], Awaitable[None]]],
                       timeout: float) -> bool:
     """Stop several loop threads in parallel, under one shared deadline.
 
@@ -360,8 +358,10 @@ def stop_loop_threads(threads: Sequence[LoopThread],
         if before_stop is None or thread.loop is None or thread.loop.is_closed():
             continue
         try:
-            pending.append((thread, thread._schedule(  # pylint: disable=protected-access
-                lambda index=thread.index: before_stop(index))))
+            pending.append((
+                thread,
+                thread._schedule(  # pylint: disable=protected-access
+                    lambda index=thread.index: before_stop(index))))
         except RuntimeError:
             continue
     for thread, future in pending:
