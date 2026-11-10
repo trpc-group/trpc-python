@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """tRPC server transport: record options before fork, listen after it.
 
 :meth:`TrpcServerTransport.bind` runs in ``ServiceAdapter.init_transport`` and only keeps the
@@ -113,7 +112,8 @@ class TrpcServerTransport(BaseServerTransport):
     default. A subclass serving another protocol over the same listen
     machinery calls :meth:`set_io_connection`, overrides :meth:`_msg_handler`
     and, when the framing differs, sets another ``opts.parser``; its
-    connections are then :class:`DefaultIoConnection` objects. Datagrams are always served by :class:`DefaultDatagramConnection`, which
+    connections are then :class:`DefaultIoConnection` objects. Datagrams
+    are always served by :class:`DefaultDatagramConnection`, which
     hands every frame to :meth:`_msg_handler`.
 
     Attributes:
@@ -248,11 +248,12 @@ class TrpcServerTransport(BaseServerTransport):
         """
         opts = self.opts
         if self._io_connection is None:
-            return partial(TCPConnection,
-                           TcpConnectionOption(parser=opts.parser,
-                                               rpc_handler=opts.rpc_handler,
-                                               timeout=opts.idle_timeout,
-                                               shared_pool=shared_pool))
+            return partial(
+                TCPConnection,
+                TcpConnectionOption(parser=opts.parser,
+                                    rpc_handler=opts.rpc_handler,
+                                    timeout=opts.idle_timeout,
+                                    shared_pool=shared_pool))
         return partial(self._io_connection, ConnectionOption(parser=opts.parser, msg_handler=self._msg_handler))
 
     async def _msg_handler(self, conn: ServerConnection, data: bytes) -> None:
@@ -309,9 +310,7 @@ class TrpcServerTransport(BaseServerTransport):
         """
         opts = self.opts
         return partial(DefaultDatagramConnection,
-                       ConnectionOption(parser=opts.parser,
-                                        msg_handler=self._msg_handler,
-                                        shared_pool=shared_pool))
+                       ConnectionOption(parser=opts.parser, msg_handler=self._msg_handler, shared_pool=shared_pool))
 
     def create_socket(self, reuse_port: bool, stream: bool = True) -> socket.socket:
         """Create and bind one socket on the configured address.
@@ -347,8 +346,13 @@ class TrpcServerTransport(BaseServerTransport):
         """
         sock = self.create_socket(model.reuse_port)
         try:
-            listener = serve_stream(model, group, sock, factory_for, self.opts.backlog,
-                                    ssl_context=ssl_context, address=self.opts.address)
+            listener = serve_stream(model,
+                                    group,
+                                    sock,
+                                    factory_for,
+                                    self.opts.backlog,
+                                    ssl_context=ssl_context,
+                                    address=self.opts.address)
         except BaseException:
             sock.close()
             raise

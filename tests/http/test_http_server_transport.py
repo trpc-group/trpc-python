@@ -34,6 +34,7 @@ from trpc_sdk.http import get_http_request
 from trpc_sdk.http import get_http_response
 from trpc_sdk.http import register_user_http_decode_func
 from trpc_sdk.http import _routes
+from trpc_sdk.utils import set_default_close_wait
 
 
 def test_http_server_transport():
@@ -57,6 +58,15 @@ def test_http_listen_serves_the_runner_on_one_loop(monkeypatch):
     opts.set_address(("127.0.0.1", port))
     transport = HttpServerTransportFactory().create()
     transport.bind(opts)
+
+    real_create_socket = transport.create_socket
+
+    def _create_socket(reuse_port, stream=True):
+        sock = real_create_socket(reuse_port, stream)
+        set_default_close_wait(sock)
+        return sock
+
+    monkeypatch.setattr(transport, "create_socket", _create_socket)
 
     def _app():
         app = web.Application()

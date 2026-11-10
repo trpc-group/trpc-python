@@ -30,6 +30,7 @@ from trpc_sdk.transport import TrpcServerTransport
 from trpc_sdk.transport._server import serve_stream
 from trpc_sdk.transport._server import _trpc_transport
 from trpc_sdk.utils import create_new_socket
+from trpc_sdk.utils import set_default_close_wait
 
 
 @pytest.fixture
@@ -67,7 +68,12 @@ class _FakeReactor:
 
 
 def _listen_socket() -> socket.socket:
-    return create_new_socket(("127.0.0.1", 0), "", False, True, 16)
+    # Linux inherits SO_LINGER(1, 0) from the listen socket, so closing an
+    # accepted fd sends RST and can fail the client's connect. Restore the
+    # default linger so this test sees a normal FIN.
+    sock = create_new_socket(("127.0.0.1", 0), "", False, True, 16)
+    set_default_close_wait(sock)
+    return sock
 
 
 def test_default_model_is_rebuilt_on_the_calling_loop(loop):
