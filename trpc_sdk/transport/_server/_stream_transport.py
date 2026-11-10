@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Streaming server transport that maps (session, stream) to a write handle.
 
 Inherits :class:`TrpcServerTransport`, so ``bind`` (pre-fork, options only)

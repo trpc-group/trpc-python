@@ -71,6 +71,7 @@ jobs:
 
       - name: Install package and dependencies
         run: |
+          pip install -e ".[dev,fast]" "protobuf>=3.19.4,<3.20"
           pip install -r requirements-test.txt
 
       - name: Run tests with coverage
