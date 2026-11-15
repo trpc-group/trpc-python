@@ -7,13 +7,9 @@
 """Built-in ContentType serializer plugins.
 
 This is the merged copy of the historical ``serialization_json`` /
-``serialization_proto`` / ``serialization_noop`` / ``serialization_jce``
-/ ``serialization_wup`` modules. Importing it (which
-:mod:`trpc_sdk.serialization` does) registers every built-in serializer,
-JCE (1) and WUP (200) included.
-
-``jcepy`` is imported on first JCE / WUP use so processes that never
-send those encodings do not need the optional dependency.
+``serialization_proto`` / ``serialization_noop`` modules. Importing it
+(which :mod:`trpc_sdk.serialization` does) registers every built-in
+serializer.
 """
 
 from __future__ import annotations
@@ -39,11 +35,10 @@ from ._types import SerializationType
 _PROTOBUF_VERSION = tuple(int(x) for x in google.protobuf.__version__.split(".")[:2])
 _USE_NEW_PARAM = _PROTOBUF_VERSION >= (5, 26)
 
-# Extra kwargs for MessageToJson / Parse used by JsonSerializer. Update in
-# place (``pb_to_json_kwargs.update(...)``); rebinding the name after
+# Extra kwargs for MessageToJson used by JsonSerializer. Update in place
+# (``pb_to_json_kwargs.update(...)``); rebinding the name after
 # ``from ... import`` does not reach this module.
 pb_to_json_kwargs = {}
-json_to_pb_kwargs = {}
 
 
 @register_plugin(PluginType.SERIALIZATION, SerializationType.JSON, init_pos=PluginInitPos.WORKER)
@@ -51,9 +46,10 @@ class JsonSerializer(BaseSerializer):
     """JSON serializer registered as ``SerializationType.JSON``.
 
     Accepts either a :class:`JsonData` dict wrapper or a protobuf
-    ``Message``. Protobuf conversion uses :data:`pb_to_json_kwargs` /
-    :data:`json_to_pb_kwargs` when they are set; otherwise it picks the
-    protobuf 5.26+ vs older ``MessageToJson`` parameter names.
+    ``Message``. Protobuf-to-JSON conversion uses :data:`pb_to_json_kwargs`
+    when it is set; otherwise it picks the protobuf 5.26+ vs older
+    ``MessageToJson`` parameter names. JSON-to-protobuf conversion always
+    ignores unknown fields.
     """
 
     def _pb_serialize(self, body: PbMessage) -> bytes:
@@ -90,16 +86,12 @@ class JsonSerializer(BaseSerializer):
     def _pb_deserialize(self, data: bytes, body: PbMessage) -> None:
         """Populate a protobuf message from JSON bytes.
 
-        Uses :data:`json_to_pb_kwargs` when present; otherwise
-        ``ignore_unknown_fields=True``.
+        Unknown JSON fields are ignored.
 
         Args:
             data: JSON bytes.
             body: Protobuf message mutated in place.
         """
-        if json_to_pb_kwargs:
-            Parse(data, body, **json_to_pb_kwargs)
-            return
         Parse(data, body, ignore_unknown_fields=True)
 
     def _json_serialize(self, body: JsonData) -> bytes:
@@ -211,76 +203,3 @@ class NoopSerializer(BaseSerializer):
         """
         if isinstance(body, Body):
             body.data = data
-
-
-@register_plugin(PluginType.SERIALIZATION, SerializationType.JCE, init_pos=PluginInitPos.WORKER)
-class JceSerializer(BaseSerializer):
-    """JCE serializer registered as ``SerializationType.JCE``.
-
-    ``jcepy.core.tafcore`` is imported on first use. Output uses
-    ``JceOutputStream.bodySerilization`` (the jcepy spelling). Input
-    skips the leading int32 tag and copies deserialized fields onto
-    ``body``.
-    """
-
-    def serialize(self, body: Any) -> bytes:
-        """Serialize ``body`` with a JCE output stream.
-
-        Args:
-            body: JCE-capable application object.
-        """
-        from jcepy.core import tafcore
-
-        oos = tafcore.JceOutputStream()
-        oos.bodySerilization(body)
-        return oos.getBuffer()
-
-    def deserialize(self, data: bytes, body: Any) -> None:
-        """Populate ``body`` from JCE bytes.
-
-        Args:
-            data: JCE-encoded body bytes.
-            body: Object whose attributes are overwritten from the
-                deserialized result.
-        """
-        from jcepy.core import tafcore
-
-        ios = tafcore.JceInputStream(data)
-        ios.read(tafcore.int32, 0, True)
-        res = ios.bodydeserialize(body)
-        for item in res.__dict__.items():
-            setattr(body, str(item[0]), item[1])
-
-
-@register_plugin(PluginType.SERIALIZATION, SerializationType.Wup, init_pos=PluginInitPos.WORKER)
-class WupSerializer(BaseSerializer):
-    """Taf WUP serializer registered as ``SerializationType.Wup``.
-
-    ``jcepy.core.tafcore`` is imported on first use. WUP is the Taf
-    dictionary packet (``TafUniPacket``), not the raw JCE stream used
-    by :class:`JceSerializer`.
-    """
-
-    def serialize(self, body: Any) -> bytes:
-        """Serialize ``body`` with ``TafUniPacket.WUPserialize``.
-
-        Args:
-            body: WUP-capable application object.
-        """
-        from jcepy.core import tafcore
-
-        up = tafcore.TafUniPacket()
-        return up.WUPserialize(body)
-
-    def deserialize(self, data: bytes, body: Any) -> None:
-        """Populate ``body`` from a WUP packet.
-
-        Args:
-            data: WUP-encoded body bytes.
-            body: Object to populate via ``WUPdeserialize``.
-        """
-        from jcepy.core import tafcore
-
-        up = tafcore.TafUniPacket()
-        up.deserialize(data)
-        up.WUPdeserialize(body)

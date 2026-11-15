@@ -17,24 +17,20 @@ from tests.helloworld_pb2 import HelloRequest
 from trpc_sdk.abc import BaseSerializer
 from trpc_sdk.serialization import JsonData
 from trpc_sdk.serialization import JsonSerializer
-from trpc_sdk.serialization import json_to_pb_kwargs
 from trpc_sdk.serialization import pb_to_json_kwargs
 from trpc_sdk.serialization._serialization import _PROTOBUF_VERSION
 from trpc_sdk.serialization._serialization import _USE_NEW_PARAM
 
 
-def register_pb_json_format_kwargs(pb_kwargs=None, json_kwargs=None):
-    """Update the serializer kwargs dicts in place.
+def register_pb_json_format_kwargs(pb_kwargs=None):
+    """Update ``pb_to_json_kwargs`` in place.
 
-    An empty mapping clears that side so JsonSerializer falls back to its
-    protobuf-version defaults. ``None`` leaves that side unchanged.
+    An empty mapping clears it so JsonSerializer falls back to its
+    protobuf-version defaults. ``None`` leaves it unchanged.
     """
     if pb_kwargs is not None:
         pb_to_json_kwargs.clear()
         pb_to_json_kwargs.update(pb_kwargs)
-    if json_kwargs is not None:
-        json_to_pb_kwargs.clear()
-        json_to_pb_kwargs.update(json_kwargs)
 
 
 # JsonSerializer tests
@@ -397,51 +393,10 @@ def test_register_pb_map_json_kwargs_with_pb_kwargs():
     register_pb_json_format_kwargs(pb_kwargs={})
 
 
-def test_register_pb_map_json_kwargs_with_json_kwargs():
-    """Test register_pb_json_format_kwargs with json_kwargs"""
-    # Register custom json_kwargs
-    custom_json_kwargs = {"ignore_unknown_fields": False}
-    register_pb_json_format_kwargs(json_kwargs=custom_json_kwargs)
-
-    serializer = JsonSerializer()
-    request = HelloRequest()
-    request.msg = "Test"
-
-    serialized = serializer.serialize(request)
-
-    # Deserialize with custom kwargs
-    new_request = HelloRequest()
-    serializer.deserialize(serialized, new_request)
-    assert new_request.msg == "Test"
-
-    # Reset to default
-    register_pb_json_format_kwargs(json_kwargs={})
-
-
-def test_register_pb_map_json_kwargs_with_both():
-    """Test register_pb_json_format_kwargs with both pb_kwargs and json_kwargs"""
-    custom_pb_kwargs = {"use_integers_for_enums": True}
-    custom_json_kwargs = {"ignore_unknown_fields": True}
-
-    register_pb_json_format_kwargs(pb_kwargs=custom_pb_kwargs, json_kwargs=custom_json_kwargs)
-
-    serializer = JsonSerializer()
-    request = HelloRequest()
-    request.msg = "Test both kwargs"
-
-    serialized = serializer.serialize(request)
-    new_request = HelloRequest()
-    serializer.deserialize(serialized, new_request)
-    assert new_request.msg == "Test both kwargs"
-
-    # Reset to default
-    register_pb_json_format_kwargs(pb_kwargs={}, json_kwargs={})
-
-
 def test_register_pb_map_json_kwargs_with_none():
     """Test register_pb_json_format_kwargs with None parameters"""
     # Should not raise any exception
-    register_pb_json_format_kwargs(pb_kwargs=None, json_kwargs=None)
+    register_pb_json_format_kwargs(pb_kwargs=None)
 
     serializer = JsonSerializer()
     request = HelloRequest()
@@ -549,28 +504,6 @@ def test_pb_serialize_with_custom_kwargs():
 
     # Reset
     register_pb_json_format_kwargs(pb_kwargs={})
-
-
-def test_pb_deserialize_with_custom_kwargs():
-    """Test _pb_deserialize with custom kwargs registered"""
-    serializer = JsonSerializer()
-
-    # First serialize a message
-    request = HelloRequest()
-    request.msg = "Deserialize test"
-    serialized = serializer.serialize(request)
-
-    # Register custom json_kwargs
-    custom_kwargs = {"ignore_unknown_fields": True}
-    register_pb_json_format_kwargs(json_kwargs=custom_kwargs)
-
-    # Deserialize with custom kwargs
-    new_request = HelloRequest()
-    serializer._pb_deserialize(serialized, new_request)
-    assert new_request.msg == "Deserialize test"
-
-    # Reset
-    register_pb_json_format_kwargs(json_kwargs={})
 
 
 def test_json_data_field_default_factory():

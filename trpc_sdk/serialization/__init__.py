@@ -12,7 +12,7 @@ modules; callers should only ``from trpc_sdk.serialization import ...``.
 The package is split by responsibility:
 
 - :mod:`~trpc_sdk.serialization._types` — ``SerializationType``, ``JsonData``, ``Body``
-- :mod:`~trpc_sdk.serialization._serialization` — JSON / protobuf / noop / JCE / WUP plugins
+- :mod:`~trpc_sdk.serialization._serialization` — JSON / protobuf / noop plugins
 - :mod:`~trpc_sdk.serialization._utils` — ``serialize`` / ``deserialize`` / ``get_serializer``
 - :mod:`~trpc_sdk.serialization._constants` — ``SerializationCode`` wire values
 
@@ -21,12 +21,9 @@ Importing this package registers every built-in serializer.
 
 from __future__ import annotations
 
-from ._serialization import JceSerializer
 from ._serialization import JsonSerializer
 from ._serialization import NoopSerializer
 from ._serialization import ProtoSerializer
-from ._serialization import WupSerializer
-from ._serialization import json_to_pb_kwargs
 from ._serialization import pb_to_json_kwargs
 from ._types import Body
 from ._types import JsonData
@@ -44,9 +41,6 @@ __all__ = [
     "JsonData",
     "Body",
     "pb_to_json_kwargs",
-    "json_to_pb_kwargs",
     "ProtoSerializer",
     "NoopSerializer",
-    "JceSerializer",
-    "WupSerializer",
 ]
