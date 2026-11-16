@@ -3,6 +3,7 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
+"""Generated tRPC protocol buffer modules."""
 
 from . import trpc_pb2
 

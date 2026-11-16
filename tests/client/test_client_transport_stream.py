@@ -10,7 +10,7 @@ from trpc_sdk.abc import TrpcContext
 from trpc_sdk.codec import create_message
 from trpc_sdk.exceptions import ClientInvokeError
 from trpc_sdk.exceptions import ClientTimeoutError
-from trpc_sdk.transport import ClientConn
+from trpc_sdk.transport import ClientStreamConn
 from trpc_sdk.transport import ClientTransport
 from trpc_sdk.transport import RoundTripOptions
 
@@ -82,7 +82,7 @@ async def test_recv_frame():
     """Recv frame turns parser failures into client errors."""
     timeout_options = RoundTripOptions()
     timeout_options.set_parser(_Parser(error=TimeoutError("slow")))
-    client_conn = ClientConn(conn=_FakeConn(), options=timeout_options)
+    client_conn = ClientStreamConn(conn=_FakeConn(), options=timeout_options)
     ctx = TrpcContext()
     ctx.deadline = 0
     with pytest.raises(ClientTimeoutError):
@@ -90,7 +90,7 @@ async def test_recv_frame():
 
     error_options = RoundTripOptions()
     error_options.set_parser(_Parser(error=RuntimeError("test err")))
-    client_conn = ClientConn(conn=_FakeConn(), options=error_options)
+    client_conn = ClientStreamConn(conn=_FakeConn(), options=error_options)
     with pytest.raises(ClientInvokeError, match="test err"):
         await client_conn.recv_frame(ctx)
 
@@ -100,6 +100,6 @@ def test_client_conn_close_marks_force():
     fake = _FakeConn()
     options = RoundTripOptions()
     options.parser = _Parser()
-    client_conn = ClientConn(conn=fake, options=options)
+    client_conn = ClientStreamConn(conn=fake, options=options)
     client_conn.close(True)
     assert fake.closed is True

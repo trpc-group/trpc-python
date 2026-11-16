@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Task child processes: background work moved off the worker processes.
 
 A task is registered with ``@trpc.task`` and runs in its own process, so slow
@@ -97,8 +96,6 @@ def build_task_infos(default_task_num: int = 1) -> List[TaskInfo]:
             task.batch_size = task_handler.batch_size
             task.thread_num = task_handler.thread_num
             task.model_info = task_handler.model_info
-            task.use_c_task = task_handler.use_c_task
-            task.c_task_driver_params = task_handler.c_task_driver_params
             task.on_fork = task_handler.on_fork
             task.pause_heartbeat = task_handler.pause_heartbeat
             if task.pause_heartbeat:
@@ -138,7 +135,8 @@ class TaskIpcMesh:
         # Sender name -> its end toward each task, index-aligned with
         # ``task_infos``.
         self._sender_pipes: Dict[str, List[Optional[PipeConnection]]] = {
-            name: [None] * len(task_infos) for name in self.sender_names
+            name: [None] * len(task_infos)
+            for name in self.sender_names
         }
         self._build()
 

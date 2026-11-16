@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Process role stamps and parent-death binding.
 
 :class:`trpc_sdk.abc.ProcessType` is the single source of truth for process

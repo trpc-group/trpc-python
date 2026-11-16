@@ -3,12 +3,11 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """tRPC-Python ABC module"""
 
-from ._circuit_breaker import BaseCircuitBreaker
 from ._codec import TaskCodec
 from ._client import BaseClient
+from ._client import ClientStreamDesc
 from ._client import BaseClientStream
 from ._client import BaseClientStreamConnection
 from ._compress import BaseCompress
@@ -30,14 +29,12 @@ from ._cython import create_frame_head  # pyright: ignore[reportMissingModuleSou
 from ._cython import create_message  # pyright: ignore[reportMissingModuleSource]
 from ._cython import get_message  # pyright: ignore[reportMissingModuleSource]
 from ._cython import parse_frame_head  # pyright: ignore[reportMissingModuleSource]
-from ._discovery import BaseDiscovery
 from ._filter import BaseFilter
 from ._filter import FilterHandleType
 from ._filter import FilterAsyncGenHandleType
 from ._filter import FilterAsyncGenReturnType
 from ._filter import FilterReturnType
 from ._filter import FilterStreamResultType
-from ._loadbalance import BaseLoadBalance
 from ._log import LOG_LEVEL_NAMES
 from ._log import BaseLogger
 from ._log import BaseWriter
@@ -53,16 +50,20 @@ from ._metrics import PassiveData
 from ._metrics import ReportStatus
 from ._metrics import StatPolicy
 from ._metrics import StatValue
-from ._node import Node
+from ._naming import BaseCircuitBreaker
+from ._naming import BaseDiscovery
+from ._naming import BaseLoadBalance
+from ._naming import BaseSelector
+from ._naming import BaseServiceRegistry
+from ._naming import BaseServiceRouter
+from ._naming import SelectorOption
+from ._naming import ServerRouterOption
+from ._naming import ServiceNameExtractor
+from ._naming import Node
 from ._plugin import BasePlugin
 from ._plugin import BasePluginFactory
 from ._plugin import PluginInitPos
 from ._plugin import PluginType
-from ._selector import BaseSelector
-from ._selector import BaseServiceRouter
-from ._selector import SelectorOption
-from ._selector import ServerRouterOption
-from ._selector import ServiceNameExtractor
 from ._serializer import BaseSerializer
 from ._server import BaseServer
 from ._server import BaseServerStream
@@ -71,9 +72,8 @@ from ._server import Method
 from ._server import ProcessType
 from ._server import ServiceDesc
 from ._server import StreamDesc
-from ._service_registry import BaseServiceRegistry
-from ._task_info import TaskInfo
-from ._timer_hook import TimerHook
+from ._types import TaskInfo
+from ._timer import TimerHook
 from ._transport import AddrType
 from ._transport import BaseClientStreamTransport
 from ._transport import BaseClientTransport
@@ -88,6 +88,7 @@ __all__ = [
     "BaseCircuitBreaker",
     "BaseClient",
     "BaseClientProtocolParser",
+    "ClientStreamDesc",
     "BaseClientStream",
     "BaseClientStreamConnection",
     "BaseClientStreamTransport",

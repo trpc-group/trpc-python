@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Per-call options the client transport reads on a round trip.
 
 :class:`RoundTripOptions` is the bag of knobs :class:`ClientTransport`
@@ -23,9 +22,10 @@ from trpc_sdk.abc import BaseClientProtocolParser
 from trpc_sdk.abc import BaseClientTransportOption
 from trpc_sdk.abc import BaseCodec
 from trpc_sdk.codec import TrpcClientParser
+
 from .._constants import RequestType
-from .._pool import ConnPoolOptions
-from .._pool import ConnectionPoolManager
+from ._pool import KeepLiveConnPoolOptions
+from ._pool import KeepLiveConnPoolManager
 
 
 class RoundTripOptions(BaseClientTransportOption):
@@ -52,7 +52,7 @@ class RoundTripOptions(BaseClientTransportOption):
     def __init__(self):
         super().__init__()
         self.parser = TrpcClientParser()
-        self.password = None
+        self.password: Optional[str] = None
         self.pool = None
         self.pool_opts = None
 
@@ -86,16 +86,16 @@ class RoundTripOptions(BaseClientTransportOption):
         """
         self.password = password
 
-    def set_pool(self, pool: ConnectionPoolManager):
+    def set_pool(self, pool: KeepLiveConnPoolManager):
         """Use a caller-supplied connection pool instead of the default.
 
         Args:
-            pool: Pool manager the TCP helper will ``get`` from.
+            pool: Connection pool manager the TCP helper will ``get`` from.
         """
         self.pool = pool
 
-    def set_pool_options(self, pool_opts: ConnPoolOptions):
-        """Set options for the framework-built connection pool.
+    def set_pool_options(self, pool_opts: KeepLiveConnPoolOptions):
+        """Set options for the framework-built KeepLiveConnPool.
 
         Ignored when :meth:`set_pool` has already supplied a pool.
 

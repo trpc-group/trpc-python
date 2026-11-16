@@ -7,7 +7,7 @@
 
 from trpc_sdk.abc import BaseClientTransportOption
 from trpc_sdk.abc import BaseServerTransportOption
-from trpc_sdk.transport import ConnPoolOptions
+from trpc_sdk.transport import KeepLiveConnPoolOptions
 from trpc_sdk.transport import RoundTripOptions
 from trpc_sdk.transport._cython import inner_decode_rsp
 from trpc_sdk.transport._cython import inner_encode_rsp
@@ -23,7 +23,7 @@ def test_client_transport_option_defaults():
 
 
 def test_round_trip_options_carry_pool_settings():
-    pool = ConnPoolOptions(dial_timeout=100, idle_timeout=1, max_idle=2, max_active=4)
+    pool = KeepLiveConnPoolOptions(dial_timeout=100, idle_timeout=1, max_idle=2, max_active=4)
     options = RoundTripOptions()
     options.set_network("udp")
     options.set_pool_options(pool)

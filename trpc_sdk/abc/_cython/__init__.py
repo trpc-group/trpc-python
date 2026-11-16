@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Cython implementations of the core tRPC interfaces."""
 
 from ._codec import BaseClientProtocolParser  # pyright: ignore[reportMissingModuleSource]

@@ -15,9 +15,9 @@ from tests.common_util import unused_port
 from trpc_sdk.abc import BaseClientTransportOption
 from trpc_sdk.config import SocketType
 from trpc_sdk.exceptions import ClientPoolConnClosedError
-from trpc_sdk.transport import ConnPoolOptions
-from trpc_sdk.transport import ConnectionPoolManager
-from trpc_sdk.transport._pool import ConnectionPool
+from trpc_sdk.transport import KeepLiveConnPoolOptions
+from trpc_sdk.transport import KeepLiveConnPoolManager
+from trpc_sdk.transport._client._pool import KeepLiveConnPool
 
 
 class ThreadTcpServer(object):
@@ -71,12 +71,12 @@ class TestMultiplexed:
         print("stop simple tcpserver")
         self.tcpsrv.stop()
 
-    def _pool(self) -> ConnectionPool:
+    def _pool(self) -> KeepLiveConnPool:
         trans_opt = BaseClientTransportOption()
         trans_opt.address = ("127.0.0.1", self.port)
         trans_opt.socket_type = SocketType.NET
-        options = ConnPoolOptions(max_idle=2, max_active=4)
-        return ConnectionPool(dial=ConnectionPoolManager.dial, trans_opt=trans_opt, options=options)
+        options = KeepLiveConnPoolOptions(max_idle=2, max_active=4)
+        return KeepLiveConnPool(dial=KeepLiveConnPoolManager.dial, trans_opt=trans_opt, options=options)
 
     @pytest.mark.asyncio
     async def test_get_conn(self):

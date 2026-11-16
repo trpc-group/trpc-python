@@ -21,7 +21,7 @@ from trpc_sdk import codec
 from trpc_sdk import exceptions
 from trpc_sdk.abc import TrpcContext
 from trpc_sdk.client import Options
-from trpc_sdk.http import Client
+from trpc_sdk.http import HttpClient
 from trpc_sdk.http import SSEClient
 from trpc_sdk.http import get_http_header_in_client
 from trpc_sdk.http import get_http_status_in_client
@@ -205,7 +205,7 @@ _t2.start()
 
 async def test_http_client_post():
     """Test http client post"""
-    cli = Client()
+    cli = HttpClient()
     ctx = TrpcContext()
     rsp = await cli.post(ctx, f"http://{_HOST}:{_port}/", data="text")
     body = await rsp.text()
@@ -214,7 +214,7 @@ async def test_http_client_post():
 
 async def test_http_client_post_json():
     """Test http client post json"""
-    cli = Client()
+    cli = HttpClient()
     ctx = TrpcContext()
     rsp = await cli.post(ctx, f"http://{_HOST}:{_port}/json", json={"key": "value"})
     body = await rsp.json()
@@ -224,7 +224,7 @@ async def test_http_client_post_json():
 
 async def test_http_client_post_json_context_manager():
     """Test http client post json context manager"""
-    cli = Client()
+    cli = HttpClient()
     ctx = TrpcContext()
     async with cli.post(ctx, f"http://{_HOST}:{_port}/json", json={"key": "value"}) as rsp:
         body = await rsp.json()
@@ -233,7 +233,7 @@ async def test_http_client_post_json_context_manager():
 
 async def test_http_client_post_pb():
     """Test http client post pb"""
-    cli = Client()
+    cli = HttpClient()
     ctx = TrpcContext()
     req = helloworld_pb2.HelloRequest()
     req.msg = "hello"
@@ -247,7 +247,7 @@ async def test_http_client_post_pb():
 
 async def test_http_client_post_pb_with_short_conn():
     """Test http client post pb"""
-    cli = Client()
+    cli = HttpClient()
     ctx = TrpcContext()
     req = helloworld_pb2.HelloRequest()
     req.msg = "hello"
@@ -268,7 +268,7 @@ async def test_http_client_post_pb_with_short_conn():
 
 async def test_http_client_post_stream_pb():
     """Test http client post pb"""
-    cli = Client()
+    cli = HttpClient()
     ctx = TrpcContext()
     req = helloworld_pb2.HelloRequest()
     req.msg = "hello"
@@ -287,7 +287,7 @@ async def test_http_client_post_stream_pb():
 
 async def test_http_client_post_stream_data():
     """Test http client post pb"""
-    cli = Client()
+    cli = HttpClient()
     ctx = TrpcContext()
     req = helloworld_pb2.HelloRequest()
     req.msg = "hello"
@@ -304,7 +304,7 @@ async def test_http_client_post_stream_data():
 
 async def test_http_client_post_pb_timeout():
     """Test http client post pb timeout"""
-    cli = Client()
+    cli = HttpClient()
     ctx = TrpcContext()
     req = helloworld_pb2.HelloRequest()
     req.msg = "hello"
@@ -322,7 +322,7 @@ async def test_http_client_post_pb_timeout():
 
 async def test_http_client_post_pb_timeout2():
     """Test http client post timeout"""
-    cli = Client()
+    cli = HttpClient()
     ctx = TrpcContext()
     ctx.deadline = time.time() * 1000 - 100
 
@@ -343,7 +343,7 @@ async def test_http_client_post_pb_timeout2():
 
 async def test_http_client_get():
     """Test http client get"""
-    cli = Client()
+    cli = HttpClient()
     ctx = TrpcContext()
     rsp = await cli.get(ctx, f"http://{_HOST}:{_port}/img?id=123")
     body = await rsp.content.read(4)
@@ -353,7 +353,7 @@ async def test_http_client_get():
 
 async def test_http_client_stream_upload():
     """Test http client get"""
-    cli = Client()
+    cli = HttpClient()
     ctx = TrpcContext()
 
     check_recv_data = []
@@ -394,7 +394,7 @@ async def test_trpc_http_client():
 
 async def test_http_client_invalid_url():
     """Test http client invalid url"""
-    cli = Client()
+    cli = HttpClient()
     ctx = TrpcContext()
     req = helloworld_pb2.HelloRequest()
     req.msg = "hello"
@@ -412,7 +412,7 @@ async def test_http_client_invalid_url():
 
 async def test_https_client_post():
     """Test https client post"""
-    cli = Client()
+    cli = HttpClient()
     ctx = TrpcContext()
     cert = "./examples/helloworld/cert/domain_srv_localhost.crt"
     opts = [
@@ -433,7 +433,7 @@ async def test_https_client_post():
 
 async def test_http_client_naming_service():
     """Test http client naming"""
-    cli = Client()
+    cli = HttpClient()
     ctx = TrpcContext()
     req = helloworld_pb2.HelloRequest()
     req.msg = "hello"

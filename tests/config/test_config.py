@@ -19,8 +19,6 @@ from trpc_sdk.config import SocketType
 from trpc_sdk.config import TrpcConfig
 from trpc_sdk.config import TrpcConfigParser
 from trpc_sdk.config import YamlDecoder
-from trpc_sdk.config import with_codec
-from trpc_sdk.config import with_provider
 from trpc_sdk.http import register_http_session_params
 from trpc_sdk.http._client_transport import _http_session_params
 from trpc_sdk.plugin import get_plugin
@@ -195,7 +193,7 @@ def test_load_global_config():
 def test_load_config_from_file():
     """Load an application YAML through the file provider and yaml decoder."""
     file_path = './tests/test_config_data/trpc_python.yaml'
-    test_config = ConfigLoaderFactory.sync_load(file_path, with_provider('file'), with_codec('yaml'))
+    test_config = ConfigLoaderFactory.sync_load(file_path, provider='file', decoder='yaml')
     assert test_config.get('server', '').get('app') == 'test'
 
 

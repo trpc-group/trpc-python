@@ -1,14 +1,14 @@
 # tRPC-Python 客户端开发向导
 
-在 tRPC-Python 中，发起一次出站 RPC 调用的核心流程是：先组装调用选项 `Options`，再交由 `Client.invoke` 执行。Protobuf 生成的桩代码（Proxy）只是对这一流程的轻量封装，其自身并不维护网络连接。
+在 tRPC-Python 中，发起一次出站 RPC 调用的核心流程是：先组装调用选项 `Options`，再交由 `TrpcClient.invoke` 执行。Protobuf 生成的桩代码（Proxy）只是对这一流程的轻量封装，其自身并不维护网络连接。
 
-客户端核心公开接口位于 `trpc_sdk.client` 模块（包括 `Client`、`get_client`、`Options`），调用上下文使用 `trpc_sdk.abc.TrpcContext`。
+客户端核心公开接口位于 `trpc_sdk.client` 模块（包括 `TrpcClient`、`get_client`、`Options`），调用上下文使用 `trpc_sdk.abc.TrpcContext`。
 
 ## 调用选项合并与执行顺序
 
 每次调用时，`get_options` 会严格按以下优先级顺序组装最终的 `Options`（后执行的覆盖先执行的同名字段）：
 
-1. **框架默认值**：路由选点器（Selector）默认为 `TrpcSelector`，序列化类型默认为 `SerializationType.PB`（Protobuf），压缩类型默认为 `CompressType.Noop`（不压缩）。
+1. **框架默认值**：路由选点器（Selector）默认为 `TrpcSelector`，序列化类型默认为 `SerializationType.PB`（Protobuf），压缩类型默认为 `CompressType.NOOP`（不压缩）。
 2. **YAML 配置文件**：根据 `TrpcMessage` 上的被调服务名，匹配并应用 `trpc_python.yaml` 中 `client` 段的配置。
 3. **调用方传入的 `Options`**：最后应用本次调用时通过代码传入的 `Options` 参数。
 
@@ -88,8 +88,8 @@ async def say_hello() -> pb.HelloReply:
 ## 3. 使用生成的桩代码（Proxy）
 
 Protobuf 生成的 `GreeterClientProxyImpl` 会在调用前自动将完整 RPC 路径、被调服务名（Callee）和方法名写入 `TrpcMessage`，然后调用 `get_client()` 发送请求：
-- **异步调用**：`await proxy.asyncSayHello(ctx, req, options)`（底层调用 `Client.invoke`）。
-- **同步调用**：`proxy.SayHello(ctx, req, options)`（底层调用 `Client.invoke_sync`）。
+- **异步调用**：`await proxy.asyncSayHello(ctx, req, options)`（底层调用 `TrpcClient.invoke`）。
+- **同步调用**：`proxy.SayHello(ctx, req, options)`（底层调用 `TrpcClient.invoke_sync`）。
 
 关于 Proxy 的使用细节：
 - **自定义服务名（`service_name`）**：构造 `GreeterClientProxyImpl(service_name=...)` 时，默认使用 `.proto` 文件中定义的服务名，并以此作为查找 YAML 配置的键。若传入了自定义服务名，则 YAML 查找键和请求中的 RPC 路径都会替换为该名称；若同时传入 `fix_rpc_name=False`，则仅替换 YAML 查找键，发出的 RPC 路径仍保持 `.proto` 中的原始定义。
@@ -104,10 +104,10 @@ options = [
 reply = proxy.SayHello(ctx, req, options)
 ```
 
-- **轻量实例化**：Proxy 实例非常轻量，可在每次调用时按需创建。`get_client()` 返回的 `Client` 是进程内单例，底层的连接池维护在 `transport` 层而非 Proxy 实例上。
+- **轻量实例化**：Proxy 实例非常轻量，可在每次调用时按需创建。`get_client()` 返回的 `TrpcClient` 是进程内单例，底层的连接池维护在 `transport` 层而非 Proxy 实例上。
 - **切换为泛 HTTP RPC**：使用同一套桩代码，只需设置 `Options().set_protocol("http")`，即可改用 HTTP 协议承载该 RPC 调用（若不通过桩代码、直接按 URL 发送标准 HTTP 请求，请参考 [HTTP 客户端使用指南](http.zh_CN.md)）。
 
-## 4. 不使用桩代码直接调用（`Client.invoke`）
+## 4. 不使用桩代码直接调用（`TrpcClient.invoke`）
 
 如果不使用生成的桩代码，直接调用 `get_client().invoke(...)`，则需要调用方自行在 `TrpcMessage` 上设置被调服务名、RPC 路径和方法名，并传入响应类型 `rsp_cls`（框架会调用 `rsp_cls()` 构造空实例并反序列化填充）：
 
@@ -137,7 +137,7 @@ reply = await get_client().invoke(ctx, req, pb.HelloReply, options)
 | `set_protocol(protocol)` | 设置协议名称，用于查找并绑定对应的 `codec`、`checker` 和 `transport` |
 | `set_network(network)` | 设置传输层网络类型：`tcp` 或 `udp` |
 | `set_serialization_type(t)` | 设置序列化类型，默认为 `SerializationType.PB` |
-| `set_compress_type(t)` | 设置压缩类型，默认为 `CompressType.Noop` |
+| `set_compress_type(t)` | 设置压缩类型，默认为 `CompressType.NOOP` |
 | `set_timeout(ms)` | 设置本次客户端调用的超时时间（毫秒） |
 | `set_namespace(ns)` | 设置被调服务所在的命名空间 |
 | `set_metadata(key, val)` | 添加一条跨进程透传的键值对（`val` 必须为 `bytes`） |
@@ -206,8 +206,8 @@ options = Options().set_target("ip://127.0.0.1:8000").set_protocol("trpc").set_f
 
 ## 9. 同步与异步调用方式
 
-- **异步调用（推荐）**：`await proxy.asyncSayHello(...)` 和 `await Client.invoke(...)` 均为协程函数，直接在当前运行的事件循环中 `await` 即可。
-- **同步调用**：`proxy.SayHello(...)` 和 `Client.invoke_sync(...)` 会在当前线程阻塞运行直至调用完成。如果当前线程尚未创建事件循环，框架会自动新建一个并绑定到当前线程；**注意：如果当前线程的事件循环已经处于运行状态（例如在 `async def` 协程内部），请勿调用同步入口，否则会导致事件循环冲突报错。**
+- **异步调用（推荐）**：`await proxy.asyncSayHello(...)` 和 `await TrpcClient.invoke(...)` 均为协程函数，直接在当前运行的事件循环中 `await` 即可。
+- **同步调用**：`proxy.SayHello(...)` 和 `TrpcClient.invoke_sync(...)` 会在当前线程阻塞运行直至调用完成。如果当前线程尚未创建事件循环，框架会自动新建一个并绑定到当前线程；**注意：如果当前线程的事件循环已经处于运行状态（例如在 `async def` 协程内部），请勿调用同步入口，否则会导致事件循环冲突报错。**
 
 ## 10. 超时与链路透传
 
@@ -220,26 +220,26 @@ options = Options().set_metadata("key", b"value")
 
 ## 11. 序列化、压缩与二进制透传（Noop）
 
-框架默认使用 `SerializationType.PB`（Protobuf 序列化）与 `CompressType.Noop`（不压缩）。常用序列化类型还包括 `SerializationType.JSON` 和 `SerializationType.Noop`；压缩类型定义在 `trpc_sdk.compressor.CompressType`（如 `Gzip`）。YAML 配置中的 `serialization` 和 `compression` 填写对应的整数枚举值（`0` 分别代表 PB 和不压缩）。
+框架默认使用 `SerializationType.PB`（Protobuf 序列化）与 `CompressType.NOOP`（不压缩）。常用序列化类型还包括 `SerializationType.JSON` 和 `SerializationType.NOOP`；压缩类型定义在 `trpc_sdk.compressor.CompressType`（如 `Gzip`）。YAML 配置中的 `serialization` 和 `compression` 填写对应的整数枚举值（`0` 分别代表 PB 和不压缩）。
 
 ### 已序列化字节流直通（转发场景）
 
 在某些代理或转发场景下，业务手头的请求体已经是序列化好的 `bytes`（例如已经是编码后的 Protobuf 字节），不希望当前进程再次执行序列化，但仍需在协议帧头中告知对端按 Protobuf 解析。此时可配合使用 `trpc_sdk.serialization.Body` 与 `set_current_serialization_type`：
 
 - `set_serialization_type(SerializationType.PB)`：写入协议帧头，告知对端该包体的实际数据格式为 PB。
-- `set_current_serialization_type(SerializationType.Noop)`：仅控制**当前进程**使用 `NoopSerializer` 直接读写原始字节，不修改协议帧头中声明的序列化类型。
+- `set_current_serialization_type(SerializationType.NOOP)`：仅控制**当前进程**使用 `NoopSerializer` 直接读写原始字节，不修改协议帧头中声明的序列化类型。
 
 ```python
 from trpc_sdk.abc import TrpcContext
 from trpc_sdk.abc import create_message
-from trpc_sdk.client import Client
+from trpc_sdk.client import TrpcClient
 from trpc_sdk.client import Options
 from trpc_sdk.serialization import Body
 from trpc_sdk.serialization import SerializationType
 
 ctx = TrpcContext()
 create_message(ctx)
-rsp = await Client().invoke(
+rsp = await TrpcClient().invoke(
     ctx,
     Body(data=raw_bytes),
     Body,
@@ -248,7 +248,7 @@ rsp = await Client().invoke(
         .set_target("ip://127.0.0.1:8000")
         .set_protocol("trpc")
         .set_serialization_type(SerializationType.PB)
-        .set_current_serialization_type(SerializationType.Noop),
+        .set_current_serialization_type(SerializationType.NOOP),
     ],
 )
 payload = rsp.data

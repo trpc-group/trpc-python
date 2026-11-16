@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Deprecated client-config shim over :class:`~trpc_sdk.config.TrpcConfig`.
 
 Prefer the corresponding :class:`~trpc_sdk.config.TrpcConfig` classmethods.

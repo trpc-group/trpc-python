@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Client half of the tRPC streaming protocol.
 
 A :class:`ClientStream` is one RPC call. ``send_msg`` encodes a DATA
@@ -11,7 +10,7 @@ frame and writes the TCP connection directly. ``recv_msg`` never reads
 the socket; it pops a queue filled by the background :meth:`ClientStream.dispatch`
 task that is the only reader of the client transport.
 
-Stream ids ``0..99`` are reserved; :func:`create_stream_client` starts at
+Stream ids ``0..99`` are reserved; :func:`create_client_stream` starts at
 :data:`STREAM_ID` so the first call is ``100``.
 """
 
@@ -30,6 +29,7 @@ from trpc_sdk.abc import create_frame_head
 from trpc_sdk.client import Options
 from trpc_sdk.client import get_options
 from trpc_sdk.client import update_message
+from trpc_sdk.abc import ClientStreamDesc
 from trpc_sdk.common import get_or_create_event_loop
 from trpc_sdk.compressor import decompress
 from trpc_sdk.exceptions import ClientDecodeError
@@ -41,11 +41,10 @@ from trpc_sdk.utils import Queue
 from trpc_sdk._inner import trpc_pb2
 from ._constants import DEFAULT_INIT_WINDOW_SIZE
 from ._constants import STREAM_ID
+from ._client_stream_conn import create_client_stream_connection
 from ._flow_control import ReceiveControl
 from ._flow_control import SendControl
 from ._options import get_window_size
-from ._stream_factory import create_stream
-from ._types import ClientStreamDesc
 
 
 # pylint: disable=too-many-instance-attributes
@@ -57,13 +56,12 @@ class ClientStream(BaseClientStream):
     peer's CLOSE (or a recv failure treated as CLOSE).
     """
 
-    def __init__(self, ctx: TrpcContext, desc: ClientStreamDesc, stream_id: int, method: str) -> None:
+    def __init__(self, ctx: TrpcContext, desc: ClientStreamDesc, stream_id: int) -> None:
         self.ctx = ctx  # Call context bound at construction; not replaced later.
         self.opts: Optional[Options] = None  # Resolved in init_stream; None before the INIT handshake.
         self.desc = desc  # Method descriptor (RPC name plus client-streams flag).
-        self.method = method  # RPC name stamped on INIT / DATA / FEEDBACK frames.
         self.stream_id = stream_id  # Allocated by Client; 0..99 are reserved.
-        self.stream = create_stream()  # Transport-level stream used for send / recv / close.
+        self.stream = create_client_stream_connection()  # Transport-level stream used for send / recv / close.
         self.recv_queue = Queue()  # Filled only by dispatch(); recv_msg never touches the socket.
         self.client_closed = False  # We sent CLOSE.
         self.server_closed = False  # Peer sent CLOSE, or a recv failure was treated as one.
@@ -156,7 +154,7 @@ class ClientStream(BaseClientStream):
         frame_head = create_frame_head(trpc_pb2.TRPC_STREAM_FRAME, trpc_pb2.TRPC_STREAM_FRAME_DATA, self.stream_id)
         client_msg.set_frame_head(frame_head)
         client_msg.set_stream_id(self.stream_id)
-        client_msg.set_client_rpc_name(self.method)
+        client_msg.set_client_rpc_name(self.desc.name)
 
         await self.stream.send(ctx, msg)
 
@@ -176,7 +174,7 @@ class ClientStream(BaseClientStream):
         if frame_state == trpc_pb2.TRPC_STREAM_FRAME_DATA:
             self.recv_queue.push((rsp_data, None))
             return
-    
+
         if frame_state == trpc_pb2.TRPC_STREAM_FRAME_CLOSE:
             err = msg.client_rsp_err or EOFError
             self.recv_queue.push((b"", err), True)
@@ -186,7 +184,7 @@ class ClientStream(BaseClientStream):
                 self.opts.s_control.close_control()
             self.server_closed = True
             return
-    
+
         if frame_state == trpc_pb2.TRPC_STREAM_FRAME_FEEDBACK:
             self.handle_feedback(msg)
 
@@ -201,8 +199,7 @@ class ClientStream(BaseClientStream):
             ClientDecodeError: ``stream_frame`` is the wrong type.
         """
         if not isinstance(msg.stream_frame, trpc_pb2.TrpcStreamFeedBackMeta):
-            raise ClientDecodeError(
-                "msg.stream_frame feedback fields must be type of TrpcStreamFeedBackMeta")
+            raise ClientDecodeError("msg.stream_frame feedback fields must be type of TrpcStreamFeedBackMeta")
 
         if self.opts.s_control:
             self.opts.s_control.update_window(msg.stream_frame.window_size_increment)
@@ -243,7 +240,7 @@ class ClientStream(BaseClientStream):
         frame_head = create_frame_head(trpc_pb2.TRPC_STREAM_FRAME, trpc_pb2.TRPC_STREAM_FRAME_FEEDBACK, self.stream_id)
         msg.set_frame_head(frame_head)
         msg.set_stream_id(self.stream_id)
-        msg.set_client_rpc_name(self.method)
+        msg.set_client_rpc_name(self.desc.name)
 
         feedback_meta = trpc_pb2.TrpcStreamFeedBackMeta()
         feedback_meta.window_size_increment = increment
@@ -282,7 +279,7 @@ class ClientStream(BaseClientStream):
         frame_head = create_frame_head(trpc_pb2.TRPC_STREAM_FRAME, trpc_pb2.TRPC_STREAM_FRAME_INIT, self.stream_id)
         msg.set_frame_head(frame_head)
         msg.set_stream_id(self.stream_id)
-        msg.set_client_rpc_name(self.method)
+        msg.set_client_rpc_name(self.desc.name)
 
         await self._rpc_stream(ctx, msg, options)
 
@@ -340,43 +337,46 @@ class ClientStream(BaseClientStream):
 
 
 # pylint: disable=too-few-public-methods
-class Client:
-    """Allocates monotonically increasing stream ids and opens streams."""
+class ClientStreamFactory:
+    """Factory for creating client streams."""
 
     def __init__(self, stream_id: int) -> None:
         self.stream_id = stream_id
 
     async def create_client_stream(
-            self,
-            ctx: TrpcContext,
-            desc: ClientStreamDesc,
-            method: str,
-            options: List[Callable],
+        self,
+        ctx: TrpcContext,
+        desc: ClientStreamDesc,
+        options: List[Callable],
     ) -> ClientStream:
         """Allocate a stream id, construct the stream, and run INIT.
 
         Args:
             ctx: Call context.
-            desc: Method descriptor (name plus client-streams flag).
-            method: RPC name stamped on INIT / DATA frames.
+            desc: Method descriptor.
             options: Client option callables.
 
         Returns:
             An initialized :class:`ClientStream`.
         """
         self.stream_id += 1
-        client_stream = ClientStream(ctx, desc, self.stream_id, method)
+        client_stream = ClientStream(ctx, desc, self.stream_id)
         await client_stream.init_stream(options)
         return client_stream
 
 
-def create_stream_client() -> Client:
+def create_client_stream_factory() -> ClientStreamFactory:
     """Build a public-protocol stream client starting at :data:`STREAM_ID`.
 
     Returns:
-        A :class:`Client` whose first allocated id is ``100``.
+        A :class:`ClientStreamFactory` whose first allocated id is ``100``.
     """
-    return Client(STREAM_ID)
+    return ClientStreamFactory(STREAM_ID)
 
 
-default_stream_client = create_stream_client()
+_client_stream_factory = create_client_stream_factory()
+
+
+def get_default_client_stream_factory() -> ClientStreamFactory:
+    """Get the default client stream factory."""
+    return _client_stream_factory

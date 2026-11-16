@@ -2,11 +2,11 @@ English | [中文](database.zh_CN.md)
 
 # How to Write a Database Plugin
 
-When a call to Redis, MySQL, or another store should reuse the RPC client's naming route (`Selector`), timeout control, and client filters (metrics, tracing, and so on), wrap the third-party database SDK into the `Client.invoke` path under a custom `protocol`. tRPC-Python ships Redis, MySQL, and Kafka plugins in the ecosystem repository [python-database](https://github.com/trpc-ecosystem/python-database).
+When a call to Redis, MySQL, or another store should reuse the RPC client's naming route (`Selector`), timeout control, and client filters (metrics, tracing, and so on), wrap the third-party database SDK into the `TrpcClient.invoke` path under a custom `protocol`. tRPC-Python ships Redis, MySQL, and Kafka plugins in the ecosystem repository [python-database](https://github.com/trpc-ecosystem/python-database).
 
 The overall workflow is:
 
-1. **Pass the command via `req_head`**: Database SDKs usually take structured commands or arguments rather than serialized wire bytes. The caller passes empty bytes `b""` as the request body (with `SerializationType.Noop`) and attaches the command object via `Options().set_req_head(command)`, which places it on `msg.client_req_head`.
+1. **Pass the command via `req_head`**: Database SDKs usually take structured commands or arguments rather than serialized wire bytes. The caller passes empty bytes `b""` as the request body (with `SerializationType.NOOP`) and attaches the command object via `Options().set_req_head(command)`, which places it on `msg.client_req_head`.
 2. **Register a pass-through `CLIENT_CODEC`**: Register a codec that returns the byte buffer unchanged so the protocol slot is valid.
 3. **Execute the SDK call in `CLIENT_TRANSPORT`**: At the end of the client filter chain, `round_trip` reads the resolved `(host, port)` from `options.address` and the command object from `msg.client_req_head`, invokes the third-party database SDK, and writes the result back onto the command object.
 
@@ -20,7 +20,7 @@ The walkthrough below registers a generic protocol named `store` without tying i
 
 When `protocol: store` is set in `trpc_python.yaml` or via call options, `Options.set_protocol("store")` looks up plugins in this exact order:
 
-1. **Look up `CLIENT_CODEC`**: Calls `get_client_codec(protocol)`. **If no client codec is registered under that name, `set_protocol` returns immediately** without updating the parser or transport. The options instance keeps the default `trpc` transport with `opts.codec = None`, and `Client.invoke` subsequently raises `ClientEncodeError("client codec empty")` before reaching the transport layer.
+1. **Look up `CLIENT_CODEC`**: Calls `get_client_codec(protocol)`. **If no client codec is registered under that name, `set_protocol` returns immediately** without updating the parser or transport. The options instance keeps the default `trpc` transport with `opts.codec = None`, and `TrpcClient.invoke` subsequently raises `ClientEncodeError("client codec empty")` before reaching the transport layer.
 2. **Look up `CLIENT_CHECKER`**: Once a codec exists, calls `get_client_parser(protocol)`. Because the third-party database SDK manages its own framing and connections, you do not need to register a client checker (`set_parser(None)` has no effect on a custom `round_trip`).
 3. **Look up `CLIENT_TRANSPORT`**: Calls `get_client_transport(protocol)`. If a transport instance is found, it replaces the default `trpc` transport initialized in `_create_client_options`.
 
@@ -100,15 +100,15 @@ client:
 
 ## 4. Calling from Business Code
 
-When calling `Client().invoke()` from business code, pay attention to three details:
+When calling `TrpcClient().invoke()` from business code, pay attention to three details:
 
 1. **Set the callee service name on the message before calling `invoke`**: `get_options` loads YAML configuration (`load_client_config`) using `msg.callee_service_name` *before* applying the per-call `Options` list. Always call `msg.set_callee_service_name("trpc.app.server.store")` prior to `invoke`. If you only pass `Options().set_service_name(...)`, the YAML lookup has already happened with an empty name, and the `protocol` and `target` from YAML will be missed.
-2. **Use `SerializationType.Noop` with an empty request body**: `NoopSerializer.serialize` only accepts `bytes` or `Body` instances, so a custom `StoreCommand` object cannot be passed as the request body `req`. Pass `b""` as the request body, `Body` as the response class, and attach `command` via `Options().set_req_head(command)` (which `update_message` copies to `msg.client_req_head`).
+2. **Use `SerializationType.NOOP` with an empty request body**: `NoopSerializer.serialize` only accepts `bytes` or `Body` instances, so a custom `StoreCommand` object cannot be passed as the request body `req`. Pass `b""` as the request body, `Body` as the response class, and attach `command` via `Options().set_req_head(command)` (which `update_message` copies to `msg.client_req_head`).
 3. **Import the plugin module at startup**: Make sure the module defining `StoreCodec` and `StoreTransport` is imported before making calls so `@register_plugin` executes.
 
 ```python
 from trpc_sdk.abc import clone_client_message
-from trpc_sdk.client import Client
+from trpc_sdk.client import TrpcClient
 from trpc_sdk.client import Options
 from trpc_sdk.serialization import Body
 from trpc_sdk.serialization import SerializationType
@@ -124,14 +124,14 @@ async def execute(ctx, statement: str):
     ctx, _ = clone_client_message(ctx)
     ctx.get_message().set_callee_service_name("trpc.app.server.store")
     command = StoreCommand(statement)
-    await Client().invoke(
+    await TrpcClient().invoke(
         ctx,
         b"",
         Body,
         [
             Options()
             .set_req_head(command)
-            .set_serialization_type(SerializationType.Noop),
+            .set_serialization_type(SerializationType.NOOP),
         ],
     )
     return command.result

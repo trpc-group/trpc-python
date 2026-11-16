@@ -3,8 +3,7 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
-"""HTTP-client option assembly for ``Client.invoke``.
+"""HTTP-client option assembly for ``TrpcClient.invoke``.
 
 :func:`get_options` turns a parsed URL plus extra
 :class:`~trpc_sdk.client.Options` into the list the HTTP client passes to
@@ -33,16 +32,12 @@ def get_options(url: ParseResult, opts: Optional[List]) -> List:
 
     Args:
         url: Already-parsed URL.
-        opts: Extra :class:`~trpc_sdk.client.Options` to append.
+        opts: Extra :class:`~trpc_sdk.client.TrpcOptions` to append.
 
     Returns:
-        A list of options to pass to ``Client.invoke``.
+        A list of options to pass to ``TrpcClient.invoke``.
     """
-    base = (
-        Options()
-        .set_protocol("http")
-        .set_serialization_type(SerializationType.Noop)
-    )
+    base = (Options().set_protocol("http").set_serialization_type(SerializationType.NOOP))
 
     trpc_selector = TrpcSelector()
     if url.scheme == trpc_selector.get_selector_name():

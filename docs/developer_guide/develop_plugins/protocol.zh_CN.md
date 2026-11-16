@@ -97,9 +97,9 @@ def setup_line_checker() -> LineCheckerFactory:
 
 客户端的接收方向先经过图中标为 **Framer** 的 `BaseClientProtocolParser`，再进入 `decode_data` 和反序列化。
 
-与服务端不同，客户端切帧器继承 `BaseClientProtocolParser`（本身即为 `BasePlugin` 子类），直接将类注册为单例即可。它需要实现异步方法 `async def read_frame(self, connection) -> bytes`，客户端 TCP 传输层会直接 `await` 该方法从连接池连接（`PooledConnection`）中读取一帧完整响应。
+与服务端不同，客户端切帧器继承 `BaseClientProtocolParser`（本身即为 `BasePlugin` 子类），直接将类注册为单例即可。它需要实现异步方法 `async def read_frame(self, connection) -> bytes`，客户端 TCP 传输层会直接 `await` 该方法从连接池连接（`Connection`）中读取一帧完整响应。
 
-`PooledConnection.read(n)` 每次会异步读满 `n` 个字节。下面为演示原理，每次读取 1 个字节直到遇到 `b"\n"`（当连接关闭或读取异常时，捕获并统一转换为 `ClientDecodeError`）：
+`Connection.read(n)` 每次会异步读满 `n` 个字节。下面为演示原理，每次读取 1 个字节直到遇到 `b"\n"`（当连接关闭或读取异常时，捕获并统一转换为 `ClientDecodeError`）：
 
 ```python
 from trpc_sdk.abc import BaseClientProtocolParser
@@ -145,7 +145,7 @@ class LineClientParser(BaseClientProtocolParser):
 
 在服务端 `decode_data` 中，还需要设置两个关键的 `message` 属性：
 1. **设置路由方法名（`server_rpc_name`）**：`Service.handle` 依赖 `message.get_server_rpc_name()` 查找已注册的 RPC 处理函数（格式形如 `/service/method`；若注册服务时指定了 `fix_rpc_name=True`，其中 `service` 段会被替换为 YAML 中的服务 `name`）。由于简单的 `line` 帧里没有携带方法名字段，我们在下面的示例中将其固定设为 `"/trpc.app.server.Greeter/SayHello"`（实际协议可将方法名编入帧头并在 `decode_data` 中解析出来）。
-2. **设置序列化类型（`serialization_type`）**：新建 `message` 的默认序列化类型是 `0`（即 Protobuf）。如果业务希望直接收发原始字节而不走 Protobuf 解析，需要在 `decode_data` 中调用 `message.set_serialization_type(SerializationType.Noop)`。
+2. **设置序列化类型（`serialization_type`）**：新建 `message` 的默认序列化类型是 `0`（即 Protobuf）。如果业务希望直接收发原始字节而不走 Protobuf 解析，需要在 `decode_data` 中调用 `message.set_serialization_type(SerializationType.NOOP)`。
 
 完整代码如下：
 
@@ -170,7 +170,7 @@ class LineServerCodec(BaseCodec):
     async def decode_data(self, context: TrpcContext, buffer: Optional[bytes]) -> bytes:
         message = get_message(context)
         message.set_server_rpc_name("/trpc.app.server.Greeter/SayHello")
-        message.set_serialization_type(SerializationType.Noop)
+        message.set_serialization_type(SerializationType.NOOP)
         return (buffer or b"").rstrip(b"\n")
 
 
@@ -186,18 +186,18 @@ class LineClientCodec(BaseCodec):
 ```
 
 > 补充说明：
-> - **HTTP Codec 的工作方式**：内置的 `ServerHttpCodec` 不负责拼接 TCP 帧，而是从 `message` 上获取 `aiohttp` 的 request 和 response 对象——在 `decode_data` 中从 request 读取 body（忽略 `buffer` 参数），在 `encode_data` 中将状态码和响应头写入 response 并返回 body。
+> - **HTTP Codec 的工作方式**：内置的 `HttpServerCodec` 不负责拼接 TCP 帧，而是从 `message` 上获取 `aiohttp` 的 request 和 response 对象——在 `decode_data` 中从 request 读取 body（忽略 `buffer` 参数），在 `encode_data` 中将状态码和响应头写入 response 并返回 body。
 > - **流式编解码**：`BaseCodec` 上的 `encode_stream` / `decode_stream` 专供 tRPC 流式协议使用，普通一元协议无需实现。
 
 ## 4. 序列化与压缩插件（可选）
 
 序列化与压缩是独立于协议之外的两个插件槽位：
-- **序列化（`PluginType.SERIALIZATION`）**：继承 `BaseSerializer`，实现 `serialize` 和 `deserialize`。其注册名使用的是 `SerializationType` 枚举的整型值（`PB = 0`、`JCE = 1`、`JSON = 2`、`FlatBuffer = 3`、`Noop = 4`）。
-- **压缩（`PluginType.COMPRESS`）**：继承 `BaseCompress`，实现 `compress` 和 `decompress`。其注册名使用的是 `CompressType` 枚举的整型值（默认不压缩为 `CompressType.Noop = 0`）。
+- **序列化（`PluginType.SERIALIZATION`）**：继承 `BaseSerializer`，实现 `serialize` 和 `deserialize`。其注册名使用的是 `SerializationType` 枚举的整型值（`PB = 0`、`JSON = 2`、`FLATBUFFER = 3`、`NOOP = 4`）。
+- **压缩（`PluginType.COMPRESS`）**：继承 `BaseCompress`，实现 `compress` 和 `decompress`。其注册名使用的是 `CompressType` 枚举的整型值（默认不压缩为 `CompressType.NOOP = 0`）。
 
-在本文的 `line` 协议示例中，报文头不包含序列化类型字段，因此双方约定使用 `SerializationType.Noop`（值为 `4`）直接收发原始字节：
-- **服务端**：已在上面 `LineServerCodec.decode_data` 中设置为 `SerializationType.Noop`。`Noop` 反序列化器会将原始字节写入 `trpc_sdk.serialization.Body` 对象的 `data` 属性中。
-- **客户端**：在 YAML 中配置 `serialization: 4`，或在调用时通过 `Options().set_serialization_type(SerializationType.Noop)` 指定。
+在本文的 `line` 协议示例中，报文头不包含序列化类型字段，因此双方约定使用 `SerializationType.NOOP`（值为 `4`）直接收发原始字节：
+- **服务端**：已在上面 `LineServerCodec.decode_data` 中设置为 `SerializationType.NOOP`。`NOOP` 反序列化器会将原始字节写入 `trpc_sdk.serialization.Body` 对象的 `data` 属性中。
+- **客户端**：在 YAML 中配置 `serialization: 4`，或在调用时通过 `Options().set_serialization_type(SerializationType.NOOP)` 指定。
 
 ## 5. 自定义传输层与自定义监听（可选）
 
@@ -226,7 +226,7 @@ server:
 
 ### 客户端配置
 
-客户端除了指定 `protocol: line` 外，还需配置目标地址 `target`（其中 `ip://` 为名字服务 Selector，详见 [名字服务插件](naming.zh_CN.md)）以及 `serialization: 4`（即 `SerializationType.Noop`）：
+客户端除了指定 `protocol: line` 外，还需配置目标地址 `target`（其中 `ip://` 为名字服务 Selector，详见 [名字服务插件](naming.zh_CN.md)）以及 `serialization: 4`（即 `SerializationType.NOOP`）：
 
 ```yaml
 client:

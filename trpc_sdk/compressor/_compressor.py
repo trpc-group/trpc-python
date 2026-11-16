@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Built-in ContentEncoding plugin implementations.
 
 Importing this module (which :mod:`trpc_sdk.compressor` does) registers
@@ -26,12 +25,12 @@ from trpc_sdk.abc import BaseCompress
 from trpc_sdk.abc import PluginInitPos
 from trpc_sdk.abc import PluginType
 from trpc_sdk.plugin import register_plugin
-from ._types import CompressType
+from ._constants import CompressType
 
 
-@register_plugin(PluginType.COMPRESS, CompressType.Noop, init_pos=PluginInitPos.WORKER)
+@register_plugin(PluginType.COMPRESS, CompressType.NOOP, init_pos=PluginInitPos.WORKER)
 class CompressNoop(BaseCompress):
-    """Identity compressor registered as ``CompressType.Noop``.
+    """Identity compressor registered as ``CompressType.NOOP``.
 
     Empty or non-empty input is returned unchanged. Used when the frame
     head says the body is already raw bytes.
@@ -54,9 +53,9 @@ class CompressNoop(BaseCompress):
         return data
 
 
-@register_plugin(PluginType.COMPRESS, CompressType.Gzip, init_pos=PluginInitPos.WORKER)
+@register_plugin(PluginType.COMPRESS, CompressType.GZIP, init_pos=PluginInitPos.WORKER)
 class CompressGZip(BaseCompress):
-    """gzip compressor registered as ``CompressType.Gzip``.
+    """gzip compressor registered as ``CompressType.GZIP``.
 
     Empty input is returned as-is so a zero-length body does not become
     a gzip header-only blob.
@@ -83,9 +82,9 @@ class CompressGZip(BaseCompress):
         return gzip.decompress(data)
 
 
-@register_plugin(PluginType.COMPRESS, CompressType.ZLib, init_pos=PluginInitPos.WORKER)
+@register_plugin(PluginType.COMPRESS, CompressType.ZLIB, init_pos=PluginInitPos.WORKER)
 class CompressZlib(BaseCompress):
-    """zlib compressor registered as ``CompressType.ZLib``.
+    """zlib compressor registered as ``CompressType.ZLIB``.
 
     Empty input is returned as-is so a zero-length body does not become
     a zlib header-only blob.
@@ -112,13 +111,13 @@ class CompressZlib(BaseCompress):
         return zlib.decompress(data)
 
 
-@register_plugin(PluginType.COMPRESS, CompressType.Snappy, init_pos=PluginInitPos.WORKER)
+@register_plugin(PluginType.COMPRESS, CompressType.SNAPPY, init_pos=PluginInitPos.WORKER)
 class CompressSnappy(BaseCompress):
-    """Block-mode snappy compressor registered as ``CompressType.Snappy``.
+    """Block-mode snappy compressor registered as ``CompressType.SNAPPY``.
 
     ``python-snappy`` is imported on first use so processes that never
     send or receive snappy frames do not need the optional dependency.
-    The same class is also registered as ``CompressType.SnappyBlock``.
+    The same class is also registered as ``CompressType.SNAPPY_BLOCK``.
     """
 
     def __init__(self) -> None:
@@ -165,12 +164,12 @@ class CompressSnappy(BaseCompress):
 
 # SnappyBlock (5) uses the same block implementation as the deprecated
 # Snappy (2); both codes stay registered so either value decodes.
-register_plugin(PluginType.COMPRESS, CompressType.SnappyBlock, init_pos=PluginInitPos.WORKER)(CompressSnappy)
+register_plugin(PluginType.COMPRESS, CompressType.SNAPPY_BLOCK, init_pos=PluginInitPos.WORKER)(CompressSnappy)
 
 
-@register_plugin(PluginType.COMPRESS, CompressType.SnappyStream, init_pos=PluginInitPos.WORKER)
+@register_plugin(PluginType.COMPRESS, CompressType.SNAPPY_STREAM, init_pos=PluginInitPos.WORKER)
 class CompressStreamSnappy(CompressSnappy):
-    """Stream-mode snappy compressor registered as ``CompressType.SnappyStream``.
+    """Stream-mode snappy compressor registered as ``CompressType.SNAPPY_STREAM``.
 
     ``snappy.stream_compress`` / ``stream_decompress`` take file-like
     objects, so this subclass wraps the body in ``BytesIO`` rather than

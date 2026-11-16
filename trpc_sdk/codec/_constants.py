@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Shared constants for the codec package.
 
 Frame-head length and ``trans_info`` keys are the single source for
@@ -16,8 +15,7 @@ instead of a module attribute.
 
 from __future__ import annotations
 
-
-# tRPC wire frame head (stx + type + state + package_len + head_len +
+# tRPC wire frame head (magic + type + state + package_len + head_len +
 # stream_id + reserved). Not the transport IPC envelope, which is 6 bytes.
 FRAME_HEAD_LEN = 16
 

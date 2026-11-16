@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """IP and DNS selectors that parse the target as host:port.
 
 :class:`IpSelector` is registered as ``ip``, ``http``, and ``https`` so
@@ -31,7 +30,6 @@ from trpc_sdk.plugin import register_plugin
 
 from ._constants import DNS_SELECTOR_NAME
 from ._discovery import resolve_host
-from ._selector_lookup import get_selector
 
 
 @register_plugin(PluginType.NAMING_SELECTOR, DNS_SELECTOR_NAME)
@@ -56,10 +54,8 @@ class DNSSelector(BaseSelector):
             Exception: ``service_name`` is empty.
         """
         if service_name == "":
-            raise Exception(
-                "DNSSelector.select received an empty service_name; "
-                "pass a host:port target"
-            )
+            raise Exception("DNSSelector.select received an empty service_name; "
+                            "pass a host:port target")
 
         addr = get_random_addr(service_name)
         ip, port = resolve_host(addr)
@@ -101,10 +97,8 @@ class IpSelector(BaseSelector):
             Exception: ``service_name`` is empty.
         """
         if service_name == "":
-            raise Exception(
-                "IpSelector.select received an empty service_name; "
-                "pass a host:port target"
-            )
+            raise Exception("IpSelector.select received an empty service_name; "
+                            "pass a host:port target")
 
         addr = get_random_addr(service_name)
         ip, port = resolve_host(addr, False)

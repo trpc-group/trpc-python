@@ -3,12 +3,12 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Service discovery extension interfaces.
 
 This module defines the abstract contract used by pluggable discovery
 implementations that list service endpoints and select one node for a call.
 """
+
 from __future__ import annotations
 
 from abc import abstractmethod
@@ -16,8 +16,8 @@ from typing import Any
 from typing import List
 from typing import Optional
 
-from ._node import Node
-from ._plugin import BasePlugin
+from .._plugin import BasePlugin
+from ._types import Node
 
 
 class BaseDiscovery(BasePlugin):

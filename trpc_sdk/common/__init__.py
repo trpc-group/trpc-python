@@ -16,7 +16,6 @@ from ._process_hook import register_child_callback
 from ._process_hook import execute_before_in_parent
 from ._process_hook import execute_after_in_parent
 from ._process_hook import execute_after_in_child
-from ._process_hook import execute_before_loop_run_in_child
 from ._process_helper import ProcessType
 from ._process_helper import bind_lifetime_to_parent
 from ._process_helper import is_task_process
@@ -39,7 +38,6 @@ __all__ = [
     "execute_before_in_parent",
     "execute_after_in_parent",
     "execute_after_in_child",
-    "execute_before_loop_run_in_child",
     "ProcessType",
     "bind_lifetime_to_parent",
     "is_task_process",

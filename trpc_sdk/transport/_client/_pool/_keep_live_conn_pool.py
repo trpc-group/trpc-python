@@ -3,27 +3,20 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
+"""Address-scoped TCP/Unix keep-alive client connection pools.
 
-"""Address-scoped TCP/Unix client connection pools.
+:class:`KeepLiveConnPool` holds idle conns for one remote.
+:class:`KeepLiveConnPoolManager` maps a local+peer key onto those pools
+and runs a periodic idle sweep. :class:`KeepLiveConnPoolManagerCache`
+keeps one manager per event loop for
+:func:`~trpc_sdk.transport._client._pool.get_pool_connection`.
 
-:class:`ConnectionPool` holds idle conns for one remote.
-:class:`ConnectionPoolManager` maps a local+peer key onto those pools
-and runs a periodic idle sweep.
-:class:`~trpc_sdk.transport._pool.ShortConnFactory` dials a
-one-shot conn that is force-closed on return and never queued; it lives
-in :mod:`trpc_sdk.transport._pool._short_conn_factory` and is
-re-exported here.
-:func:`get_pool_connection` is the entry used by client transport:
-short-conn options skip the manager; otherwise a per-loop manager is
-cached in :class:`PoolCache`.
-
-:class:`Pool` is a historical alias of :class:`ConnectionPoolManager`.
-Types and the pooled wrapper live in
-:mod:`trpc_sdk.transport._pool._types` and
-:mod:`trpc_sdk.transport._pool._pooled_connection`; the
-:class:`BasePool` contract lives in
-:mod:`trpc_sdk.transport._pool._base`. Dialing lives in
-:mod:`trpc_sdk.transport._pool._dial`.
+Types and the connection wrapper live in
+:mod:`trpc_sdk.transport._client._pool._types` and
+:mod:`trpc_sdk.transport._client._pool._connection`; the
+:class:`BaseConnectionPool` contract lives in
+:mod:`trpc_sdk.transport._client._pool._base`. Dialing lives in
+:mod:`trpc_sdk.transport._client._pool._dial`.
 """
 
 from __future__ import annotations
@@ -44,15 +37,14 @@ from trpc_sdk.exceptions import ClientPoolClosedError
 from trpc_sdk.exceptions import ClientPoolLimitError
 from trpc_sdk.log import logger
 
-from ._base import BasePool
+from ._base import BaseConnectionPool
 from ._dial import dial_connection
-from ._pooled_connection import PooledConnection
-from ._short_conn_factory import ShortConnFactory
+from ._connection import Connection
 from ._types import ConnAddress
-from ._types import ConnPoolOptions
+from ._types import KeepLiveConnPoolOptions
 
 
-class ConnectionPool(BasePool):
+class KeepLiveConnPool(BaseConnectionPool):
     """Idle-queue pool for one transport address.
 
     ``max_idle`` sizes the idle :class:`asyncio.Queue`. ``max_active``
@@ -65,17 +57,16 @@ class ConnectionPool(BasePool):
         trans_opt: Client transport options, including the remote
             address.
         options: Idle / active / lifetime tunables. Must not be
-            ``None`` at runtime; callers pass a :class:`ConnPoolOptions`.
+            ``None`` at runtime; callers pass a :class:`KeepLiveConnPoolOptions`.
         loop: Event loop bound to the idle queue, or ``None`` to pick
             the current one.
     """
 
-    def __init__(
-            self,
-            dial: Callable,
-            trans_opt: BaseClientTransportOption,
-            options: Optional[ConnPoolOptions] = None,
-            loop: Optional[BaseEventLoop] = None):
+    def __init__(self,
+                 dial: Callable,
+                 trans_opt: BaseClientTransportOption,
+                 options: Optional[KeepLiveConnPoolOptions] = None,
+                 loop: Optional[BaseEventLoop] = None):
         super().__init__(address=trans_opt.address, loop=loop)
         self._dial = dial
         self._trans_opt = trans_opt
@@ -95,7 +86,7 @@ class ConnectionPool(BasePool):
         """How many conns currently sit in the idle queue."""
         return self._idle_conns.qsize()
 
-    async def get(self, timeout: float) -> PooledConnection:
+    async def get(self, timeout: float) -> Connection:
         """Take a healthy idle conn, or dial a new one.
 
         Idle entries that fail :meth:`_checker` are force-closed and
@@ -106,7 +97,7 @@ class ConnectionPool(BasePool):
             timeout: Dial timeout in seconds for a new connection.
 
         Returns:
-            A :class:`PooledConnection` the caller must ``close``.
+            A :class:`Connection` the caller must ``close``.
 
         Raises:
             ClientPoolClosedError: :meth:`close` has already run.
@@ -116,7 +107,7 @@ class ConnectionPool(BasePool):
             raise ClientPoolClosedError("ErrPoolClosed")
 
         for _ in range(self._idle_conns.qsize()):
-            pool_conn: PooledConnection = self._idle_conns.get_nowait()
+            pool_conn: Connection = self._idle_conns.get_nowait()
             if self._checker(pool_conn):
                 pool_conn.close(True)
             else:
@@ -128,12 +119,12 @@ class ConnectionPool(BasePool):
             return await self._idle_conns.get()
 
         reader, writer = await self._dial(options=self._trans_opt, timeout=timeout, loop=self.loop)
-        pool_conn = PooledConnection(reader=reader,
-                                     writer=writer,
-                                     loop=self.loop,
-                                     pool=self,
-                                     address=self.address,
-                                     is_short=False)
+        pool_conn = Connection(reader=reader,
+                               writer=writer,
+                               loop=self.loop,
+                               pool=self,
+                               address=self.address,
+                               is_short=False)
         self._active_conn_num += 1
         self._active_conns.add(pool_conn)
         return pool_conn
@@ -141,7 +132,7 @@ class ConnectionPool(BasePool):
     def _clear_all_conn(self) -> None:
         """Force-close every idle and in-use conn, then empty the active set."""
         for _ in range(self._idle_conns.qsize()):
-            pool_conn: PooledConnection = self._idle_conns.get_nowait()
+            pool_conn: Connection = self._idle_conns.get_nowait()
             pool_conn.force_close()
         for pool_conn in self._active_conns:
             pool_conn.force_close()
@@ -170,7 +161,7 @@ class ConnectionPool(BasePool):
             logger.error(f"address: {self.address}, total: {self._active_conn_num}, \
                         qsize: {self._idle_conns.qsize()} err: {err}")
 
-    def put(self, pool_conn: PooledConnection, force_close: bool = False) -> None:
+    def put(self, pool_conn: Connection, force_close: bool = False) -> None:
         """Return ``pool_conn`` to the idle queue, or close it.
 
         When the idle queue is already at ``max_idle``, the returning
@@ -202,7 +193,7 @@ class ConnectionPool(BasePool):
         """Return True when ``max_active`` is set and already reached."""
         return self._pool_options.max_active > 0 and self._active_conn_num >= self._pool_options.max_active
 
-    def _checker(self, pool_conn: PooledConnection) -> bool:
+    def _checker(self, pool_conn: Connection) -> bool:
         """Return True if ``pool_conn`` must not be handed out again.
 
         Remote errors always fail. Otherwise idle_timeout is measured
@@ -231,7 +222,7 @@ class ConnectionPool(BasePool):
     def clean_idle_conn(self) -> None:
         """Drop idle conns that fail :meth:`_checker`, keep the rest.
 
-        Called periodically by :class:`ConnectionPoolManager`. If the
+        Called periodically by :class:`KeepLiveConnPoolManager`. If the
         pool is already closed or its loop is not running, every conn
         is force-closed instead.
 
@@ -240,7 +231,7 @@ class ConnectionPool(BasePool):
         """
         if self._closed is False and self.loop.is_running():
             for _ in range(self._idle_conns.qsize()):
-                pool_conn: PooledConnection = self._idle_conns.get_nowait()
+                pool_conn: Connection = self._idle_conns.get_nowait()
                 if self._checker(pool_conn):
                     logger.debug("pool conn remote error")
                     pool_conn.close(True)
@@ -250,8 +241,8 @@ class ConnectionPool(BasePool):
             self._clear_all_conn()
 
 
-class ConnectionPoolManager:
-    """Create and look up one :class:`ConnectionPool` per address key.
+class KeepLiveConnPoolManager:
+    """Create and look up one :class:`KeepLiveConnPool` per address key.
 
     The key is ``local_addr + peer`` plus a ``_sock`` / ``_addr``
     suffix, so the same remote with a different local bind does not
@@ -259,25 +250,25 @@ class ConnectionPoolManager:
     ``loop``, which sleeps 1000s between sweeps.
 
     Args:
-        options: Shared :class:`ConnPoolOptions` for every pool this
+        options: Shared :class:`KeepLiveConnPoolOptions` for every pool this
             manager creates. ``None`` uses defaults.
         loop: Event loop for new pools and the idle-clean task.
     """
 
-    def __init__(self, options: Optional[ConnPoolOptions] = None, loop: Optional[BaseEventLoop] = None):
-        self._options = options or ConnPoolOptions()
-        self._conn_pools: Dict[ConnAddress, ConnectionPool] = {}
+    def __init__(self, options: Optional[KeepLiveConnPoolOptions] = None, loop: Optional[BaseEventLoop] = None):
+        self._options = options or KeepLiveConnPoolOptions()
+        self._conn_pools: Dict[ConnAddress, KeepLiveConnPool] = {}
         self._loop = loop or get_or_create_event_loop()
         self._loop.create_task(self.__clean_idle_conn())
         self._lock = asyncio.Lock()
         self._is_closed = False
 
-    # Kept as a staticmethod so ``ConnectionPoolManager.dial`` and
-    # ``ConnectionPool(dial=self.dial)`` keep working after the dial
-    # logic moved to :mod:`trpc_sdk.transport._pool._dial`.
+    # Kept as a staticmethod so ``KeepLiveConnPoolManager.dial`` and
+    # ``KeepLiveConnPool(dial=self.dial)`` keep working after the dial
+    # logic moved to :mod:`trpc_sdk.transport._client._pool._dial`.
     dial = staticmethod(dial_connection)
 
-    async def get(self, trans_opt: BaseClientTransportOption, timeout: float) -> PooledConnection:
+    async def get(self, trans_opt: BaseClientTransportOption, timeout: float) -> Connection:
         """Return a pooled conn for ``trans_opt``'s remote.
 
         ``timeout <= 0`` falls back to ``dial_timeout`` milliseconds
@@ -291,7 +282,7 @@ class ConnectionPoolManager:
             timeout: Dial timeout in seconds, or ``0`` to use options.
 
         Returns:
-            A :class:`PooledConnection` from that address's pool.
+            A :class:`Connection` from that address's pool.
         """
         timeout = timeout if timeout and timeout > 0 else self._options.dial_timeout / 1000
         addr = trans_opt.sock or trans_opt.address
@@ -306,12 +297,12 @@ class ConnectionPoolManager:
             if trans_opt.local_addr:
                 index = f"{trans_opt.local_addr}"
             index = f"{index}_{addr}_addr"
-        conn_pool: ConnectionPool = self._conn_pools.get(index, None)
+        conn_pool: KeepLiveConnPool = self._conn_pools.get(index, None)
         if conn_pool:
             return await conn_pool.get(timeout)
 
         async with self._lock:
-            new_pool = ConnectionPool(dial=self.dial, trans_opt=trans_opt, options=self._options, loop=self._loop)
+            new_pool = KeepLiveConnPool(dial=self.dial, trans_opt=trans_opt, options=self._options, loop=self._loop)
             self._conn_pools[index] = new_pool
             return await new_pool.get(timeout)
 
@@ -330,10 +321,7 @@ class ConnectionPoolManager:
         self._conn_pools.clear()
 
 
-Pool = ConnectionPoolManager
-
-
-class PoolCache(threading.local):
+class KeepLiveConnPoolManagerCache(threading.local):
     """Per-thread map from event loop (or address) to a pool manager.
 
     :func:`get_pool_connection` stores the manager under the loop id
@@ -361,51 +349,3 @@ class PoolCache(threading.local):
 
     def __setitem__(self, key, value):
         self.__dict__[key] = value
-
-
-_short_conn_factory = ShortConnFactory()
-
-_default_connection_pools = PoolCache()
-
-
-async def get_pool_connection(options: BaseClientTransportOption,
-                              timeout: float,
-                              loop: Optional[BaseEventLoop] = None) -> PooledConnection:
-    """Return a pooled (or short) connection for ``options``.
-
-    ``options.short_conn`` uses :class:`ShortConnFactory` and never
-    touches the manager cache. Otherwise a :class:`ConnectionPoolManager`
-    is created once per event loop and reused. If the same address was
-    previously bound to a different loop, that stale loop entry is
-    deleted after a warning.
-
-    Args:
-        options: Client transport options, including ``pool_opts`` when
-            a new manager must be built.
-        timeout: Dial timeout in seconds; ``<= 0`` uses pool options.
-        loop: Event loop that owns the manager; ``None`` picks current.
-
-    Returns:
-        A :class:`PooledConnection` ready for ``read`` / ``write``.
-    """
-    loop = loop or get_or_create_event_loop()
-
-    if options.short_conn:
-        return await _short_conn_factory.get(options=options, timeout=timeout, loop=loop)
-
-    conn_pool_mgr = _default_connection_pools.get(loop, None)
-    if not conn_pool_mgr:
-        old_loop: BaseEventLoop = _default_connection_pools.get(options.address, None)
-        if old_loop:
-            if id(old_loop) != id(loop):
-                logger.warning(f"address: {options.address} exist different loop, \
-                               old {id(old_loop)} != current loop: {loop}")
-            if old_loop in _default_connection_pools.__dict__:
-                del _default_connection_pools.__dict__[old_loop]
-        _default_connection_pools[options.address] = loop
-
-        pool_opts = getattr(options, "pool_opts", None)
-        conn_pool_mgr = ConnectionPoolManager(options=pool_opts, loop=loop)
-        _default_connection_pools[loop] = conn_pool_mgr
-
-    return await conn_pool_mgr.get(options, timeout)

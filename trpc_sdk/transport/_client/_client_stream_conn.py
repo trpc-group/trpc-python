@@ -3,13 +3,12 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Pooled connection plus recv queue used by a client streaming call.
 
-:class:`ClientConn` is what :class:`ClientTransport.start` stores under
+:class:`ClientStreamConn` is what :class:`ClientTransport.start` stores under
 ``stream_id``. Later ``send`` / ``recv`` / ``close`` look it up. The
-queue is filled either by a background :meth:`ClientConn.recv` loop or
-by :meth:`ClientConn.push_data_to_recv_queue`.
+queue is filled either by a background :meth:`ClientStreamConn.recv` loop or
+by :meth:`ClientStreamConn.push_data_to_recv_queue`.
 """
 
 from __future__ import annotations
@@ -22,20 +21,21 @@ from trpc_sdk.exceptions import ClientInvokeError
 from trpc_sdk.exceptions import ClientTimeoutError
 from trpc_sdk.log import logger
 from trpc_sdk.utils import Queue
-from .._pool import PooledConnection
-from ._client_transport_tcp import get_remain_time
+
+from ._pool import Connection
+from ._tcp_round_trip import get_remain_time
 from ._options import RoundTripOptions
 
 
-class ClientConn:
-    """Client-side stream connection: pooled TCP plus a recv queue.
+class ClientStreamConn:
+    """Client-side stream connection: connection plus a recv queue.
 
     Args:
-        conn: Pooled connection obtained by ``start``.
+        conn: Connection obtained by ``start``.
         options: Round-trip options, including the frame parser.
     """
 
-    def __init__(self, conn: PooledConnection, options: RoundTripOptions):
+    def __init__(self, conn: Connection, options: RoundTripOptions):
         self._recv_queue = Queue()
         self._options = options
         self._conn = conn
@@ -55,7 +55,7 @@ class ClientConn:
         self._recv_queue.push(data)
 
     def close(self, force=False):
-        """Close the pooled connection.
+        """Close the connection.
 
         Args:
             force: Passed through to the pool conn. True drops it instead
@@ -68,7 +68,7 @@ class ClientConn:
     async def recv_frame(self, ctx: TrpcContext):
         """Read one complete frame, bounded by ``ctx.deadline``.
 
-        On timeout or any other I/O error the pooled connection is
+        On timeout or any other I/O error the connection is
         force-closed and ``_conn`` is set to None so a later
         :meth:`close` does not touch it again.
 
@@ -93,17 +93,13 @@ class ClientConn:
                 self._conn.close(True)
                 self._conn = None
 
-            raise ClientTimeoutError(
-                f"recv_frame deadline to {self._options.address}, {err} io error "
-            )
+            raise ClientTimeoutError(f"recv_frame deadline to {self._options.address}, {err} io error ")
 
         except Exception as err:  # pylint: disable=broad-except
             if self._conn:
                 self._conn.close(True)
                 self._conn = None
-            raise ClientInvokeError(
-                f"recv_frame failed {self._options.address}, error {err}"
-            )
+            raise ClientInvokeError(f"recv_frame failed {self._options.address}, error {err}")
 
         return rsp
 
@@ -112,7 +108,7 @@ class ClientConn:
 
         Runs until the remote side errors, a read fails, or
         :meth:`close` marks the connection closed. Any failure closes
-        the pooled connection (without force) and stops the loop; it
+        the connection (without force) and stops the loop; it
         does not raise to the caller.
         """
         while not self._is_closed:
@@ -133,7 +129,7 @@ class ClientConn:
                 return
 
     def write(self, data: bytes):
-        """Write bytes on the pooled connection.
+        """Write bytes on the connection.
 
         Args:
             data: Encoded request (or stream frame) to send.

@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """TCP round-trip helper used by :class:`ClientTransport`.
 
 :func:`tcp_round_trip` takes a pooled connection, writes, optionally
@@ -27,7 +26,7 @@ from trpc_sdk.utils import now_ms
 from trpc_sdk.utils import now_us
 from trpc_sdk.utils import set_addr_to_ctx_from_transport
 from .._constants import RequestType
-from .._pool import get_pool_connection
+from ._pool import get_pool_connection
 from ._options import RoundTripOptions
 
 
@@ -104,4 +103,3 @@ async def tcp_round_trip(ctx: TrpcContext, req_data: bytes, options: RoundTripOp
             conn.close()
 
     return rsp
-

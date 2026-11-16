@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Shared helpers used across tRPC-Python packages.
 
 Public symbols are re-exported here. Callers should ``from trpc_sdk.utils

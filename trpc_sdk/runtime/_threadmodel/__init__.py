@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Thread model of one serving process, after trpc-cpp ``runtime/threadmodel``.
 
 The threads of a ``merge`` worker are built from the pieces below. Which of

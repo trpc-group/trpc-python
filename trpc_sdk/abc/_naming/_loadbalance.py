@@ -3,15 +3,15 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Load balancing service selection."""
+
 from __future__ import annotations
 
 from abc import abstractmethod
 from typing import List
 
-from ._node import Node
-from ._plugin import BasePlugin
+from .._plugin import BasePlugin
+from ._types import Node
 
 
 class BaseLoadBalance(BasePlugin):
@@ -19,8 +19,7 @@ class BaseLoadBalance(BasePlugin):
 
     @abstractmethod
     async def select(self, service_name: str, node_list: List[Node], namespace: str) -> Node:
-        """
-        Select one endpoint for the given service and options.
+        """Select one endpoint for the given service and options.
 
         Args:
             service_name: Logical service name to select from.

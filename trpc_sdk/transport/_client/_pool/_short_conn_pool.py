@@ -3,12 +3,11 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """One-shot TCP/Unix connections that are never returned to an idle queue.
 
-:class:`ShortConnFactory` duck-types the ``get`` / ``put`` surface of
-:class:`~trpc_sdk.transport._pool.BasePool` so a
-:class:`~trpc_sdk.transport._pool.PooledConnection` can still
+:class:`ShortConnPool` implements the ``get`` / ``put`` surface of
+:class:`~trpc_sdk.transport._client._pool.BaseConnectionPool` so a
+:class:`~trpc_sdk.transport._client._pool.Connection` can still
 ``close`` through ``pool.put``. ``put`` always force-closes.
 """
 
@@ -18,14 +17,15 @@ from asyncio import BaseEventLoop
 
 from trpc_sdk.abc import BaseClientTransportOption
 
+from ._base import BaseConnectionPool
 from ._dial import dial_connection
-from ._pooled_connection import PooledConnection
+from ._connection import Connection
 
 
-class ShortConnFactory:
+class ShortConnPool(BaseConnectionPool):
     """Dial a one-shot conn that is never returned to an idle queue.
 
-    ``put`` always :meth:`~PooledConnection.force_close` so callers can
+    ``put`` always :meth:`~Connection.force_close` so callers can
     still use the pooled ``close`` path. ``is_short`` is True on the
     wrapper so logs can tell these apart from pooled conns.
 
@@ -33,12 +33,12 @@ class ShortConnFactory:
         None.
     """
 
-    async def get(
-            self,
-            options: BaseClientTransportOption,
-            timeout: float,
-            loop: BaseEventLoop) -> PooledConnection:
-        """Dial through :func:`~trpc_sdk.transport._pool._dial.dial_connection`.
+    def __init__(self):  # pylint: disable=super-init-not-called
+        self._address = None
+        self._loop = None
+
+    async def get(self, options: BaseClientTransportOption, timeout: float, loop: BaseEventLoop) -> Connection:
+        """Dial through :func:`~trpc_sdk.transport._client._pool._dial.dial_connection`.
 
         Args:
             options: Transport options with the remote address / sock.
@@ -46,18 +46,12 @@ class ShortConnFactory:
             loop: Event loop the dial runs on.
 
         Returns:
-            A short-lived :class:`PooledConnection`.
+            A short-lived :class:`Connection`.
         """
         reader, writer = await dial_connection(options=options, timeout=timeout, loop=loop)
-        return PooledConnection(reader=reader,
-                                writer=writer,
-                                loop=loop,
-                                pool=self,
-                                address=options.address,
-                                is_short=True)
+        return Connection(reader=reader, writer=writer, loop=loop, pool=self, address=options.address, is_short=True)
 
-    @staticmethod
-    def put(pool_conn: PooledConnection, _: bool = True) -> None:
+    def put(self, pool_conn: Connection, _: bool = True) -> None:
         """Force-close ``pool_conn``; short conns are never cached.
 
         Args:

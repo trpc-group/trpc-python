@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Event-loop policy helpers for the tRPC process.
 
 Whether uvloop is used comes from the ``global.enable_uvloop`` key of the

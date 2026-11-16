@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """User protocol starters, served through :class:`UserProtocolTransport`.
 
 A service whose ``protocol`` has a starter registered with

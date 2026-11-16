@@ -11,13 +11,11 @@ from packaging.version import Version
 _v = Version(protobuf_version)
 
 if Version("2.5") <= _v < Version("3.20.0"):
-    from ._v3_trpc_pb2 import *
+    from ._v3_trpc_pb2 import *  # noqa: F401,F403
 elif Version("4.21.0") <= _v < Version("5.26.0"):
-    from ._v4_trpc_pb2 import *
+    from ._v4_trpc_pb2 import *  # noqa: F401,F403
 elif _v >= Version("5.26.0"):
-    from ._v5_trpc_pb2 import *
+    from ._v5_trpc_pb2 import *  # noqa: F401,F403
 else:
-    raise ImportError(
-        f"unsupported protobuf version: {protobuf_version}; "
-        "require 3.x, >=4.21,<5.26, or >=5.26"
-    )
+    raise ImportError(f"unsupported protobuf version: {protobuf_version}; "
+                      "require 3.x, >=4.21,<5.26, or >=5.26")

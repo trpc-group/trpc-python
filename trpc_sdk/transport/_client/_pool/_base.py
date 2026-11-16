@@ -3,14 +3,14 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Abstract contract for a client connection pool.
 
-:class:`BasePool` is the get/put surface that
-:class:`~trpc_sdk.transport._pool.PooledConnection` talks to when it is
-returned. :class:`~trpc_sdk.transport._pool.ConnectionPool` is the
+:class:`BaseConnection` is the read/write/close surface every pooled
+connection exposes. :class:`BaseConnectionPool` is the get/put surface that
+:class:`~trpc_sdk.transport._client._pool.Connection` talks to when it is
+returned. :class:`~trpc_sdk.transport._client._pool.KeepLiveConnPool` is the
 idle-queue implementation;
-:class:`~trpc_sdk.transport._pool.ShortConnFactory` duck-types the same
+:class:`~trpc_sdk.transport._client._pool.ShortConnPool` implements the same
 ``put`` so a short-lived conn can still call ``close``.
 """
 
@@ -19,17 +19,35 @@ from __future__ import annotations
 from abc import ABC
 from abc import abstractmethod
 from asyncio import BaseEventLoop
-from typing import TYPE_CHECKING
 from typing import Optional
 
 from trpc_sdk.abc import AddrType
 from trpc_sdk.common import get_or_create_event_loop
 
-if TYPE_CHECKING:
-    from ._pooled_connection import PooledConnection
+
+class BaseConnection(ABC):
+    """Client connection that issues and takes back pooled connections.
+
+    """
+
+    @abstractmethod
+    async def read(self, num: int) -> bytes:
+        """Read exactly ``num`` bytes from the underlying stream"""
+
+    @abstractmethod
+    def write(self, data: bytes) -> int:
+        """Write data to the underlying stream"""
+
+    @abstractmethod
+    def close(self, force: bool = False) -> None:
+        """Close the underlying stream"""
+
+    @abstractmethod
+    def force_close(self) -> None:
+        """Force-close the underlying stream"""
 
 
-class BasePool(ABC):
+class BaseConnectionPool(ABC):
     """Client pool that issues and takes back pooled connections.
 
     ``address`` is the remote the pool dials. ``loop`` is the event
@@ -48,16 +66,16 @@ class BasePool(ABC):
 
     @property
     def address(self) -> AddrType:
-        """Remote address this pool dials."""
+        """Remote address this connection pool dials."""
         return self._address
 
     @property
     def loop(self) -> BaseEventLoop:
-        """Event loop the pool's idle queue and dials run on."""
+        """Event loop the connection pool's idle queue and dials run on."""
         return self._loop
 
     @abstractmethod
-    async def get(self, timeout: float) -> "PooledConnection":
+    async def get(self, timeout: float) -> BaseConnection:
         """Take one connection out of the pool, dialing if needed.
 
         Args:
@@ -70,7 +88,7 @@ class BasePool(ABC):
         """
 
     @abstractmethod
-    def put(self, pool_conn: "PooledConnection", force_close: bool = False) -> None:
+    def put(self, pool_conn: BaseConnection, force_close: bool = False) -> None:
         """Return a connection to the pool, or drop it.
 
         This is a return, not a socket close. ``force_close=True``

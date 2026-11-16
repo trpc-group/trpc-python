@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """String helpers used by config parsing.
 
 :func:`str2bool` is the distutils-style truth parser consumed by

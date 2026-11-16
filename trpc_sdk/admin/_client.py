@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Worker-side admin WS client.
 
 Each worker process dials the admin HTTP server's WS endpoint and serves the

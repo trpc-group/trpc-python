@@ -443,7 +443,7 @@ cdef class _TrpcServerStreamCodec(_Codec):
         init_meta.content_type = message.serialization_type
         init_meta.content_encoding = message.compress_type
         rsp_meta = trpc_pb2.TrpcStreamInitResponseMeta()
-                
+
         err = message.server_rsp_err
         rsp_meta.error_msg = err.msg.encode('utf8')
         if err.type == TrpcErrorType.BUSINESS:
@@ -546,7 +546,7 @@ cdef class _TrpcServerStreamCodec(_Codec):
         message.set_server_rpc_name(req.func.decode('utf8'))
 
         message.set_compress_type(init_meta.content_encoding)
-        message.set_serialization_type(init_meta.content_type) 
+        message.set_serialization_type(init_meta.content_type)
         message.set_dyeing((req.message_type & trpc_pb2.TRPC_DYEING_MESSAGE) != 0)
 
         # Parse tracing metadata and store it on the msg.
@@ -615,7 +615,7 @@ cdef class _TrpcServerStreamCodec(_Codec):
         feedback.ParseFromString(body[FRAME_HEAD_LEN:])
         message.set_stream_frame(feedback)
         return b''
- 
+
 
 cpdef bytes _common_pack(TrpcFrameHead frame_head, bytes body):
     """Hand-pack a stream frame: 16-byte head plus body, ``head_len`` = 0.

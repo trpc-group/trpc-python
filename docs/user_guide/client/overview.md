@@ -4,13 +4,13 @@ English | [中文](overview.zh_CN.md)
 
 An outbound RPC call in tRPC-Python is assembled as `Options` and then executed by `Client.invoke`. A protobuf stub (proxy) is only a thin wrapper over that path. The proxy itself does not keep network connections.
 
-The public client API is in `trpc_sdk.client` (`Client`, `get_client`, and `Options`). The call context is `trpc_sdk.abc.TrpcContext`.
+The public client API is in `trpc_sdk.client` (`TrpcClient`, `get_client`, and `Options`). The call context is `trpc_sdk.abc.TrpcContext`.
 
 ## How Call Options Are Merged
 
 On each call, `get_options` builds the final `Options` in this order. A later step overwrites the same field from an earlier step:
 
-1. **Framework defaults.** The selector is `TrpcSelector`, serialization is `SerializationType.PB`, and compression is `CompressType.Noop`.
+1. **Framework defaults.** The selector is `TrpcSelector`, serialization is `SerializationType.PB`, and compression is `CompressType.NOOP`.
 2. **YAML.** The callee service name on the `TrpcMessage` selects the matching entry under `client` in `trpc_python.yaml`.
 3. **Caller `Options`.** The `Options` passed in code for this call are applied last.
 
@@ -139,7 +139,7 @@ A `set_*` in code overrides YAML, and YAML overrides the framework defaults. The
 | `set_protocol(protocol)` | Protocol name. Looks up and binds the `codec`, `checker`, and `transport` |
 | `set_network(network)` | Transport network: `tcp` or `udp` |
 | `set_serialization_type(t)` | Serialization type. Default `SerializationType.PB` |
-| `set_compress_type(t)` | Compression type. Default `CompressType.Noop` |
+| `set_compress_type(t)` | Compression type. Default `CompressType.NOOP` |
 | `set_timeout(ms)` | Timeout of this client call, in milliseconds |
 | `set_namespace(ns)` | Namespace of the callee service |
 | `set_metadata(key, val)` | Add one cross-process key-value pair. `val` must be `bytes` |
@@ -221,26 +221,26 @@ options = Options().set_metadata("key", b"value")
 
 ## 11. Serialization, Compression, and Raw Bytes (Noop)
 
-The defaults are `SerializationType.PB` and `CompressType.Noop`. Other common serializations are `SerializationType.JSON` and `SerializationType.Noop`. Compression types are in `trpc_sdk.compressor.CompressType`, for example `Gzip`. YAML `serialization` and `compression` are the integer enum values. `0` is PB and no compression, respectively.
+The defaults are `SerializationType.PB` and `CompressType.NOOP`. Other common serializations are `SerializationType.JSON` and `SerializationType.NOOP`. Compression types are in `trpc_sdk.compressor.CompressType`, for example `Gzip`. YAML `serialization` and `compression` are the integer enum values. `0` is PB and no compression, respectively.
 
 ### Passing Through Already-Serialized Bytes
 
 In a proxy or forwarding path, the request body may already be serialized `bytes` (for example an encoded protobuf payload). This process should not serialize it again, but the frame header should still tell the peer to parse the body as protobuf. Use `trpc_sdk.serialization.Body` together with `set_current_serialization_type`:
 
 - `set_serialization_type(SerializationType.PB)` is written on the frame header. It tells the peer that the body format is PB.
-- `set_current_serialization_type(SerializationType.Noop)` only decides that **this process** uses `NoopSerializer` to read and write raw bytes. It does not change the serialization type announced on the frame header.
+- `set_current_serialization_type(SerializationType.NOOP)` only decides that **this process** uses `NoopSerializer` to read and write raw bytes. It does not change the serialization type announced on the frame header.
 
 ```python
 from trpc_sdk.abc import TrpcContext
 from trpc_sdk.abc import create_message
-from trpc_sdk.client import Client
+from trpc_sdk.client import TrpcClient
 from trpc_sdk.client import Options
 from trpc_sdk.serialization import Body
 from trpc_sdk.serialization import SerializationType
 
 ctx = TrpcContext()
 create_message(ctx)
-rsp = await Client().invoke(
+rsp = await TrpcClient().invoke(
     ctx,
     Body(data=raw_bytes),
     Body,
@@ -249,7 +249,7 @@ rsp = await Client().invoke(
         .set_target("ip://127.0.0.1:8000")
         .set_protocol("trpc")
         .set_serialization_type(SerializationType.PB)
-        .set_current_serialization_type(SerializationType.Noop),
+        .set_current_serialization_type(SerializationType.NOOP),
     ],
 )
 payload = rsp.data

@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Batch consumers running inside a task child process.
 
 Requests and responses cross the worker/task boundary through two C queues.

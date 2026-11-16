@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Business-facing entry point for sending a request to a task process.
 
 This wrapper resolves a task name to a connection; the encoding and the

@@ -39,7 +39,7 @@ from trpc_sdk.exceptions import ServerDecodeError
 
 
 cdef uint16_t TRPC_MAGIC_VALUE = 2352
-cdef uint32_t FRAME_HEAD_LEN = 16
+cdef int FRAME_HEAD_LEN = 16
 
 
 cdef class TrpcServerProtocolParser(BaseServerProtocolParser):
@@ -100,13 +100,13 @@ cdef class TrpcServerProtocolParser(BaseServerProtocolParser):
         results = []
 
         cdef int scan_end = 0
-        cdef uint16_t stx = 0
+        cdef uint16_t magic = 0
         cdef uint32_t package_len = 0
 
         while self.length >= scan_end+FRAME_HEAD_LEN:
-            stx = ntohs(dereference(<uint16_t *>(self.buf+scan_end)))
+            magic = ntohs(dereference(<uint16_t *>(self.buf+scan_end)))
 
-            if stx != TRPC_MAGIC_VALUE:
+            if magic != TRPC_MAGIC_VALUE:
                 raise ServerDecodeError("framer head magic not match")
 
             package_len = ntohl(dereference(<uint32_t *>(self.buf+4+scan_end)))

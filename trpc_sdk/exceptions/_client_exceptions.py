@@ -3,9 +3,7 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-"""TRPC Framework Exception Definitions
-This file contains all exception classes and error codes used in the TRPC framework
-"""
+"""TRPC Framework Exception Definitions."""
 
 from __future__ import annotations
 
@@ -14,16 +12,12 @@ from ._trpc_exception import TrpcErrorType
 from ._trpc_exception import TrpcException
 
 
-
-
-
 class ClientTimeoutError(TrpcException):
-    """Exception raised when client request times out"""
+    """Exception raised when client request times out."""
 
     def __init__(self, msg: str):
-        """
-        Initialize the timeout error
-        
+        """Initialize the timeout error.
+
         Args:
             msg: Description of the timeout
         """
@@ -31,9 +25,8 @@ class ClientTimeoutError(TrpcException):
         super().__init__(TrpcErrorType.FRAMEWORK, TrpcErrorCode.TRPC_CLIENT_INVOKE_TIMEOUT_ERR, msg)
 
     def set_timeout_type(self, timeout_type: str):
-        """
-        Set the specific type of timeout
-        
+        """Set the specific type of timeout.
+
         Args:
             timeout_type: Detailed classification of timeout reason
         """
@@ -48,9 +41,8 @@ class ClientConnectionError(TrpcException):
     """Exception raised when client fails to establish connection"""
 
     def __init__(self, msg: str):
-        """
-        Initialize the connection error
-        
+        """Initialize the connection error.
+
         Args:
             msg: Description of the connection failure
         """
@@ -61,9 +53,8 @@ class ClientEncodeError(TrpcException):
     """Exception raised when client fails to encode request data"""
 
     def __init__(self, msg: str):
-        """
-        Initialize the encode error
-        
+        """Initialize the encode error.
+
         Args:
             msg: Description of the encode failure
         """
@@ -74,9 +65,8 @@ class ClientDecodeError(TrpcException):
     """Exception raised when client fails to decode response data"""
 
     def __init__(self, msg: str):
-        """
-        Initialize the decode error
-        
+        """Initialize the decode error.
+
         Args:
             msg: Description of the decode failure
         """
@@ -87,9 +77,8 @@ class ClientRouteError(TrpcException):
     """Exception raised when client encounters routing issues"""
 
     def __init__(self, msg: str):
-        """
-        Initialize the routing error
-        
+        """Initialize the routing error.
+
         Args:
             msg: Description of the routing failure
         """
@@ -100,9 +89,8 @@ class ClientInvokeError(TrpcException):
     """Exception raised for unknown invocation errors"""
 
     def __init__(self, msg: str):
-        """
-        Initialize the invocation error
-        
+        """Initialize the invocation error.
+
         Args:
             msg: Description of the invocation failure
         """
@@ -113,9 +101,8 @@ class ClientPoolLimitError(TrpcException):
     """Exception raised when connection pool exceeds its limit"""
 
     def __init__(self, msg: str):
-        """
-        Initialize the pool limit error
-        
+        """Initialize the pool limit error.
+
         Args:
             msg: Description of the pool limit exceeded
         """
@@ -126,9 +113,8 @@ class ClientPoolClosedError(TrpcException):
     """Exception raised when trying to use a closed connection pool"""
 
     def __init__(self, msg: str):
-        """
-        Initialize the pool closed error
-        
+        """Initialize the pool closed error.
+
         Args:
             msg: Description of the closed pool access attempt
         """
@@ -139,9 +125,8 @@ class ClientPoolConnClosedError(TrpcException):
     """Exception raised when trying to use a closed connection"""
 
     def __init__(self, msg):
-        """
-        Initialize the connection closed error
-        
+        """Initialize the connection closed error.
+
         Args:
             msg: Description of the closed connection access attempt
         """

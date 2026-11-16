@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Inter-process primitives shared by every tRPC-Python process.
 
 A pipe here is a Unix-domain socketpair, and it is always created **before

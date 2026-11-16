@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Host/port helpers for asyncio transports and the tRPC message context.
 
 :data:`AddrType` is defined in :mod:`trpc.utils._types` and re-exported

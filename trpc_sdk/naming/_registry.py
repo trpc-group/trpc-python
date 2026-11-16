@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Service-registry lookup.
 
 :func:`get_registry` is the naming counterpart of :func:`get_selector`:

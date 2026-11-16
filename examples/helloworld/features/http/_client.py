@@ -9,7 +9,7 @@
 import asyncio
 from trpc_sdk.abc import TrpcContext
 from trpc_sdk.serialization import SerializationType
-from trpc_sdk.http import Client as HttpClient
+from trpc_sdk.http import HttpClient
 from trpc_sdk.http import get_http_header_in_client
 from trpc_sdk.http import get_http_status_in_client
 

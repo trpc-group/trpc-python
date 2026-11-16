@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Process-local singleton decorator.
 
 :func:`singleton` stores the first constructed instance in a closure
@@ -49,19 +48,18 @@ def singleton(cls: Type[_T]) -> Callable[..., _T]:
     instances = {}
 
     def get_instance(*args: Any, **kw: Any) -> _T:
-        """
-        Creates or returns the singleton instance of the decorated class.
-        
+        """Creates or returns the singleton instance of the decorated class.
+
         The first call creates the instance with provided arguments. Subsequent
         calls ignore the arguments and return the existing instance.
-        
+
         Args:
             *args: Positional arguments for the class constructor (only used on first call)
             **kw: Keyword arguments for the class constructor (only used on first call)
-            
+
         Returns:
             The singleton instance of the decorated class
-            
+
         Note:
             If called with different arguments after first instantiation,
             the original instance will still be returned and new arguments

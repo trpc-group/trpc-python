@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """``application/x-www-form-urlencoded`` serializer.
 
 GET query strings and form bodies are parsed with ``parse_qs`` and
@@ -28,7 +27,7 @@ from trpc_sdk.serialization import get_serializer
 from trpc_sdk.utils import dict_to_protobuf
 
 
-@register_plugin(PluginType.SERIALIZATION, SerializationType.Form, init_pos=PluginInitPos.WORKER)
+@register_plugin(PluginType.SERIALIZATION, SerializationType.FORM, init_pos=PluginInitPos.WORKER)
 class FormSerializer(BaseSerializer):
     """Serializer for HTTP form / query-string payloads."""
 

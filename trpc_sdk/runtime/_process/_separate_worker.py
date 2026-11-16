@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Worker of ``separate`` mode: this process does I/O, its children do the work.
 
 The split is the one thing this mode exists for. :class:`SeparateWorker` owns
@@ -100,6 +99,7 @@ from trpc_sdk.utils import PipeConnection
 from trpc_sdk.utils import PipeEnd
 from trpc_sdk.utils import PipeKind
 from trpc_sdk.utils import create_pipe
+
 from .._common import ChildReadiness
 from .._common import warn_unnamed_timers
 from .._constants import CHILD_EXIT_GRACE_SECONDS

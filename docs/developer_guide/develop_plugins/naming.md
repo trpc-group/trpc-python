@@ -97,18 +97,18 @@ The four roles in the chain use these default plugins:
 Change the default sub-plugins for every client in the process from code:
 
 ```python
-from trpc_sdk.naming import set_default_circuitbreaker
+from trpc_sdk.naming import set_default_circuit_breaker
 from trpc_sdk.naming import set_default_discovery
 from trpc_sdk.naming import set_default_loadbalance
-from trpc_sdk.naming import set_default_servicerouter
+from trpc_sdk.naming import set_default_service_router
 
 set_default_discovery("static_discovery")
 set_default_loadbalance("RandomLB")
-set_default_circuitbreaker("NoopCB")
-set_default_servicerouter("NoopSR")
+set_default_circuit_breaker("NoopCB")
+set_default_service_router("NoopSR")
 ```
 
-A single client service can override `discovery`, `loadbalance`, and `circuitbreaker` in YAML. Client YAML has no `servicerouter` field. Set the service router with `set_default_servicerouter`, or with `Options.set_service_router` on the call:
+A single client service can override `discovery`, `loadbalance`, and `circuitbreaker` in YAML. Client YAML has no `servicerouter` field. Set the service router with `set_default_service_router`, or with `Options.set_service_router` on the call:
 
 ```yaml
 client:

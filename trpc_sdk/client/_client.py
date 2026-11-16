@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Unary tRPC client invoke path.
 
 Consumes the :class:`Options` built by :mod:`trpc_sdk.client._options`,
@@ -25,23 +24,17 @@ from typing import Sequence
 from typing import Union
 
 from trpc_sdk.abc import BaseClient
-from trpc_sdk.abc import Node
 from trpc_sdk.abc import TrpcContext
-from trpc_sdk.abc import TrpcMessage
 from trpc_sdk.common import get_or_create_event_loop
 from trpc_sdk.compressor import compress
 from trpc_sdk.compressor import decompress
-from trpc_sdk.config import SocketType
 from trpc_sdk.config import TrpcConfig
 from trpc_sdk.exceptions import ClientConnectionError
 from trpc_sdk.exceptions import ClientEncodeError
-from trpc_sdk.exceptions import ClientRouteError
 from trpc_sdk.exceptions import ClientTimeoutError
 from trpc_sdk.exceptions import TrpcErrorCode
 from trpc_sdk.exceptions import TrpcException
-from trpc_sdk.exceptions import UnknownError
 from trpc_sdk.log import logger
-from trpc_sdk.naming import get_selector
 from trpc_sdk.serialization import deserialize
 from trpc_sdk.serialization import serialize
 from trpc_sdk.transport import ClientTimeoutReason
@@ -51,15 +44,9 @@ from trpc_sdk.utils import now_ms
 from trpc_sdk.utils import singleton
 from ._options import Options
 from ._options import get_options
-
-
-def get_client():
-    """Return the process-wide :class:`Client` singleton.
-
-    ``Client`` is decorated with :func:`~trpc_sdk.utils.singleton`,
-    so concurrent callers share one instance.
-    """
-    return Client()
+from ._utils import update_message
+from ._utils import select_node
+from ._utils import set_timeout
 
 
 async def _invoke_backend(ctx: TrpcContext, req: Any, rsp: Any, opts: Options) -> Any:
@@ -102,13 +89,14 @@ async def _invoke_backend(ctx: TrpcContext, req: Any, rsp: Any, opts: Options) -
         rsp_buff = await client_ts.round_trip(ctx, req_buff, opts.call_options)
         logger.debug("Client invoke backend request %s end", opts.endpoint)
     except ConnectionError as err:
-        raise ClientConnectionError(f"Client invoke backend bad connection to {opts.call_options.address} {err}") from err
+        raise ClientConnectionError(
+            f"Client invoke backend bad connection to {opts.call_options.address} {err}") from err
 
     if opts.call_options.req_type == RequestType.SEND_ONLY:
         return
     rsp_body = client_codec.decode_data(ctx, rsp_buff)
 
-    if len(rsp_body) > 0:
+    if rsp_body:
         # Prefer types from the backend response, then the same per-call overrides.
         serialization_type = msg.serialization_type
         compress_type = msg.compress_type
@@ -123,130 +111,8 @@ async def _invoke_backend(ctx: TrpcContext, req: Any, rsp: Any, opts: Options) -
     return rsp
 
 
-def update_message(msg: TrpcMessage, opts: Options) -> None:
-    """Copy caller-facing option fields onto the outbound message.
-
-    Covers metadata, caller service name, serialization / compress types,
-    and optional custom request / response heads. ``req_head`` replaces
-    the codec request head; ``rsp_head`` is a caller-owned buffer that
-    the codec fills with the backend response head.
-
-    Args:
-        msg: Outbound client message to mutate.
-        opts: Per-call options already assembled by :func:`get_options`.
-    """
-    if opts.metadata:
-        meta_data = msg.client_meta_data or {}
-        meta_data.update(opts.metadata)
-        msg.set_client_meta_data(meta_data)
-
-    if opts.caller_service_name:
-        msg.set_caller_service_name(opts.caller_service_name)
-
-    if opts.serialization_type >= 0:
-        msg.set_serialization_type(opts.serialization_type)
-
-    if opts.compress_type >= 0:
-        msg.set_compress_type(opts.compress_type)
-
-    if opts.req_head:
-        msg.set_client_req_head(opts.req_head)
-    if opts.rsp_head:
-        msg.set_client_rsp_head(opts.rsp_head)
-
-
-async def select_node(msg: TrpcMessage, opts: Options) -> Node:
-    """Resolve the downstream node and copy its address onto ``msg``.
-
-    Unix-socket calls rewrite ``opts.target`` first. An explicit
-    ``target`` of the form ``scheme://endpoint`` overrides the default
-    Polar selector.
-
-    Args:
-        msg: Outbound message; remote address and env transfer are set.
-        opts: Per-call options; selector and endpoint may be replaced.
-
-    Returns:
-        The selected :class:`~trpc_sdk.abc.Node`.
-
-    Raises:
-        ClientRouteError: ``target`` has no ``scheme://endpoint``, or
-            the selector returned no addressable node.
-        UnknownError: ``opts.selector`` is missing.
-    """
-    if opts.socket_type == SocketType.UNIX:
-        opts.target = "ip://" + opts.unix_path + ":0"
-
-    if opts.target:
-        targets = opts.target.split("://")
-        if len(targets) != 2:
-            raise ClientRouteError("Client select node target schema invalid")
-        opts.selector = get_selector(targets[0])
-        opts.endpoint = targets[1]
-
-    if not opts.selector:
-        raise UnknownError("Client select node selector not exist")
-
-    logger.debug("%s|select node", opts.endpoint)
-    node = await opts.selector.select(opts.endpoint, opts.selector_options)
-    logger.debug("%s|select end node=%s", opts.endpoint, node)
-
-    if node is None or not node.address:
-        raise ClientRouteError("cannot find downstream node")
-
-    opts.load_node_config(node)
-    opts.call_options.set_endpoint(opts.endpoint)
-
-    msg.set_remote_addr(node.address)
-    msg.set_callee_container_name(node.container_name)
-    if len(msg.env_transfer) == 0:
-        msg.set_env_transfer(node.env_key)
-
-    return node
-
-
-def set_timeout(ctx: TrpcContext, msg: TrpcMessage, opts: Options, begin: int) -> ClientTimeoutReason:
-    """Apply the tighter of the client timeout and the server deadline.
-
-    When the client deadline is sooner (or the server set none), a later
-    timeout is blamed on the downstream and reported to the selector as
-    :attr:`~trpc_sdk.transport.ClientTimeoutReason.DOWNSTREAM_TIMEOUT`. When
-    the server deadline is sooner, the timeout is
-    :attr:`~trpc_sdk.transport.ClientTimeoutReason.CURRENT_SERVICE_TIMEOUT`
-    and is not treated as downstream failure.
-
-    Args:
-        ctx: Request context; ``deadline`` and ``timeout`` are updated.
-        msg: Outbound message; remaining timeout is written for the peer.
-        opts: Per-call options; ``timeout`` is in milliseconds.
-        begin: ``now_ms()`` at the start of this attempt.
-
-    Returns:
-        Which side should be blamed if this call times out.
-
-    Raises:
-        ClientTimeoutError: Remaining time is already negative.
-    """
-    timeout_reason = ClientTimeoutReason.DOWNSTREAM_TIMEOUT
-    if opts.timeout > 0:
-        client_deadline = begin + opts.timeout
-        if client_deadline < ctx.deadline or ctx.deadline == 0:
-            ctx.deadline = client_deadline
-            ctx.timeout = opts.timeout
-        else:
-            ctx.timeout = ctx.deadline - begin
-            timeout_reason = ClientTimeoutReason.CURRENT_SERVICE_TIMEOUT
-        if ctx.timeout < 0:
-            raise ClientTimeoutError("client reach deadline")
-        msg.set_timeout(ctx.timeout)
-    else:
-        ctx.timeout = 0
-
-    return timeout_reason
-
-
 @singleton
-class Client(BaseClient):
+class TrpcClient(BaseClient):
     """Default tRPC unary client.
 
     ``invoke`` builds a fresh :class:`Options` per request so concurrent
@@ -254,11 +120,8 @@ class Client(BaseClient):
     :func:`_invoke_backend`.
     """
 
-    def __init__(self):
-        pass
-
     @staticmethod
-    def check_handle_error(err, timeout_reason: ClientTimeoutReason):
+    def _check_handle_error(err, timeout_reason: ClientTimeoutReason):
         """Return whether ``err`` should be reported to the selector.
 
         Only a connect failure, or an invoke timeout blamed on the
@@ -269,13 +132,15 @@ class Client(BaseClient):
             err: Exception caught during invoke, or ``None``.
             timeout_reason: Value returned by :func:`set_timeout`.
         """
-        return err is not None and isinstance(err, TrpcException) and \
-               (err.code == TrpcErrorCode.TRPC_CLIENT_CONNECT_ERR or
-                (err.code == TrpcErrorCode.TRPC_CLIENT_INVOKE_TIMEOUT_ERR and
-                 timeout_reason == ClientTimeoutReason.DOWNSTREAM_TIMEOUT))
+        # yapf: disable
+        return (err is not None and isinstance(err, TrpcException)
+                and (err.code == TrpcErrorCode.TRPC_CLIENT_CONNECT_ERR or
+               (err.code == TrpcErrorCode.TRPC_CLIENT_INVOKE_TIMEOUT_ERR  # noqa: E128
+                and timeout_reason == ClientTimeoutReason.DOWNSTREAM_TIMEOUT)))
+        # yapf: enable
 
     @staticmethod
-    def check_client_rsp_err(err, msg):
+    def _check_client_rsp_err(err, msg):
         """Return whether the codec stored a framework error on ``msg``.
 
         Used after a successful filter-chain return to surface connect
@@ -286,10 +151,13 @@ class Client(BaseClient):
             err: Exception already captured, or ``None``.
             msg: Client message that may hold ``client_rsp_err``.
         """
-        return err is None and msg.client_rsp_err is not None and \
-               msg.client_rsp_err.code != TrpcErrorCode.TRPC_INVOKE_SUCCESS
+        return (err is None and msg.client_rsp_err is not None
+                and msg.client_rsp_err.code != TrpcErrorCode.TRPC_INVOKE_SUCCESS)
 
-    def invoke_sync(self, ctx: TrpcContext, req: Any, rsp_cls: Any,
+    def invoke_sync(self,
+                    ctx: TrpcContext,
+                    req: Any,
+                    rsp_cls: Any,
                     options: Optional[Union[Options, Callable, Sequence]] = None):
         """Run :meth:`invoke` to completion on the current event loop.
 
@@ -311,7 +179,10 @@ class Client(BaseClient):
 
         return loop.run_until_complete(self.invoke(ctx, req, rsp_cls, options))
 
-    async def invoke(self, ctx: TrpcContext, req: Any, rsp_cls: Any,
+    async def invoke(self,
+                     ctx: TrpcContext,
+                     req: Any,
+                     rsp_cls: Any,
                      options: Optional[Union[Options, Callable, Sequence]] = None) -> Any:
         """Invoke a unary backend RPC.
 
@@ -363,12 +234,12 @@ class Client(BaseClient):
         finally:
             cost = now_ms() - begin
 
-            if self.check_handle_error(err, timeout_reason):
+            if self._check_handle_error(err, timeout_reason):
                 await opts.selector.report(node, cost, err.code)
             else:
                 await opts.selector.report(node, cost, 0)
 
-            if self.check_client_rsp_err(err, msg):
+            if self._check_client_rsp_err(err, msg):
                 err = msg.client_rsp_err
 
             if opts.node:
@@ -380,3 +251,12 @@ class Client(BaseClient):
                 if isinstance(err, ClientTimeoutError):
                     err.set_timeout_type(timeout_reason)
                 raise err
+
+
+def get_client():
+    """Return the process-wide :class:`TrpcClient` singleton.
+
+    ``Client`` is decorated with :func:`~trpc_sdk.utils.singleton`,
+    so concurrent callers share one instance.
+    """
+    return TrpcClient()

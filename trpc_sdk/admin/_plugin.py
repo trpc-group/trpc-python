@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Admin plugin that starts the admin HTTP server and worker WS clients."""
 
 from __future__ import annotations

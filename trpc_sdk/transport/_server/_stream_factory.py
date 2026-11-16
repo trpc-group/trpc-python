@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Plugin factory and public aliases for the tRPC server transport.
 
 Importing this module registers ``TrpcServerTransportFactory`` under

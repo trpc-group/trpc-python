@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Client option module.
 
 Holds the per-call :class:`Options` container with chainable ``set_*``
@@ -17,6 +16,7 @@ import socket
 import ssl
 from typing import Any
 from typing import Callable
+from typing import Dict
 from typing import List
 from typing import Mapping
 from typing import Optional
@@ -25,6 +25,8 @@ from typing import Tuple
 from typing import Union
 
 from trpc_sdk.abc import BaseFilter
+from trpc_sdk.abc import BaseCodec
+from trpc_sdk.abc import BaseSelector
 from trpc_sdk.abc import Node
 from trpc_sdk.abc import SelectorOption
 from trpc_sdk.abc import TrpcMessage
@@ -37,7 +39,7 @@ from trpc_sdk.filters import get_client_filter
 from trpc_sdk.naming import TrpcSelector
 from trpc_sdk.serialization import SerializationType
 from trpc_sdk.transport import ClientTransport
-from trpc_sdk.transport import ConnPoolOptions
+from trpc_sdk.transport import KeepLiveConnPoolOptions
 from trpc_sdk.transport import RoundTripOptions
 from trpc_sdk.transport import get_client_transport
 from trpc_sdk.transport import get_default_client_transport
@@ -46,8 +48,7 @@ from ._config import get_client_service_config
 
 # pylint: disable=too-many-instance-attributes,too-many-public-methods
 class Options:
-    """
-    Client options for TRPC service invocation
+    """Client options for TRPC service invocation.
 
     This class encapsulates all configuration parameters needed for making TRPC client calls,
     including service discovery, load balancing, circuit breaking, transport settings, and more.
@@ -60,13 +61,13 @@ class Options:
         """Initialize client options with default values"""
         self._appliers: List[Callable[["Options"], None]] = []
 
-        self.namespace = ""
+        self.namespace: str = ""
 
-        self.selector = None
+        self.selector: Optional[BaseSelector] = None
         self.selector_options: SelectorOption = SelectorOption()
 
         self.filters: FilterChain = FilterChain(False)
-        self.metadata: dict = {}
+        self.metadata: Dict[str, Any] = {}
 
         self.service_name: str = ""
         self.caller_service_name: str = ""
@@ -77,20 +78,20 @@ class Options:
         self.unix_path: str = ""
         self.network: str = ""
 
-        self.transport: ClientTransport = None
+        self.transport: Optional[ClientTransport] = None
         self.call_options = RoundTripOptions()
 
-        self.codec = None
+        self.codec: Optional[BaseCodec] = None
 
         self.current_serialization_type: int = -1
         self.serialization_type: int = -1
         self.current_compress_type: int = -1
         self.compress_type: int = -1
 
-        self.req_head = None
-        self.rsp_head = None
+        self.req_head: Any = None
+        self.rsp_head: Any = None
 
-        self.node: Node = None
+        self.node: Optional[Node] = None
         self.timeout: int = 0
 
         # stream
@@ -112,8 +113,7 @@ class Options:
         return self
 
     def load_client_config(self, name: str):
-        """
-        Load client configuration from service name
+        """Load client configuration from service name.
 
         Retrieves backend configuration based on the service name (typically from proto file)
 
@@ -170,12 +170,12 @@ class Options:
         if service.short_conn is not None:
             self.call_options.set_short_conn(service.short_conn)
 
-        pool_opts = ConnPoolOptions(dial_timeout=service.dial_timeout,
-                                    idle_timeout=service.idle_time,
-                                    max_conn_lifetime=service.max_conn_lifetime,
-                                    max_idle=service.max_idle_conn,
-                                    max_active=service.max_active_conn,
-                                    wait=service.is_wait_active_conn)
+        pool_opts = KeepLiveConnPoolOptions(dial_timeout=service.dial_timeout,
+                                            idle_timeout=service.idle_time,
+                                            max_conn_lifetime=service.max_conn_lifetime,
+                                            max_idle=service.max_idle_conn,
+                                            max_active=service.max_active_conn,
+                                            wait=service.is_wait_active_conn)
         self.call_options.set_pool_options(pool_opts)
 
         if service.set_name:
@@ -189,8 +189,7 @@ class Options:
         return self
 
     def load_node_config(self, node: Node):
-        """
-        Configure options using node information from registry center
+        """Configure options using node information from registry center.
 
         Sets parameters based on the node information returned by the service registry
 
@@ -266,11 +265,11 @@ class Options:
 
         return self._record(apply)
 
-    def set_caller_envname(self, caller_envname: str) -> "Options":
+    def set_caller_env_name(self, caller_env_name: str) -> "Options":
         """Set caller service environment name."""
 
         def apply(opts: Options):
-            opts.selector_options.set_src_env_name(caller_envname)
+            opts.selector_options.set_src_env_name(caller_env_name)
 
         return self._record(apply)
 
@@ -282,11 +281,11 @@ class Options:
 
         return self._record(apply)
 
-    def set_callee_envname(self, callee_envname: str) -> "Options":
-        """Set callee service environment."""
+    def set_callee_env_name(self, callee_env_name: str) -> "Options":
+        """Set callee service environment name."""
 
         def apply(opts: Options):
-            opts.selector_options.set_dst_env_name(callee_envname)
+            opts.selector_options.set_dst_env_name(callee_env_name)
 
         return self._record(apply)
 
@@ -314,11 +313,11 @@ class Options:
 
         return self._record(apply)
 
-    def set_servicerouter_name(self, servicerouter_name: str) -> "Options":
+    def set_service_router_name(self, service_router_name: str) -> "Options":
         """Set service router by name."""
 
         def apply(opts: Options):
-            opts.selector_options.set_service_router(servicerouter_name)
+            opts.selector_options.set_service_router(service_router_name)
 
         return self._record(apply)
 
@@ -531,7 +530,7 @@ class Options:
 
         return self._record(apply)
 
-    def set_pool_opts(self, pool_opts: ConnPoolOptions) -> "Options":
+    def set_pool_opts(self, pool_opts: KeepLiveConnPoolOptions) -> "Options":
         """Set connection pool configuration options."""
 
         def apply(opts: Options):
@@ -590,7 +589,7 @@ def _create_client_options(msg: TrpcMessage) -> Options:
     opts.selector = TrpcSelector()
     opts.endpoint = msg.callee_service_name
     opts.serialization_type = SerializationType.PB
-    opts.compress_type = CompressType.Noop
+    opts.compress_type = CompressType.NOOP
     return opts
 
 
@@ -605,8 +604,7 @@ def _update_namespace_of_option(msg: TrpcMessage, opts: Options):
     opts.selector_options.set_src_setname(msg.set_name)
 
 
-def normalize_options(
-        options: Optional[Union[Options, Callable, Sequence]] = None) -> List[Callable]:
+def normalize_options(options: Optional[Union[Options, Callable, Sequence]] = None) -> List[Callable]:
     """Normalize user options into a list of callables.
 
     Accepts a single :class:`Options`, a single callable, a sequence of either,

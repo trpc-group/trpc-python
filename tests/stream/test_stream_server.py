@@ -25,7 +25,7 @@ from trpc_sdk.transport import TrpcServerStreamTransport
 def _options():
     opts = ServiceOption()
     opts.set_protocol("trpc")
-    opts.current_serialization_type = SerializationType.Noop
+    opts.current_serialization_type = SerializationType.NOOP
     opts.stream_transport = MagicMock()
     return opts
 

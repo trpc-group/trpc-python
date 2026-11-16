@@ -99,7 +99,6 @@ from ._process import PeerMainWorker
 from ._process import RpcTaskProcess
 from ._process import SeparateWorker
 from ._process import TaskProcess
-from ._switches import use_c_task
 from ._threadmodel import BaseReactor
 from ._threadmodel import HandlerThreadInfo
 from ._threadmodel import InlineReactor
@@ -161,5 +160,7 @@ __all__ = [
     "register_protocol_handle",
     "set_signal_handle",
     # Runtime feature switches
-    "use_c_task",
+    "run_server_signal_handle",
+    "create_worker",
+    "freeze_handler_thread_hooks",
 ]

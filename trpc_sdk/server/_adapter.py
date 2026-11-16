@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Options and listen-endpoint tables the worker reads at startup.
 
 :class:`TrpcServerAdapter` lives in the same process as the worker. It does
@@ -28,7 +27,6 @@ from __future__ import annotations
 
 import sys
 import threading
-from typing import TYPE_CHECKING
 from typing import Callable
 from typing import List
 from typing import Optional
@@ -41,8 +39,7 @@ from trpc_sdk.log import logger
 from trpc_sdk.runtime import ProcessInfo
 from trpc_sdk.runtime import WorkerInfo
 
-if TYPE_CHECKING:
-    from trpc_sdk.server import ServerOption
+from ._option import ServerOption
 
 
 class TrpcServerAdapter(BaseTrpcServerAdapter):

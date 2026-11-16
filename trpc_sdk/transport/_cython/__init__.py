@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Cython inner-IPC framing used across dispatcher / worker / task pipes."""
 
 from ._ipc_codec import InnerDatagramParser  # pyright: ignore[reportMissingModuleSource]

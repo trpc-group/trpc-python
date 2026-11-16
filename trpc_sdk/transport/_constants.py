@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Constants used by both halves of the transport package.
 
 The listen backlog lives in :data:`trpc_sdk.utils.DEFAULT_BACKLOG` next to
@@ -25,7 +24,7 @@ import struct
 from enum import IntEnum
 from enum import unique
 
-# Inner IPC frame: big-endian ushort magic + uint32 total length.
+# Inner IPC frame: big-endian uint16_t magic + uint32_t total length.
 INNER_MAGIC_VALUE = 1314
 FRAME_HEAD_LEN = struct.calcsize("!HI")
 

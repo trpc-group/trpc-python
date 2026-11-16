@@ -3,10 +3,9 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Async context managers wrapping an HTTP request coroutine.
 
-:class:`RequestContextManager` is what :class:`~trpc_sdk.http.Client`
+:class:`RequestContextManager` is what :class:`~trpc_sdk.http.HttpClient`
 returns from ``get`` / ``post`` / ``request``. ``async with`` awaits
 the request and :meth:`TrpcHttpResponse.release` on exit so the
 aiohttp response is closed.

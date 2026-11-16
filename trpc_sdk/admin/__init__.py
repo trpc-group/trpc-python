@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """tRPC-Python admin plugin.
 
 The package is split by responsibility:
@@ -38,7 +37,6 @@ from ._hooks import on_worker_starts
 from ._loglevel import get_log_level
 from ._loglevel import set_log_level
 from ._plugin import AdminPlugin
-
 
 __all__ = [
     "AdminPlugin",

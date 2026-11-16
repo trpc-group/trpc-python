@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Shared type definitions for the serialization package."""
 
 from __future__ import annotations
@@ -13,24 +12,6 @@ from dataclasses import field
 from typing import Any
 from typing import Dict
 from typing import Optional
-
-from ._constants import SerializationCode
-
-
-class SerializationType:
-    """ContentType codes, aligned with ``TrpcContentEncodeType`` in ``trpc.proto``.
-
-    ``Form`` / ``Wup`` are local codes; ``Unsupported`` is a skip sentinel.
-    """
-
-    PB = SerializationCode.PROTO
-    JCE = SerializationCode.JCE
-    JSON = SerializationCode.JSON
-    FlatBuffer = SerializationCode.FLATBUFFER
-    Noop = SerializationCode.NOOP_ENCODE
-    Unsupported = SerializationCode.UNSUPPORTED
-    Form = SerializationCode.FORM
-    Wup = SerializationCode.WUP
 
 
 @dataclass

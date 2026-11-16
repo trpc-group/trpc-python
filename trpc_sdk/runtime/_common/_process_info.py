@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Listen addresses, handlers, and IPC metadata shared by server processes."""
 
 from __future__ import annotations

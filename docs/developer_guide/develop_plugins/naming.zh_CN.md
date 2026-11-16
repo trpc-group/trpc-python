@@ -93,18 +93,18 @@ client:
 你可以通过代码修改进程内所有客户端的默认子插件：
 
 ```python
-from trpc_sdk.naming import set_default_circuitbreaker
+from trpc_sdk.naming import set_default_circuit_breaker
 from trpc_sdk.naming import set_default_discovery
 from trpc_sdk.naming import set_default_loadbalance
-from trpc_sdk.naming import set_default_servicerouter
+from trpc_sdk.naming import set_default_service_router
 
 set_default_discovery("static_discovery")
 set_default_loadbalance("RandomLB")
-set_default_circuitbreaker("NoopCB")
-set_default_servicerouter("NoopSR")
+set_default_circuit_breaker("NoopCB")
+set_default_service_router("NoopSR")
 ```
 
-也可以在 YAML 中针对单个客户端服务覆盖 `discovery`、`loadbalance` 和 `circuitbreaker`（注：YAML 客户端配置中没有 `servicerouter` 字段，服务路由需通过 `set_default_servicerouter` 或在调用时使用 `Options.set_service_router` 指定）：
+也可以在 YAML 中针对单个客户端服务覆盖 `discovery`、`loadbalance` 和 `circuitbreaker`（注：YAML 客户端配置中没有 `servicerouter` 字段，服务路由需通过 `set_default_service_router` 或在调用时使用 `Options.set_service_router` 指定）：
 
 ```yaml
 client:

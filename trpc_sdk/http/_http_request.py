@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """HTTP client request-header record.
 
 :class:`HttpClientReqHeader` is the object stored on
@@ -32,14 +31,14 @@ class HttpClientReqHeader:
     """
 
     def __init__(
-            self,
-            method: str = hdrs.METH_GET,
-            host: str = "",
-            headers: Optional[dict] = None,
-            stream: bool = False,
-            scheme: str = HTTP,
-            parsed_url: Optional[ParseResult] = None,
-            url_parser: Optional[UrlParser] = None,
+        self,
+        method: str = hdrs.METH_GET,
+        host: str = "",
+        headers: Optional[dict] = None,
+        stream: bool = False,
+        scheme: str = HTTP,
+        parsed_url: Optional[ParseResult] = None,
+        url_parser: Optional[UrlParser] = None,
     ) -> None:
         self.method = method
         self.host = host  # not read by transport; Host is filled from parsed_url / selector addr

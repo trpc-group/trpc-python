@@ -50,7 +50,7 @@ def _request() -> bytes:
     msg.set_callee_service_name("trpc.test.Greeter")
     msg.set_caller_service_name("trpc.test.Caller")
     msg.set_timeout(1000)
-    msg.set_serialization_type(SerializationType.Noop)
+    msg.set_serialization_type(SerializationType.NOOP)
     msg.set_compress_type(0)
     return TrpcClientCodec().encode_data(ctx, b"hello")
 

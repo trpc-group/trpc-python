@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """HTTP client with tRPC filters, naming and a plain HTTP API.
 
 :class:`Client` wraps :class:`trpc_sdk.client.Client` so ``get`` / ``post``
@@ -19,7 +18,8 @@ from urllib.parse import ParseResult
 from aiohttp import hdrs
 
 from trpc_sdk.abc import clone_client_message
-from trpc_sdk.client import Client as TrpcClient
+from trpc_sdk.client import TrpcClient
+
 from ._constants import HTTP_ARG_STREAM_KEY
 from ._constants import HTTP_ARGS_META_KEY
 from ._ctx_manager import RequestContextManager
@@ -31,7 +31,7 @@ from ._options import get_options
 from ._types import UrlParser
 
 
-class Client:
+class HttpClient:
     """HTTP client that reuses tRPC filters, naming and invoke.
 
     ``get`` / ``post`` / ``request`` return an async context manager that
@@ -67,14 +67,14 @@ class Client:
         return ctx, msg
 
     def post(
-            self,
-            ctx,
-            url: str,
-            options=None,
-            *,
-            data: Any = None,
-            headers: Any = None,
-            **kwargs: Any,
+        self,
+        ctx,
+        url: str,
+        options=None,
+        *,
+        data: Any = None,
+        headers: Any = None,
+        **kwargs: Any,
     ) -> RequestContextManager:
         """Send an HTTP POST.
 
@@ -108,15 +108,15 @@ class Client:
         return RequestContextManager(self._request(ctx, hdrs.METH_GET, url, options, headers=headers, **kwargs))
 
     def request(
-            self,
-            ctx,
-            method,
-            url,
-            options=None,
-            *,
-            data: Any = None,
-            headers: Any = None,
-            **kwargs: Any,
+        self,
+        ctx,
+        method,
+        url,
+        options=None,
+        *,
+        data: Any = None,
+        headers: Any = None,
+        **kwargs: Any,
     ) -> RequestContextManager:
         """Send an HTTP request with an arbitrary method.
 
@@ -132,19 +132,18 @@ class Client:
         Returns:
             Async context manager yielding a :class:`TrpcHttpResponse`.
         """
-        return RequestContextManager(
-            self._request(ctx, method, url, options, data=data, headers=headers, **kwargs))
+        return RequestContextManager(self._request(ctx, method, url, options, data=data, headers=headers, **kwargs))
 
     async def _request(
-            self,
-            ctx,
-            method,
-            url,
-            options=None,
-            *,
-            data: Any = None,
-            headers: Any = None,
-            **kwargs: Any,
+        self,
+        ctx,
+        method,
+        url,
+        options=None,
+        *,
+        data: Any = None,
+        headers: Any = None,
+        **kwargs: Any,
     ) -> TrpcHttpResponse:
         """Parse the URL, invoke, and wrap ``client_rsp_head`` as :class:`TrpcHttpResponse`.
 

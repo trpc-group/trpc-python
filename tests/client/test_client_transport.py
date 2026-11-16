@@ -16,7 +16,7 @@ from trpc_sdk.exceptions import ClientTimeoutError
 from trpc_sdk.exceptions import ServerSystemError
 from trpc_sdk.transport import ClientTransport
 from trpc_sdk.transport import RoundTripOptions
-from trpc_sdk.transport._client._client_transport_tcp import tcp_round_trip
+from trpc_sdk.transport._client._tcp_round_trip import tcp_round_trip
 from trpc_sdk.utils import now_ms
 
 
@@ -98,7 +98,7 @@ async def test_client_transport_with_tcp(monkeypatch):
         raise ConnectionRefusedError(111, "Connection refused")
 
     monkeypatch.setattr(
-        "trpc_sdk.transport._client._client_transport_tcp.get_pool_connection",
+        "trpc_sdk.transport._client._tcp_round_trip.get_pool_connection",
         _refused,
     )
     client_transport = ClientTransport()
@@ -231,7 +231,7 @@ async def test_client_transport(monkeypatch):
         return fake
 
     monkeypatch.setattr(
-        "trpc_sdk.transport._client._client_transport_tcp.get_pool_connection",
+        "trpc_sdk.transport._client._tcp_round_trip.get_pool_connection",
         _get_conn,
     )
     options = RoundTripOptions()
@@ -254,7 +254,7 @@ async def test_client_transport(monkeypatch):
         return udp
 
     monkeypatch.setattr(
-        "trpc_sdk.transport._client._client_transport_udp.open_datagram_endpoint",
+        "trpc_sdk.transport._client._udp_round_trip.open_datagram_endpoint",
         _open,
     )
     options.set_network("udp")
@@ -272,7 +272,7 @@ async def test_tcp_round_trip_records_rpcz_timestamps(monkeypatch):
         return fake
 
     monkeypatch.setattr(
-        "trpc_sdk.transport._client._client_transport_tcp.get_pool_connection",
+        "trpc_sdk.transport._client._tcp_round_trip.get_pool_connection",
         _get_conn,
     )
     ctx, msg = _context()

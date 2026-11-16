@@ -3,12 +3,12 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Metrics extension interfaces and shared report models.
 
 This module defines statistics policies, call-dimension payloads, and the
 abstract metrics reporter used by pluggable monitoring backends.
 """
+
 from __future__ import annotations
 
 from abc import abstractmethod

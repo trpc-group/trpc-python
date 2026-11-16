@@ -3,12 +3,11 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """HTTP client response wrappers.
 
 :class:`HttpClientRspHeader` is the raw status/headers/body the
 transport stores on ``TrpcMessage.client_rsp_head``. :class:`TrpcHttpResponse`
-is the user-facing wrapper returned by :class:`~trpc_sdk.http.Client`.
+is the user-facing wrapper returned by :class:`~trpc_sdk.http.HttpClient`.
 """
 
 from __future__ import annotations
@@ -31,11 +30,11 @@ class HttpClientRspHeader:
     """
 
     def __init__(
-            self,
-            code: int,
-            headers: CIMultiDictProxy,
-            body: Union[ClientResponse, bytes],
-            stream: bool = False,
+        self,
+        code: int,
+        headers: CIMultiDictProxy,
+        body: Union[ClientResponse, bytes],
+        stream: bool = False,
     ) -> None:
         self.status_code = code
         self.headers = headers  # aiohttp CIMultiDictProxy; lookups are case-insensitive
@@ -52,7 +51,7 @@ class HttpClientRspHeader:
 
 
 class TrpcHttpResponse:
-    """User-facing HTTP response returned by :class:`~trpc_sdk.http.Client`.
+    """User-facing HTTP response returned by :class:`~trpc_sdk.http.HttpClient`.
 
     Parsing helpers (``json`` / ``pb`` / ``text`` / ``stream_data``)
     delegate to the wrapped :class:`HttpClientRspHeader`. :meth:`release`

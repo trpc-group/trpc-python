@@ -20,7 +20,7 @@ cdef class TCPConnection:
         public object aio_connection   # asyncio.Transport; None until connection_made.
         public object parser           # Per-connection frame splitter from parser.create().
         public object shared_pool      # SharedHandlerPool (io_handle_type: separate), else None.
-        public object writer           # ConnWriter: from connection_made under shared_pool, else from the first stream frame.
+        public object writer           # ConnWriter: connection_made if shared_pool, else the first stream frame.
         readonly int session_id        # Process-unique, non-zero; assigned in connection_made.
         readonly bint has_streams      # Set by the first stream frame; close() then aborts the streams.
         readonly object stream_dispatcher  # StreamDispatcher of the service; None until the first stream frame.

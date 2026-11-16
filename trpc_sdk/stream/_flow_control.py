@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Credit-based flow control for one stream.
 
 :class:`SendControl` gates outgoing DATA until the peer's window has

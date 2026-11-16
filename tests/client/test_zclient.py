@@ -15,7 +15,7 @@ import pytest
 from examples.helloworld.stub.trpc_trpc_python_group_helloworld import helloworld_pb2
 from tests.common_util import unused_port
 from trpc_sdk.abc import TrpcContext
-from trpc_sdk.client import Client
+from trpc_sdk.client import TrpcClient
 from trpc_sdk.client import Options
 from trpc_sdk.codec import create_message
 from trpc_sdk.config import ClientServiceConfig
@@ -62,7 +62,7 @@ class TestClient:
         req = helloworld_pb2.HelloRequest()
         req.msg = 'hello'
         rsp_cls = helloworld_pb2.HelloReply
-        cli = Client()
+        cli = TrpcClient()
 
         with pytest.raises(Exception, match="empty service_name"):
             cli.invoke_sync(ctx, req, rsp_cls, Options())

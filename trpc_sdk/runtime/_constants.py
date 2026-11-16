@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Constants for the tRPC-Python runtime (process and thread model)."""
 
 from __future__ import annotations

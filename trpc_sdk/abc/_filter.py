@@ -3,12 +3,12 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Filter extension interfaces.
 
 This module defines the abstract contracts and shared result types used by
 pluggable filters that intercept unary and streaming RPC call chains.
 """
+
 from __future__ import annotations
 
 from abc import abstractmethod

@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Service table and the startup order that turns this process into a worker.
 
 :class:`Server` is the object application code holds after :func:`create_server`.
@@ -58,6 +57,7 @@ from trpc_sdk.transport import TrpcServerTransport
 from trpc_sdk.transport import get_server_transport
 from trpc_sdk.utils import find_free_port
 from trpc_sdk.utils import get_async_lib
+
 from ._adapter import TrpcServerAdapter
 from ._option import ServerOption
 from ._option import ServiceOption
@@ -136,8 +136,9 @@ class Server(BaseServer):
         """
         for desc in list(service_desc.methods or ()) + list(service_desc.streams or ()):
             if not _is_coroutine_handler(desc.impl_func):
-                logger.warning("handler %s is not 'async def'; it runs as a task on a serving loop "
-                               "and the framework keeps no thread pool for blocking handlers", desc.name)
+                logger.warning(
+                    "handler %s is not 'async def'; it runs as a task on a serving loop "
+                    "and the framework keeps no thread pool for blocking handlers", desc.name)
         for service_adapter in self.service_adapters.values():
             service_adapter.register(service_desc, fix_rpc_name)
 

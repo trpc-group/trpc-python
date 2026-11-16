@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Unix timestamps used by RPCZ, the client, and transport timeouts.
 
 :func:`now_us` and :func:`now_ms` are bound at import time. When

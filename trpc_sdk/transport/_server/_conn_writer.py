@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Write-back handle that answers on a connection's transport from any thread.
 
 An asyncio transport may only be touched from the loop that created it.

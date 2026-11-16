@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Connected UDP endpoint used by the client UDP round trip.
 
 :func:`open_datagram_endpoint` builds a remote-addr-connected datagram

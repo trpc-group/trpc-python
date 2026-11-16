@@ -3,16 +3,17 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Client-side extension interfaces.
 
 This module defines the abstract contracts for unary RPC clients, application
 streams, and stream transports used by pluggable client implementations.
 """
+
 from __future__ import annotations
 
 from abc import ABC
 from abc import abstractmethod
+from dataclasses import dataclass
 from typing import Any
 from typing import List
 
@@ -42,6 +43,17 @@ class BaseClient(ABC):
             Decoded application response object.
         """
         ...
+
+
+@dataclass
+class ClientStreamDesc:
+    """Describes one client-side streaming method.
+
+    Attributes:
+        name: RPC name written onto the INIT / DATA frames.
+    """
+
+    name: str = ""
 
 
 class BaseClientStream(ABC):

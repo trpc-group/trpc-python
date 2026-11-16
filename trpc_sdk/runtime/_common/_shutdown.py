@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """The exit template every serving process shares.
 
 Every role — the merge worker, the separate-mode I/O process, its rpc tasks,
@@ -59,6 +58,7 @@ from typing import List
 from typing import Optional
 
 from trpc_sdk.log import logger
+
 from ._signals import run_worker_signal_handle
 from .._constants import CHILD_EXIT_GRACE_SECONDS
 from .._constants import CHILD_EXIT_POLL_INTERVAL
@@ -300,7 +300,7 @@ class WorkerExit:
         """
         if self._exit_killer is not None:
             return
-        killer = threading.Timer(PARENT_EXIT_GRACE_SECONDS, os._exit, args=(1,))
+        killer = threading.Timer(PARENT_EXIT_GRACE_SECONDS, os._exit, args=(1, ))
         killer.daemon = True
         killer.start()
         self._exit_killer = killer

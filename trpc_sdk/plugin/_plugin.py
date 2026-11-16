@@ -72,8 +72,7 @@ class _PluginManager:
         self._plugin_specs[plugin_type] = ordered_dict
 
     def register(self, plugin_spec: PluginSpec):
-        """
-        Register plugin
+        """Register plugin.
 
         Args:
             plugin_spec: plugin specification
@@ -81,8 +80,7 @@ class _PluginManager:
         self._plugin_specs[plugin_spec.plugin_type][plugin_spec.plugin_name] = plugin_spec
 
     def get_plugin_spec(self, plugin_type: PluginType, plugin_name: str) -> Optional[PluginSpec]:
-        """
-        Get plugin specification by plugin type and plugin name
+        """Get plugin specification by plugin type and plugin name.
 
         Args:
             plugin_type: plugin type
@@ -93,8 +91,7 @@ class _PluginManager:
         return self._plugin_specs[plugin_type].get(plugin_name, None)
 
     def find_instance(self, plugin_type: PluginType, plugin_name: str) -> bool:
-        """
-        Check if plugin instance exists by plugin type and plugin name
+        """Check if plugin instance exists by plugin type and plugin name.
 
         Args:
             plugin_type: plugin type
@@ -105,8 +102,7 @@ class _PluginManager:
         return plugin_type in self._plugin_instances and plugin_name in self._plugin_instances[plugin_type]
 
     def get_instance(self, plugin_type: PluginType, plugin_name: str) -> Optional[object]:
-        """
-        Get plugin instance by plugin type and plugin name
+        """Get plugin instance by plugin type and plugin name.
 
         Args:
             plugin_type: plugin type
@@ -117,8 +113,7 @@ class _PluginManager:
         return self._plugin_instances[plugin_type].get(plugin_name, None)
 
     def set_instance(self, plugin_type: PluginType, plugin_name: str, instance: object) -> None:
-        """
-        Set plugin instance
+        """Set plugin instance.
 
         The slot is keyed by the registered type and name rather than by
         the instance, because not every registered object is a
@@ -133,8 +128,7 @@ class _PluginManager:
         self._plugin_instances[plugin_type][plugin_name] = instance
 
     def remove_plugin_spec(self, plugin_spec: PluginSpec) -> None:
-        """
-        Remove plugin specification
+        """Remove plugin specification.
 
         Args:
             plugin_spec: plugin specification

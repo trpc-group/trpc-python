@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Default client transport plugin.
 
 Importing this module registers :class:`ClientTransport` as
@@ -14,13 +13,13 @@ imports it eagerly so the slot is filled as soon as
 Unary calls go through :meth:`ClientTransport.round_trip`, which picks
 TCP or UDP from :class:`RoundTripOptions`.
 Streaming calls never use ``round_trip``: :meth:`ClientTransport.start`
-takes a pooled connection, stores a :class:`ClientConn` under the
+takes a pooled connection, stores a :class:`ClientStreamConn` under the
 message ``stream_id``, and later :meth:`send` / :meth:`recv` /
 :meth:`close` look that conn up.
 
-The TCP / UDP helpers live in ``_client_transport_tcp`` and
-``_client_transport_udp``. :class:`ClientConn` lives in
-``_client_transport_stream``.
+The TCP / UDP helpers live in ``_tcp_round_trip`` and
+``_udp_round_trip``. :class:`ClientStreamConn` lives in
+``_client_stream_conn``.
 """
 
 from __future__ import annotations
@@ -34,11 +33,11 @@ from trpc_sdk.abc import TrpcContext
 from trpc_sdk.exceptions import ServerSystemError
 from trpc_sdk.plugin import get_plugin
 from trpc_sdk.plugin import register_plugin
-from .._pool import get_pool_connection
-from ._client_transport_stream import ClientConn as ClientStreamConn
-from ._client_transport_tcp import get_remain_time
-from ._client_transport_tcp import tcp_round_trip
-from ._client_transport_udp import udp_round_trip
+from ._pool import get_pool_connection
+from ._client_stream_conn import ClientStreamConn
+from ._tcp_round_trip import get_remain_time
+from ._tcp_round_trip import tcp_round_trip
+from ._udp_round_trip import udp_round_trip
 from ._options import RoundTripOptions
 
 
@@ -48,7 +47,7 @@ class ClientTransport(BaseClientStreamTransport):
 
     Unary and stream paths share this class but not the same state.
     ``round_trip`` never reads :attr:`stream_id_to_conn`. The stream
-    methods only talk to the :class:`ClientConn` stored there.
+    methods only talk to the :class:`ClientStreamConn` stored there.
 
     Attributes:
         stream_id_to_conn: Live stream connections keyed by the tRPC
@@ -69,7 +68,7 @@ class ClientTransport(BaseClientStreamTransport):
 
         Branch is ``options.network``:
 
-        - ``tcp``: :func:`tcp_round_trip` (pooled one-shot;
+        - ``tcp``: :func:`tcp_round_trip` (connection one-shot;
           ``close()`` in ``finally`` returns the conn to the pool)
         - ``udp``: :func:`udp_round_trip`
 
@@ -94,7 +93,7 @@ class ClientTransport(BaseClientStreamTransport):
         raise ValueError(f"error network type {options.network}")
 
     def send(self, ctx: TrpcContext, req_data: bytes, _):
-        """Write one stream frame on the conn stored by :meth:`start`.
+        """Write one stream frame on the connection stored by :meth:`start`.
 
         Lookup is by ``ctx``'s client-message ``stream_id``, not by
         ``options``. The ABC still passes options; this method ignores

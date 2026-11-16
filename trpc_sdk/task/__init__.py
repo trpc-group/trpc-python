@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """tRPC-Python task process module.
 
 A task is a child process the server forks before its event loop starts, so a

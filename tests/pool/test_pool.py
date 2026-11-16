@@ -25,11 +25,11 @@ from trpc_sdk.common import create_object_with_loop
 from trpc_sdk.config import SocketType
 from trpc_sdk.exceptions import ClientPoolClosedError
 from trpc_sdk.exceptions import ClientPoolLimitError
-from trpc_sdk.transport import ConnPoolOptions
-from trpc_sdk.transport import ConnectionPoolManager
-from trpc_sdk.transport import PooledConnection
+from trpc_sdk.transport import KeepLiveConnPoolOptions
+from trpc_sdk.transport import KeepLiveConnPoolManager
+from trpc_sdk.transport import Connection
 from trpc_sdk.transport import get_pool_connection
-from trpc_sdk.transport._pool import ConnectionPool
+from trpc_sdk.transport._client._pool import KeepLiveConnPool
 from trpc_sdk.utils import TcpState
 from trpc_sdk.utils import close_socket
 from trpc_sdk.utils import get_async_lib
@@ -190,7 +190,7 @@ class ThreadTcpServer:
             os.remove(self.addr[0])
 
 
-def _create_pool_options() -> Tuple[BaseClientTransportOption, ConnPoolOptions]:
+def _create_pool_options() -> Tuple[BaseClientTransportOption, KeepLiveConnPoolOptions]:
     """Create default connection pool options for testing
 
     Returns:
@@ -200,7 +200,7 @@ def _create_pool_options() -> Tuple[BaseClientTransportOption, ConnPoolOptions]:
     trans_opt.network = "tcp"
     trans_opt.socket_type = SocketType.UNIX
     trans_opt.address = ("./trpc_local", 0)
-    options = ConnPoolOptions(max_idle=2, max_active=10)
+    options = KeepLiveConnPoolOptions(max_idle=2, max_active=10)
     return trans_opt, options
 
 
@@ -233,7 +233,7 @@ class TestUnixConnectionPool:
         host, _port = options.address
         return await asyncio.open_unix_connection(host)
 
-    def new_pool(self, trans_opt: BaseClientTransportOption, options: ConnPoolOptions):
+    def new_pool(self, trans_opt: BaseClientTransportOption, options: KeepLiveConnPoolOptions):
         """Create new connection pool
 
         Args:
@@ -243,7 +243,7 @@ class TestUnixConnectionPool:
         Returns:
             New connection pool instance
         """
-        return ConnectionPool(self.dial, trans_opt=trans_opt, options=options)
+        return KeepLiveConnPool(self.dial, trans_opt=trans_opt, options=options)
 
     @pytest.mark.asyncio
     async def test_pool_get(self):
@@ -325,7 +325,7 @@ class TestConnectionPool:
         assert writer.get_extra_info("socket") is not None
         return reader, writer
 
-    def new_pool(self, trans_opt: BaseClientTransportOption, options: ConnPoolOptions) -> ConnectionPool:
+    def new_pool(self, trans_opt: BaseClientTransportOption, options: KeepLiveConnPoolOptions) -> KeepLiveConnPool:
         """Create new connection pool
 
         Args:
@@ -335,7 +335,7 @@ class TestConnectionPool:
         Returns:
             New connection pool instance
         """
-        return ConnectionPool(self.dial, trans_opt=trans_opt, options=options)
+        return KeepLiveConnPool(self.dial, trans_opt=trans_opt, options=options)
 
     @pytest.mark.asyncio
     async def test_pool_get(self):
@@ -503,8 +503,8 @@ class TestConnectionPool:
 
 def test_check_remote_error_close_wait(monkeypatch):
     """Test check_remote_error with socket in CLOSE_WAIT state"""
-    monkeypatch.setattr("trpc_sdk.transport._pool._pooled_connection.is_valid_socket", lambda _sock: True)
-    monkeypatch.setattr("trpc_sdk.transport._pool._pooled_connection.is_close_wait", lambda _sock: True)
+    monkeypatch.setattr("trpc_sdk.transport._client._pool._connection.is_valid_socket", lambda _sock: True)
+    monkeypatch.setattr("trpc_sdk.transport._client._pool._connection.is_close_wait", lambda _sock: True)
     reader = mock.MagicMock()
     writer = mock.MagicMock()
     sock = mock.MagicMock(spec=socket.socket)
@@ -516,12 +516,12 @@ def test_check_remote_error_close_wait(monkeypatch):
     writer.is_closing.return_value = False
     reader.at_eof.return_value = False
     reader._buffer = b""
-    pool_conn = PooledConnection(reader=reader,
-                                 writer=writer,
-                                 loop=mock.MagicMock(),
-                                 pool=mock.MagicMock(),
-                                 address=("127.0.0.1", 8080),
-                                 is_short=False)
+    pool_conn = Connection(reader=reader,
+                           writer=writer,
+                           loop=mock.MagicMock(),
+                           pool=mock.MagicMock(),
+                           address=("127.0.0.1", 8080),
+                           is_short=False)
 
     result = pool_conn.check_remote_error()
     assert result is True
@@ -570,7 +570,7 @@ class TestConnectionPoolWithSocket:
 
             # Test dial with Unix socket
             loop = asyncio.get_running_loop()
-            _reader, writer = await ConnectionPoolManager.dial(options=trans_opt, timeout=1.0, loop=loop)
+            _reader, writer = await KeepLiveConnPoolManager.dial(options=trans_opt, timeout=1.0, loop=loop)
 
             assert writer is not None
             assert writer.get_extra_info("socket") is not None
@@ -597,7 +597,7 @@ class TestConnectionPoolWithSocket:
 
         # Test dial with TCP socket
         loop = asyncio.get_running_loop()
-        _reader, writer = await ConnectionPoolManager.dial(options=trans_opt, timeout=1.0, loop=loop)
+        _reader, writer = await KeepLiveConnPoolManager.dial(options=trans_opt, timeout=1.0, loop=loop)
 
         assert writer is not None
         assert writer.get_extra_info("socket") is not None
@@ -607,7 +607,7 @@ class TestConnectionPoolWithSocket:
 
     @pytest.mark.asyncio
     async def test_pool_get_with_socket_address(self):
-        """Test ConnectionPoolManager.get with socket address (lines 383-395)"""
+        """Test KeepLiveConnPoolManager.get with socket address (lines 383-395)"""
         port = getattr(self, "port")
 
         # Create a TCP socket
@@ -622,7 +622,7 @@ class TestConnectionPoolWithSocket:
 
         # Create connection pool manager
         loop = asyncio.get_running_loop()
-        pool_mgr = ConnectionPoolManager(loop=loop)
+        pool_mgr = KeepLiveConnPoolManager(loop=loop)
 
         # Get connection from pool with socket
         conn = await pool_mgr.get(trans_opt, timeout=1.0)
@@ -641,7 +641,7 @@ class TestConnectionPoolWithSocket:
 
     @pytest.mark.asyncio
     async def test_pool_get_with_local_addr(self):
-        """Test ConnectionPoolManager.get with local_addr (lines 383-395)"""
+        """Test KeepLiveConnPoolManager.get with local_addr (lines 383-395)"""
         port = getattr(self, "port")
 
         # Create transport options with local_addr
@@ -652,7 +652,7 @@ class TestConnectionPoolWithSocket:
 
         # Create connection pool manager
         loop = asyncio.get_running_loop()
-        pool_mgr = ConnectionPoolManager(loop=loop)
+        pool_mgr = KeepLiveConnPoolManager(loop=loop)
 
         # Get connection from pool
         conn = await pool_mgr.get(trans_opt, timeout=1.0)
@@ -667,7 +667,7 @@ class TestConnectionPoolWithSocket:
 
     @pytest.mark.asyncio
     async def test_pool_get_without_local_addr(self):
-        """Test ConnectionPoolManager.get without local_addr (lines 383-395)"""
+        """Test KeepLiveConnPoolManager.get without local_addr (lines 383-395)"""
         port = getattr(self, "port")
 
         # Create transport options without local_addr
@@ -677,7 +677,7 @@ class TestConnectionPoolWithSocket:
 
         # Create connection pool manager
         loop = asyncio.get_running_loop()
-        pool_mgr = ConnectionPoolManager(loop=loop)
+        pool_mgr = KeepLiveConnPoolManager(loop=loop)
 
         # Get connection from pool
         conn = await pool_mgr.get(trans_opt, timeout=1.0)
@@ -702,7 +702,7 @@ class TestConnectionPoolWithSocket:
 
         # This test may fail if IPv6 is not available, so we catch the exception
         try:
-            _reader, writer = await ConnectionPoolManager.dial(options=trans_opt, timeout=1.0, loop=loop)
+            _reader, writer = await KeepLiveConnPoolManager.dial(options=trans_opt, timeout=1.0, loop=loop)
         except OSError as err:
             # IPv6 may not be available in test environment
             print(f"IPv6 test skipped: {err}")

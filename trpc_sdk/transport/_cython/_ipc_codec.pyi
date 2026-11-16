@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Type hints for the Cython inner-IPC codec.
 
 Production dispatcher / worker / task paths import these symbols from
@@ -22,7 +21,7 @@ _GLOBAL_MAX_IPC_SIZE: int
 class InnerStreamParser:
     """Split a byte stream into complete inner-IPC frames.
 
-    A frame is magic (ushort) plus total length (uint32) followed by the
+    A frame is magic (uint16_t) plus total length (uint32_t) followed by the
     payload. ``read`` returns every complete package currently buffered;
     an incomplete tail stays in the buffer across ``feeds_data``.
     """

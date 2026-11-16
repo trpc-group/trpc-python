@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Plugin lookups and body compress helpers.
 
 ``get_compress`` is a thin plugin-table lookup. Built-in compressors

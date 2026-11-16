@@ -17,20 +17,20 @@ def test_serialization():
     # unsupported
     body = helloworld_pb2.HelloRequest()
     body.msg = 'test'
-    assert serialize(SerializationType.Unsupported, body) == b''
+    assert serialize(SerializationType.UNSUPPORTED, body) == b''
 
     body = helloworld_pb2.HelloRequest()
     data = b'\n\x04test'
-    assert deserialize(SerializationType.Unsupported, data, body) is None
+    assert deserialize(SerializationType.UNSUPPORTED, data, body) is None
 
     # Noop
     body = Body()
     body.data = b'test'
-    assert serialize(SerializationType.Noop, body) == b'test'
+    assert serialize(SerializationType.NOOP, body) == b'test'
 
     body = Body()
     data = b'\n\x04test'
-    assert deserialize(SerializationType.Noop, data, body) is None
+    assert deserialize(SerializationType.NOOP, data, body) is None
     assert body.data == data
 
     # body or data empty

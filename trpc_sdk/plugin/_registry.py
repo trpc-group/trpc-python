@@ -16,9 +16,9 @@ from trpc_sdk.abc import BasePlugin
 from trpc_sdk.abc import PluginInitPos
 from trpc_sdk.abc import PluginType
 from trpc_sdk.abc import TaskInfo
+
 from ._plugin import DEFAULT_PLUGIN_MANAGER
 from ._plugin import PluginSpec
-
 
 PluginFactoryType = TypeVar("PluginFactoryType", bound=Callable[[], object])
 """Anything ``register_plugin`` accepts: a plugin class or a factory."""
@@ -31,8 +31,7 @@ def register_plugin(
     version: str = "",
     report: bool = False,
 ) -> Callable[[PluginFactoryType], PluginFactoryType]:
-    """
-    Register plugin decorator
+    """Register plugin decorator.
 
     The decorated object only has to be callable with no arguments. A
     :class:`~trpc_sdk.abc.BasePlugin` subclass is the common case and is
@@ -84,8 +83,7 @@ def register_task(task_name: str, task_info: TaskInfo):
 
 
 def get_plugin(plugin_type: PluginType, plugin_name: str) -> Optional[object]:
-    """
-    Get plugin, building it on first use if no eager pass covered it
+    """Get plugin, building it on first use if no eager pass covered it.
 
     Args:
         plugin_type: plugin type
@@ -116,8 +114,8 @@ def get_plugin(plugin_type: PluginType, plugin_name: str) -> Optional[object]:
 
 
 def get_plugin_class(plugin_type: PluginType, plugin_name: str) -> Optional[Callable[[], object]]:
-    """
-    Get plugin class
+    """Get plugin class.
+
     Args:
         plugin_type: plugin type
         plugin_name: plugin name

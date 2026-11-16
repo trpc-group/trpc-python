@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Resolution of the thread-model and process-model fields of :class:`ServerOption`.
 
 :func:`~trpc_sdk.server.create_server` first calls :func:`apply_process_model`,
@@ -41,7 +40,6 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import TYPE_CHECKING
 from typing import Dict
 from typing import List
 from typing import Optional
@@ -59,6 +57,7 @@ from trpc_sdk.runtime import MODE_SEPARATE
 from trpc_sdk.runtime import MODE_SPELLINGS
 from trpc_sdk.runtime import PROCESS_MODEL_MULTI
 from trpc_sdk.runtime import PROCESS_MODEL_SINGLE
+
 from ._constants import DEFAULT_HANDLE_THREAD_NUM
 from ._constants import DEFAULT_HANDLER_MAX_CONCURRENCY
 from ._constants import DEFAULT_HANDLER_QUEUE_SIZE
@@ -69,9 +68,7 @@ from ._constants import DEFAULT_TASK_NUM
 from ._constants import DEFAULT_WORKER_NUM
 from ._constants import THREADS_PER_CPU_WARN
 from ._constants import WORKERS_PER_CPU_WARN
-
-if TYPE_CHECKING:
-    from ._option import ServerOption
+from ._option import ServerOption
 
 # ``global.processmodel.io_handle_type`` spellings accepted under
 # ``multi_process`` only: there, merging I/O and handlers means peer mode.
@@ -173,8 +170,9 @@ def _apply_single_process(option: ServerOption, model: ProcessModel) -> None:
     if io_handle_type == IO_HANDLE_TYPE_MERGE:
         thread_num = model.handle_num or model.io_num
         if model.io_num and model.handle_num and model.io_num != model.handle_num:
-            logger.warning("global.processmodel: io_num=%s and handle_num=%s must be equal when io_handle_type is "
-                           "merge; using handle_num=%s", model.io_num, model.handle_num, model.handle_num)
+            logger.warning(
+                "global.processmodel: io_num=%s and handle_num=%s must be equal when io_handle_type is "
+                "merge; using handle_num=%s", model.io_num, model.handle_num, model.handle_num)
         option.io_thread_num = thread_num
         option.handle_thread_num = DEFAULT_HANDLE_THREAD_NUM
         return
@@ -206,8 +204,9 @@ def _apply_multi_process(option: ServerOption, model: ProcessModel) -> None:
     if io_handle_type == IO_HANDLE_TYPE_SEPARATE:
         option.mode = MODE_SEPARATE
         if model.io_num not in (0, 1):
-            logger.warning("global.processmodel: io_num=%s, but multi_process separate runs a single I/O process; "
-                           "using 1", model.io_num)
+            logger.warning(
+                "global.processmodel: io_num=%s, but multi_process separate runs a single I/O process; "
+                "using 1", model.io_num)
     else:
         option.mode = MODE_PEER
         if model.io_num:
@@ -242,8 +241,7 @@ def resolve_server_option(option: ServerOption, services: List[ServerService]) -
     elif option.mode == MODE_PEER:
         _resolve_peer_options(option)
     elif option.worker_num != DEFAULT_WORKER_NUM:
-        logger.warning("ServerOption.worker_num=%s is only read in separate and peer mode; ignored",
-                       option.worker_num)
+        logger.warning("ServerOption.worker_num=%s is only read in separate and peer mode; ignored", option.worker_num)
 
 
 def _canonical_name(value: str) -> str:
@@ -370,8 +368,9 @@ def _warn_if_oversized(field_name: str, value: int) -> None:
     """
     limit = THREADS_PER_CPU_WARN * (os.cpu_count() or 1)
     if value > limit:
-        logger.warning("global.processmodel.%s=%s is more than %s times the CPU count (%s); keeping it, but it is likely too many",
-                       field_name, value, THREADS_PER_CPU_WARN, os.cpu_count())
+        logger.warning(
+            "global.processmodel.%s=%s is more than %s times the CPU count (%s); keeping it, but it is likely too many",
+            field_name, value, THREADS_PER_CPU_WARN, os.cpu_count())
 
 
 def _resolve_ready_timeout(value: int, waits_for_startup: bool) -> int:
@@ -441,8 +440,9 @@ def _resolve_separate_options(option: ServerOption, services: List[ServerService
     _warn_single_rpc_task_on_macos(option.worker_num, services)
     if (option.handler_max_concurrency != DEFAULT_HANDLER_MAX_CONCURRENCY
             or option.handler_queue_size != DEFAULT_HANDLER_QUEUE_SIZE):
-        logger.warning("server.handler_max_concurrency / handler_queue_size are not supported in separate mode yet "
-                       "and are ignored (got %s / %s)", option.handler_max_concurrency, option.handler_queue_size)
+        logger.warning(
+            "server.handler_max_concurrency / handler_queue_size are not supported in separate mode yet "
+            "and are ignored (got %s / %s)", option.handler_max_concurrency, option.handler_queue_size)
     if option.tcp_reuse_port:
         logger.info("server.tcp_reuse_port is on: several processes may bind the same TCP port at once")
 
@@ -464,8 +464,9 @@ def _resolve_worker_num(value: int) -> int:
         logger.warning("global.processmodel.handle_num=%s is negative; using %s", value, default)
         return default
     if value > WORKERS_PER_CPU_WARN * default:
-        logger.warning("global.processmodel.handle_num=%s is more than %s times the CPU count (%s); keeping it, "
-                       "but that many processes is likely too many", value, WORKERS_PER_CPU_WARN, default)
+        logger.warning(
+            "global.processmodel.handle_num=%s is more than %s times the CPU count (%s); keeping it, "
+            "but that many processes is likely too many", value, WORKERS_PER_CPU_WARN, default)
     return value
 
 
@@ -483,11 +484,14 @@ def _warn_single_rpc_task_on_macos(rpc_task_num: int, services: List[ServerServi
     """
     if sys.platform != "darwin" or rpc_task_num <= 1:
         return
-    self_bound = [service.name for service in services
-                  if "tcp" not in service.network or "http" in service.protocol or "sse" in service.protocol]
+    self_bound = [
+        service.name for service in services
+        if "tcp" not in service.network or "http" in service.protocol or "sse" in service.protocol
+    ]
     if self_bound:
-        logger.warning("global.processmodel.handle_num=%s on macOS: services %s are bound by each rpc task with SO_REUSEPORT, "
-                       "which macOS does not balance, so one rpc task will handle them", rpc_task_num, self_bound)
+        logger.warning(
+            "global.processmodel.handle_num=%s on macOS: services %s are bound by each rpc task with SO_REUSEPORT, "
+            "which macOS does not balance, so one rpc task will handle them", rpc_task_num, self_bound)
 
 
 def _resolve_peer_options(option: ServerOption) -> None:
@@ -506,5 +510,6 @@ def _resolve_peer_options(option: ServerOption) -> None:
         logger.warning("global.processmodel.handle_num=1 in peer mode: a single worker, i.e. merge mode with a "
                        "supervisor around it")
     if sys.platform == "darwin" and value > 1:
-        logger.warning("global.processmodel.handle_num=%s on macOS: SO_REUSEPORT does not balance load there, "
-                       "so in practice one peer worker handles every request", value)
+        logger.warning(
+            "global.processmodel.handle_num=%s on macOS: SO_REUSEPORT does not balance load there, "
+            "so in practice one peer worker handles every request", value)

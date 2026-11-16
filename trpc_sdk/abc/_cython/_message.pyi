@@ -10,7 +10,7 @@ from typing import Any
 class TrpcFrameHead:
     """Mutable tRPC transport frame header."""
 
-    stx: int
+    magic: int
     frame_type: int
     frame_state: int
     package_len: int
@@ -18,7 +18,7 @@ class TrpcFrameHead:
     stream_id: int
     frame_reserved: int
 
-    def set_stx(self, stx: int) -> None: ...
+    def set_magic(self, magic: int) -> None: ...
     def set_frame_type(self, frame_type: int) -> None: ...
     def set_frame_state(self, frame_state: int) -> None: ...
     def set_package_len(self, package_len: int) -> None: ...

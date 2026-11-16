@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Dispatcher-side worker selection.
 
 After the dispatcher splits a complete frame, it must choose which worker IPC
@@ -117,8 +116,9 @@ def select_rpc_task(schedule: SchedulerParams, alive: Sequence[bool]) -> Optiona
             return picked
         if not _warned_bad_hook_index:
             _warned_bad_hook_index = True
-            logger.warning("[scheduler] custom scheduler returned %r, which is not a live rpc task in [0, %s); "
-                           "falling back to round-robin (reported once)", picked, count)
+            logger.warning(
+                "[scheduler] custom scheduler returned %r, which is not a live rpc task in [0, %s); "
+                "falling back to round-robin (reported once)", picked, count)
 
     for _ in range(count):
         index = _default_dispatcher_worker(schedule)
@@ -127,9 +127,8 @@ def select_rpc_task(schedule: SchedulerParams, alive: Sequence[bool]) -> Optiona
     return None
 
 
-def register_dispatcher_worker_func(
-        dispatcher_worker: Optional[Callable[[SchedulerParams], int]],
-        is_scheduler: bool = False) -> None:
+def register_dispatcher_worker_func(dispatcher_worker: Optional[Callable[[SchedulerParams], int]],
+                                    is_scheduler: bool = False) -> None:
     """Install or clear a custom unary worker-selection hook.
 
     Passing ``None`` clears that hook. Streaming frames ignore both hooks.

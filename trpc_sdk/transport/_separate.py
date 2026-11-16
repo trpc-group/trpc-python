@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """asyncio protocols for both ends of the separate-mode IPC pipes.
 
 The I/O process (``app`` is its :class:`~trpc_sdk.runtime.SeparateWorker`)
@@ -232,8 +231,7 @@ class SeparateClientConnection(asyncio.Protocol):
                 report_attr("trpc_dispatcher_worker_conn_closed", 1)
                 logger.warning("[dispatcher] pipe to rpc task %s is closed; frame dropped", index)
                 continue
-            worker_conn.write(inner_encode_req(self.fd, self.index, self.session_id, now_ms(), self.addr_info,
-                                               package))
+            worker_conn.write(inner_encode_req(self.fd, self.index, self.session_id, now_ms(), self.addr_info, package))
 
     def data_received(self, data: bytes) -> None:
         """Feed upstream bytes into the parser and forward complete frames.

@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Processes the worker forks: task children, and ``separate`` / ``peer`` mode.
 
 Task children are the batch and inference processes a worker forks before it

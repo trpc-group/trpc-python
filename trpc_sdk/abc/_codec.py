@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Pure-Python contracts for compression, serialization, and the task body codec.
 
 These interfaces are distinct from the Cython context-first protocol

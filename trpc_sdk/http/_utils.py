@@ -3,95 +3,159 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
+"""HTTP request/response accessors on :class:`~trpc_sdk.abc.TrpcContext`.
 
-"""Dict lookup helpers and URL small tools used by the HTTP package.
-
-:func:`reverse_dict` and :func:`find_from_dict` exist so the content-type,
-content-encoding and HTTP-status tables in :mod:`trpc_sdk.http._types` can
-be inverted and queried without repeating the same two functions.
-:func:`check_url` and :func:`get_host` operate on an already-parsed
-:class:`~urllib.parse.ParseResult`.
+Handlers use these functions to reach the aiohttp ``Request`` /
+``Response`` held on a context's message, and the HTTP client uses them to
+pull status and headers off a :class:`~trpc_sdk.http.TrpcHttpResponse`.
+Extra response headers and accepted status codes travel through
+dedicated meta keys so codec encode can merge them after the user
+handler returns.
 """
 
 from __future__ import annotations
 
-from typing import Mapping
-from typing import Optional
-from typing import TypeVar
-from urllib.parse import ParseResult
+from typing import Dict
+from typing import Set
+
+from aiohttp.web_request import CIMultiDictProxy
+from aiohttp.web_request import Request
+from aiohttp.web_response import Response
+
+from trpc_sdk.abc import TrpcContext
+from trpc_sdk.abc import get_message
+from ._constants import HTTP_RSP_HEADER_KEY
+from ._constants import HTTP_RSP_OK_CODE_KEY
+from ._http_response import TrpcHttpResponse
 
 
-_KT = TypeVar("_KT")
-_VT = TypeVar("_VT")
-
-
-def reverse_dict(origin: Mapping[_KT, _VT]) -> Mapping[_VT, _KT]:
-    """Return a new mapping with keys and values swapped.
-
-    Duplicate values keep the last key that mapped to them, matching
-    the historical ``defines._reverse_dict`` behaviour. That is why
-    ``application/protobuf`` (and not ``application/x-protobuf``) is
-    the content type returned for :attr:`~trpc_sdk.serialization.SerializationType.PB`.
-
-    Args:
-        origin: Mapping to invert.
-
-    Returns:
-        A new mapping from values to keys.
-    """
-    reversed_map: dict[_VT, _KT] = {}
-    for key, value in origin.items():
-        reversed_map[value] = key
-    return reversed_map
-
-
-def find_from_dict(
-        origin: Mapping[_KT, _VT],
-        key: _KT,
-        default: Optional[_VT] = None,
-) -> Optional[_VT]:
-    """Look ``key`` up in ``origin``, returning ``default`` if missing.
-
-    The HTTP lookup helpers in :mod:`trpc_sdk.http._types` bind ``origin``
-    with :func:`functools.partial`, so callers pass only ``key`` and
-    an optional ``default``.
+def get_http_request(ctx: TrpcContext) -> Request:
+    """Return the aiohttp request stored on ``ctx``'s message.
 
     Args:
-        origin: Mapping to search.
-        key: Key to look up.
-        default: Value returned when ``key`` is absent.
+        ctx: Server-side tRPC context of an HTTP call.
 
     Returns:
-        The mapped value, or ``default``.
+        The aiohttp ``Request`` held as ``message.server_raw_req``, or
+        None outside an HTTP server call.
     """
-    return origin.get(key, default)
+    return get_message(ctx).server_raw_req
 
 
-def check_url(url: ParseResult) -> bool:
-    """Return whether ``url`` has both scheme and netloc.
-
-    Kept so existing subclasses that imported this helper keep working.
+def get_http_response(ctx: TrpcContext) -> Response:
+    """Return the aiohttp response stored on ``ctx``'s message.
 
     Args:
-        url: Already-parsed URL.
+        ctx: Server-side tRPC context of an HTTP call.
 
     Returns:
-        ``True`` when both fields are non-empty.
+        The aiohttp ``Response`` held as ``message.server_raw_rsp``, or
+        None outside an HTTP server call.
     """
-    return url.scheme != "" and url.netloc != ""
+    return get_message(ctx).server_raw_rsp
 
 
-def get_host(url: ParseResult) -> str:
-    """Return ``hostname:port`` when a port is set, else ``hostname``.
-
-    Kept so existing subclasses that imported this helper keep working.
+def get_http_header_in_client(rsp: TrpcHttpResponse) -> CIMultiDictProxy:
+    """Return HTTP headers from a client response.
 
     Args:
-        url: Already-parsed URL.
+        rsp: Client response wrapper.
 
     Returns:
-        Host string suitable for a ``Host`` header.
+        Case-insensitive multi-dict of response headers.
     """
-    if url.port:
-        return f"{url.hostname}:{url.port}"
-    return url.hostname
+    return rsp.header
+
+
+def get_http_status_in_client(rsp: TrpcHttpResponse) -> int:
+    """Return the HTTP status code from a client response.
+
+    Args:
+        rsp: Client response wrapper.
+
+    Returns:
+        HTTP status code.
+    """
+    return rsp.status
+
+
+def set_http_rsp_header(ctx: TrpcContext, header: Dict) -> None:
+    """Store extra response headers on ``ctx`` for later merge.
+
+    Args:
+        ctx: tRPC context.
+        header: Headers the handler wants on the HTTP response.
+    """
+    ctx.with_meta_data(HTTP_RSP_HEADER_KEY, header)
+
+
+def get_http_rsp_header(ctx: TrpcContext) -> Dict:
+    """Return extra response headers previously stored on ``ctx``.
+
+    Args:
+        ctx: tRPC context.
+
+    Returns:
+        Header dict, or ``{}`` if none was set.
+    """
+    return ctx.get_meta_data(HTTP_RSP_HEADER_KEY, {})
+
+
+def pop_http_rsp_header(ctx: TrpcContext) -> Dict:
+    """Pop extra response headers off ``ctx``.
+
+    :class:`~trpc_sdk.http.HttpServerTransport` calls this after the handler
+    returns so the extra headers can be merged into the aiohttp
+    response exactly once.
+
+    Args:
+        ctx: tRPC context.
+
+    Returns:
+        Header dict, or ``{}`` if none was set.
+    """
+    header = {}
+    if HTTP_RSP_HEADER_KEY in ctx.meta_data:
+        header = ctx.pop_meta_data(HTTP_RSP_HEADER_KEY)
+    return header
+
+
+def set_http_ok_codes(ctx: TrpcContext, ok_codes: Set) -> None:
+    """Store the set of HTTP status codes the client treats as success.
+
+    Args:
+        ctx: tRPC context.
+        ok_codes: Status codes that should not become a client error.
+    """
+    ctx.with_meta_data(HTTP_RSP_OK_CODE_KEY, ok_codes)
+
+
+def get_http_ok_codes(ctx: TrpcContext) -> Set:
+    """Return the accepted HTTP status codes stored on ``ctx``.
+
+    Args:
+        ctx: tRPC context.
+
+    Returns:
+        Set of status codes, or ``set()`` if none was set.
+    """
+    return ctx.get_meta_data(HTTP_RSP_OK_CODE_KEY, set())
+
+
+def pop_http_ok_codes(ctx: TrpcContext) -> Set:
+    """Pop the accepted HTTP status codes off ``ctx``.
+
+    :class:`~trpc_sdk.http.HttpClientCodec` calls this during decode so a
+    non-OK HTTP status can be turned into a client-side error unless the
+    caller listed it as acceptable.
+
+    Args:
+        ctx: tRPC context.
+
+    Returns:
+        Set of status codes, or ``set()`` if none was set.
+    """
+    err_code = set()
+    if HTTP_RSP_OK_CODE_KEY in ctx.meta_data:
+        err_code = ctx.pop_meta_data(HTTP_RSP_OK_CODE_KEY)
+    return err_code

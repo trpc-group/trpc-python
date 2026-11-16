@@ -101,7 +101,7 @@ async def test_invoke_empty_codec_raises_encode_error(monkeypatch):
     opts = _prepare_invoke(monkeypatch, codec=None)
 
     with pytest.raises(ClientEncodeError, match="client codec empty"):
-        await client_mod.Client().invoke(_Context(), object(), SimpleNamespace, [])
+        await client_mod.TrpcClient().invoke(_Context(), object(), SimpleNamespace, [])
 
     opts.selector.report.assert_awaited_once()
 
@@ -111,7 +111,7 @@ async def test_invoke_timeout_is_wrapped(monkeypatch):
     opts = _prepare_invoke(monkeypatch, asyncio.TimeoutError())
 
     with pytest.raises(ClientTimeoutError, match="client request timeout") as raised:
-        await client_mod.Client().invoke(_Context(), object(), SimpleNamespace, [])
+        await client_mod.TrpcClient().invoke(_Context(), object(), SimpleNamespace, [])
 
     assert raised.value.timeout_type == ClientTimeoutReason.DOWNSTREAM_TIMEOUT
     opts.selector.report.assert_awaited_once()
@@ -123,7 +123,7 @@ async def test_invoke_unknown_exception_is_reraised(monkeypatch):
     monkeypatch.setattr(client_mod.logger, "error", MagicMock())
 
     with pytest.raises(ValueError, match="unexpected"):
-        await client_mod.Client().invoke(_Context(), object(), SimpleNamespace, [])
+        await client_mod.TrpcClient().invoke(_Context(), object(), SimpleNamespace, [])
 
     opts.selector.report.assert_awaited_once()
 
@@ -131,7 +131,7 @@ async def test_invoke_unknown_exception_is_reraised(monkeypatch):
 def test_invoke_sync_creates_loop_when_thread_has_none(monkeypatch):
     created = []
     original_new_event_loop = asyncio.new_event_loop
-    client = client_mod.Client()
+    client = client_mod.TrpcClient()
 
     def new_loop():
         loop = original_new_event_loop()

@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Shared types for the server service layer.
 
 Holds the queue-wait policy and sliding window used by ``ServiceAdapter``. The

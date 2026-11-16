@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Type hints for the request / response queues of a task process.
 
 These functions are only meaningful inside a task child: ``task_init``,

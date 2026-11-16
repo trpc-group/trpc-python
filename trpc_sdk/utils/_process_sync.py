@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Cross-process synchronization primitives shared across fork.
 
 Three primitives live here, all backed by ``multiprocessing`` objects
@@ -88,7 +87,7 @@ def io_ready_reached(cnt: int) -> bool:
     Returns:
         True once ``_io_ready_cnt.value >= cnt``.
     """
-    global _io_ready_cnt, _io_lock
+    global _io_ready_cnt, _io_lock  # noqa: F824
     with _io_lock:
         return _io_ready_cnt.value >= cnt
 
@@ -101,7 +100,7 @@ def inc_io_wait_count() -> None:
     :func:`wait_notify_in_io` return once the counter reaches their
     configured threshold.
     """
-    global _io_ready_cnt, _io_lock
+    global _io_ready_cnt, _io_lock  # noqa: F824
     with _io_lock:
         _io_ready_cnt.value += 1
 

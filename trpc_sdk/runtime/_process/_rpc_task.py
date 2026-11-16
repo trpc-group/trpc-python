@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Handler process forked by the separate-mode I/O worker."""
 
 from __future__ import annotations
@@ -24,6 +23,7 @@ from trpc_sdk.log import logger
 from trpc_sdk.transport import RpcTaskConnection
 from trpc_sdk.transport import UserProtocolTransport
 from trpc_sdk.utils import PipeEnd
+
 from .._constants import RPC_TASK_SENDER_PREFIX
 from .._threadmodel import HandlerThreadInfo
 from .._threadmodel import ThreadModel

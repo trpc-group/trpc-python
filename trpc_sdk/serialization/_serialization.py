@@ -3,17 +3,12 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Built-in ContentType serializer plugins.
 
 This is the merged copy of the historical ``serialization_json`` /
 ``serialization_proto`` / ``serialization_noop`` / ``serialization_jce``
 / ``serialization_wup`` modules. Importing it (which
 :mod:`trpc_sdk.serialization` does) registers every built-in serializer,
-JCE (1) and WUP (200) included.
-
-``jcepy`` is imported on first JCE / WUP use so processes that never
-send those encodings do not need the optional dependency.
 """
 
 from __future__ import annotations
@@ -31,9 +26,10 @@ from trpc_sdk.abc import BaseSerializer
 from trpc_sdk.abc import PluginInitPos
 from trpc_sdk.abc import PluginType
 from trpc_sdk.plugin import register_plugin
+
+from ._constants import SerializationType
 from ._types import Body
 from ._types import JsonData
-from ._types import SerializationType
 
 # protobuf >= 5.26 renamed including_default_value_fields.
 _PROTOBUF_VERSION = tuple(int(x) for x in google.protobuf.__version__.split(".")[:2])
@@ -183,9 +179,9 @@ class ProtoSerializer(BaseSerializer):
         body.ParseFromString(data)
 
 
-@register_plugin(PluginType.SERIALIZATION, SerializationType.Noop, init_pos=PluginInitPos.WORKER)
+@register_plugin(PluginType.SERIALIZATION, SerializationType.NOOP, init_pos=PluginInitPos.WORKER)
 class NoopSerializer(BaseSerializer):
-    """Identity serializer registered as ``SerializationType.Noop``.
+    """Identity serializer registered as ``SerializationType.NOOP``.
 
     Used when the frame already carries raw bytes (e.g. HTTP octet-stream).
     ``Body`` is the typed wrapper; a plain
@@ -211,76 +207,3 @@ class NoopSerializer(BaseSerializer):
         """
         if isinstance(body, Body):
             body.data = data
-
-
-@register_plugin(PluginType.SERIALIZATION, SerializationType.JCE, init_pos=PluginInitPos.WORKER)
-class JceSerializer(BaseSerializer):
-    """JCE serializer registered as ``SerializationType.JCE``.
-
-    ``jcepy.core.tafcore`` is imported on first use. Output uses
-    ``JceOutputStream.bodySerilization`` (the jcepy spelling). Input
-    skips the leading int32 tag and copies deserialized fields onto
-    ``body``.
-    """
-
-    def serialize(self, body: Any) -> bytes:
-        """Serialize ``body`` with a JCE output stream.
-
-        Args:
-            body: JCE-capable application object.
-        """
-        from jcepy.core import tafcore
-
-        oos = tafcore.JceOutputStream()
-        oos.bodySerilization(body)
-        return oos.getBuffer()
-
-    def deserialize(self, data: bytes, body: Any) -> None:
-        """Populate ``body`` from JCE bytes.
-
-        Args:
-            data: JCE-encoded body bytes.
-            body: Object whose attributes are overwritten from the
-                deserialized result.
-        """
-        from jcepy.core import tafcore
-
-        ios = tafcore.JceInputStream(data)
-        ios.read(tafcore.int32, 0, True)
-        res = ios.bodydeserialize(body)
-        for item in res.__dict__.items():
-            setattr(body, str(item[0]), item[1])
-
-
-@register_plugin(PluginType.SERIALIZATION, SerializationType.Wup, init_pos=PluginInitPos.WORKER)
-class WupSerializer(BaseSerializer):
-    """Taf WUP serializer registered as ``SerializationType.Wup``.
-
-    ``jcepy.core.tafcore`` is imported on first use. WUP is the Taf
-    dictionary packet (``TafUniPacket``), not the raw JCE stream used
-    by :class:`JceSerializer`.
-    """
-
-    def serialize(self, body: Any) -> bytes:
-        """Serialize ``body`` with ``TafUniPacket.WUPserialize``.
-
-        Args:
-            body: WUP-capable application object.
-        """
-        from jcepy.core import tafcore
-
-        up = tafcore.TafUniPacket()
-        return up.WUPserialize(body)
-
-    def deserialize(self, data: bytes, body: Any) -> None:
-        """Populate ``body`` from a WUP packet.
-
-        Args:
-            data: WUP-encoded body bytes.
-            body: Object to populate via ``WUPdeserialize``.
-        """
-        from jcepy.core import tafcore
-
-        up = tafcore.TafUniPacket()
-        up.deserialize(data)
-        up.WUPdeserialize(body)

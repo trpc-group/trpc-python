@@ -3,13 +3,11 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Constants for tRPC-Python Server Module."""
 
 from __future__ import annotations
 
 from trpc_sdk.runtime import MODE_MERGE
-
 
 # ServerOption defaults (YAML ``server:``, one per Server process).
 

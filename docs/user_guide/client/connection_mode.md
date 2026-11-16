@@ -13,9 +13,9 @@ Keep the following transport behavior in mind:
 
 By default the client keeps downstream connections in a pool. Each event loop has its own pool manager and stores connections by downstream address. A request holds the connection exclusively while it runs. When the request finishes, the connection returns to the idle queue for a later request.
 
-Pool parameters live on `ConnPoolOptions`. Set them in YAML or with `Options.set_pool_opts`. The fields correspond as follows:
+Pool parameters live on `KeepLiveConnPoolOptions`. Set them in YAML or with `Options.set_pool_opts`. The fields correspond as follows:
 
-| YAML field | `ConnPoolOptions` parameter | Default | Meaning |
+| YAML field | `KeepLiveConnPoolOptions` parameter | Default | Meaning |
 | --- | --- | --- | --- |
 | `dial_timeout` | `dial_timeout` | `200` | Dial timeout, in milliseconds |
 | `idle_time` | `idle_timeout` | `60` | How long an idle connection stays in the pool, in seconds. `0` means idle time does not reclaim it |
@@ -28,13 +28,13 @@ Set pool parameters in code:
 
 ```python
 from trpc_sdk.client import Options
-from trpc_sdk.transport import ConnPoolOptions
+from trpc_sdk.transport import KeepLiveConnPoolOptions
 
 options = (
     Options()
     .set_target("ip://127.0.0.1:8000")
     .set_protocol("trpc")
-    .set_pool_opts(ConnPoolOptions(max_idle=8, idle_timeout=30, max_active=32, wait=True))
+    .set_pool_opts(KeepLiveConnPoolOptions(max_idle=8, idle_timeout=30, max_active=32, wait=True))
 )
 ```
 
@@ -57,7 +57,7 @@ client:
 
 ## 2. Short-Connection Mode
 
-When `short_conn` is `True`, that request uses `ShortConnFactory`: a new TCP connection is opened before the request, closed as soon as the response arrives, and not returned to the idle queue. This fits an infrequent one-shot call, or a downstream service that cannot handle several requests in a row on one connection.
+When `short_conn` is `True`, that request uses `ShortConnPool`: a new TCP connection is opened before the request, closed as soon as the response arrives, and not returned to the idle queue. This fits an infrequent one-shot call, or a downstream service that cannot handle several requests in a row on one connection.
 
 Turn on short connections in code (this overrides YAML):
 

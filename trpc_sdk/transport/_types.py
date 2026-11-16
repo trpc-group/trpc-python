@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Shared type definitions for the server-side transport package."""
 
 from __future__ import annotations
@@ -77,7 +76,7 @@ class SchedulerParams:
 class UDPPackageType(IntEnum):
     """Flag values written into ``DataHeader.flags`` for C-dispatcher UDP IPC.
 
-    ``feeds_data`` and ``inner_encode_data_header_rsp`` exchange these as C ``uint``.
+    ``feeds_data`` and ``inner_encode_data_header_rsp`` exchange these as C ``uint32_t``.
     ``IntEnum`` keeps ``package_flag == UDPPackageType.COMPLETE`` true when
     the Cython side returns a plain ``int``.
     """

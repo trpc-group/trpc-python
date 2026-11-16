@@ -3,12 +3,12 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Configuration extension interfaces.
 
 This module defines the abstract contracts for configuration loading, data
 providers, and decoders used by pluggable configuration backends.
 """
+
 from __future__ import annotations
 
 from abc import abstractmethod
@@ -29,13 +29,7 @@ class BaseConfig(BasePlugin):
     hydration helpers.
     """
 
-    def __init__(
-        self,
-        provider_name: str,
-        decoder_name: str,
-        provider_options: Dict,
-        decoder_options: Dict
-    ) -> None:
+    def __init__(self, provider_name: str, decoder_name: str, provider_options: Dict, decoder_options: Dict) -> None:
         """Initialize the configuration backend identity and options.
 
         Args:
