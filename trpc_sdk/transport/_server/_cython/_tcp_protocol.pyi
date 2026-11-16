@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Type hints for the merge / executor TCP asyncio Protocol.
 
 ``TCPConnection`` is the Protocol bound to one accepted client socket.

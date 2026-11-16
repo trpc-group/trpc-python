@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Cython unary/stream codecs and the TCP frame parser.
 
 The ``_``-prefixed codec types are framework internals used only by

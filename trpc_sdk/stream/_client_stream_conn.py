@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Client-side stream implementations.
 
 ``Stream`` is the public ``trpc_sdk.stream`` protocol transport.
@@ -27,7 +26,7 @@ from trpc_sdk.serialization import serialize
 from trpc_sdk.utils import now_ms
 
 
-class Stream(BaseClientStreamConnection):
+class ClientStreamConnection(BaseClientStreamConnection):
     """Client stream for the public ``trpc_sdk.stream`` protocol.
 
     ``opts`` is filled by :meth:`start` and reused by send / recv / close
@@ -131,3 +130,13 @@ class Stream(BaseClientStreamConnection):
             client_options.node.cost_time = cost
 
         return client_options
+
+
+def create_client_stream_connection() -> ClientStreamConnection:
+    """Build a client stream for the public ``trpc_sdk.stream`` protocol.
+
+    Every call needs its own object: ``ClientStreamConnection.opts`` stays ``None`` until
+    ``start()`` fills in the per-call transport, codec and deadline, so a
+    shared instance would leak one call's options into the next.
+    """
+    return ClientStreamConnection()

@@ -10,8 +10,8 @@ from aiohttp import web
 
 from trpc_sdk.abc import BaseServerTransportOption
 from trpc_sdk.http import HttpServerTransport
-from trpc_sdk.http import RegisteredRoutes
-from trpc_sdk.http import StaticFileRouters
+from trpc_sdk.http import get_registered_routes
+from trpc_sdk.http import get_static_file_routers
 from trpc_sdk.http import register_static
 from trpc_sdk.http import route
 from trpc_sdk.server import ServiceOption
@@ -73,13 +73,13 @@ def test_https_without_cert():
 
 def test_register_static():
     """Test register static"""
-    saved = dict(StaticFileRouters)
+    saved = dict(get_static_file_routers())
     try:
         register_static("/static", "static")
-        assert StaticFileRouters["/static"] == "static"
+        assert get_static_file_routers()["/static"] == "static"
     finally:
-        StaticFileRouters.clear()
-        StaticFileRouters.update(saved)
+        get_static_file_routers().clear()
+        get_static_file_routers().update(saved)
 
 
 async def _service_1(_, __) -> bytes:  # return rsp
@@ -96,10 +96,10 @@ async def _other_service(_, __) -> bytes:
 
 def test_many_service():
     """User routes for this service, and only this service, land on the app."""
-    saved_routes = dict(RegisteredRoutes)
-    saved_static = dict(StaticFileRouters)
-    RegisteredRoutes.clear()
-    StaticFileRouters.clear()
+    saved_routes = dict(get_registered_routes())
+    saved_static = dict(get_static_file_routers())
+    get_registered_routes().clear()
+    get_static_file_routers().clear()
     try:
         route("/test", service_name="trpc_sdk.test.many.service")(_service_1)
         route("/test1")(_service_2)
@@ -123,7 +123,7 @@ def test_many_service():
         assert "/other" not in paths
         assert any(isinstance(resource, web.StaticResource) for resource in web_app.router.resources())
     finally:
-        RegisteredRoutes.clear()
-        RegisteredRoutes.update(saved_routes)
-        StaticFileRouters.clear()
-        StaticFileRouters.update(saved_static)
+        get_registered_routes().clear()
+        get_registered_routes().update(saved_routes)
+        get_static_file_routers().clear()
+        get_static_file_routers().update(saved_static)

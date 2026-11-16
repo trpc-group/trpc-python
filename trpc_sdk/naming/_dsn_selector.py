@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Data-source-name selectors.
 
 :class:`DSNSelector` is registered as
@@ -55,11 +54,9 @@ class DSNSelector(BaseSelector):
             ValueError: ``service_name`` is empty.
         """
         if service_name == "":
-            raise ValueError(
-                "DSNSelector.select received an empty service_name; "
-                "pass a data-source name such as "
-                "'dsn://user:passwd@tcp(ip:port)/db'"
-            )
+            raise ValueError("DSNSelector.select received an empty service_name; "
+                             "pass a data-source name such as "
+                             "'dsn://user:passwd@tcp(ip:port)/db'")
 
         return Node(service_name=service_name, address=service_name)
 
@@ -108,15 +105,11 @@ class ResolveSelector(BaseSelector):
                 ``None``, or the inner selector is not instantiated.
         """
         if service_name == "":
-            raise ValueError(
-                "ResolveSelector.select received an empty service_name; "
-                "pass a DSN that contains an extractable service name"
-            )
+            raise ValueError("ResolveSelector.select received an empty service_name; "
+                             "pass a DSN that contains an extractable service name")
         if self.extractor is None:
-            raise ValueError(
-                "ResolveSelector.select cannot extract a service name "
-                "because extractor is None"
-            )
+            raise ValueError("ResolveSelector.select cannot extract a service name "
+                             "because extractor is None")
         pos, length = self.extractor.extract(service_name)
         extracted_service_name = service_name[pos:pos + length]
         resolved_node = await self.resolve_address(extracted_service_name, opt)
@@ -142,15 +135,12 @@ class ResolveSelector(BaseSelector):
             ValueError: No instance is stored for
                 ``resolver_selector_name``.
         """
-        resolver = DEFAULT_PLUGIN_MANAGER.get_instance(
-            PluginType.NAMING_SELECTOR, self.resolver_selector_name)
+        resolver = DEFAULT_PLUGIN_MANAGER.get_instance(PluginType.NAMING_SELECTOR, self.resolver_selector_name)
         if resolver is None:
-            raise ValueError(
-                f"ResolveSelector.resolve_address cannot load naming selector "
-                f"{self.resolver_selector_name!r} under PluginType.NAMING_SELECTOR; "
-                f"the plugin is not instantiated. Register it and call "
-                f"plugin.setup() first"
-            )
+            raise ValueError(f"ResolveSelector.resolve_address cannot load naming selector "
+                             f"{self.resolver_selector_name!r} under PluginType.NAMING_SELECTOR; "
+                             f"the plugin is not instantiated. Register it and call "
+                             f"plugin.setup() first")
         return resolver.select(service_name, opt)
 
     async def report(self, node: Node, cost: int, success: int) -> NoReturn:

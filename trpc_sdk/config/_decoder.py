@@ -8,7 +8,7 @@
 Decoders turn the raw bytes returned by a data provider into a Python object,
 usually a ``dict``. They are registered as ``CONFIG_DECODER`` plugins and are
 selected by name through :class:`~trpc_sdk.config._parser.TrpcConfigParser` or
-:func:`~trpc_sdk.config._options.with_codec`.
+:func:`~trpc_sdk.config.ConfigLoaderFactory.sync_load`.
 
 The ``code`` decoder option selects the text encoding of the raw bytes and
 defaults to ``utf8``.
@@ -41,10 +41,10 @@ class _OptionsDecoder(BaseConfigDecoder):
 
     def _resolve_encoding(self, options: Optional[dict]) -> str:
         """Read the text encoding from the decoder options.
-    
+
         Args:
             options: Decoder options, may be ``None``.
-    
+
         Returns:
             The configured encoding, or ``utf8`` when unset.
         """

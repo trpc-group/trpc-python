@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Accepted stream connections of a server listen socket, and their options.
 
 A listen socket's protocol factory is one of two shapes, chosen by
@@ -77,9 +76,9 @@ def _to_host_port(addr: Any) -> Tuple[str, int]:
 class ServerConnection(Protocol):
     """What ``TrpcServerTransport._msg_handler`` reads from ``conn``.
 
-    For TCP it is the :class:`DefaultIoConnection` itself; one connection 
-    has one peer, so its addresses never change. 
-    For UDP it is a per-datagram ``DatagramPeer``, so a handler always sees 
+    For TCP it is the :class:`DefaultIoConnection` itself; one connection
+    has one peer, so its addresses never change.
+    For UDP it is a per-datagram ``DatagramPeer``, so a handler always sees
     its own datagram's source no matter how many datagrams arrived after it.
 
     Attributes:
@@ -227,8 +226,7 @@ class DefaultIoConnection(BaseConnection):
         self.parser = option.parser.create()
         self._init_handler = option.connection_init_handler or self._default_connection_init_handler
         self._close_handler = option.connection_close_handler or self._default_connection_close_handler
-        self._idle_clean_handler = (option.connection_idle_clean_handler
-                                    or self._default_connection_idle_clean_handler)
+        self._idle_clean_handler = (option.connection_idle_clean_handler or self._default_connection_idle_clean_handler)
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         """Record the transport and addresses, run the init callback, start the idle timer."""
@@ -260,14 +258,18 @@ class DefaultIoConnection(BaseConnection):
                 frames = self.parser.read()
             except ServerDecodeError as err:
                 report_attr("trpc_io_connection_read_err", 1)
-                logger.error(f"[io_connection] failed to decode in client conn, remote_addr: "
-                             f"{self.remote_addr}, err: {err}", exc_info=True)
+                logger.error(
+                    f"[io_connection] failed to decode in client conn, remote_addr: "
+                    f"{self.remote_addr}, err: {err}",
+                    exc_info=True)
                 self.close()
                 return
             except Exception as err:  # pylint: disable=broad-except
                 report_attr("trpc_io_connection_read_fatal_err", 1)
-                logger.error(f"[io_connection] fatal err while decoding in client conn, remote_addr: "
-                             f"{self.remote_addr}, err: {err}", exc_info=True)
+                logger.error(
+                    f"[io_connection] fatal err while decoding in client conn, remote_addr: "
+                    f"{self.remote_addr}, err: {err}",
+                    exc_info=True)
                 self.close()
                 return
             if not frames:

@@ -336,14 +336,8 @@ class ClientConfig:
     discovery: str = ''
     load_balance: str = ''
     circuit_breaker: str = ''
-    filters: Optional[List[str]] = None
-    service: Optional[List[ClientServiceConfig]] = None
-
-    def __post_init__(self) -> None:
-        if self.filters is None:
-            self.filters = []
-        if self.service is None:
-            self.service = []
+    filters: List[str] = field(default_factory=list)
+    service: List[ClientServiceConfig] = field(default_factory=list)
 
 
 @dataclass

@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Type hints for the task IPC framing.
 
 One protocol lives here: a worker and its task child exchange a fixed 26-byte

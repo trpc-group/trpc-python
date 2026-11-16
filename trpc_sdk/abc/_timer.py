@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Abstract lifecycle contract for dedicated timer processes.
 
 The public SDK no longer ships a timer-process implementation, so nothing

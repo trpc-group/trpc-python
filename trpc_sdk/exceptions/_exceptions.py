@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Exceptions raised by the task process feature.
 
 ``TrpcErrorType`` and ``TrpcErrorCode`` stay in :mod:`trpc_sdk.exceptions`

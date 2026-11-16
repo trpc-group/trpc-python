@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """User callbacks run when the admin endpoints start.
 
 The lists are consumed by :meth:`~trpc_sdk.admin.AdminPlugin.on_master_start`

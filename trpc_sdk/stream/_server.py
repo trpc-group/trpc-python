@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Server half of the tRPC streaming protocol.
 
 :class:`ServerStream` is one accepted call. ``send_msg`` encodes a DATA
@@ -383,7 +382,8 @@ class StreamDispatcher:
                     server_stream.s_control.close_control()
             except Exception as err:  # pylint: disable=broad-except
                 logger.error(self._error_msg(f"[server stream] abort failed: {err!r}", session_id,
-                                             server_stream.stream_id), exc_info=True)
+                                             server_stream.stream_id),
+                             exc_info=True)
         self.opts.codec.drop_session(session_id)
 
     def get_server_stream(self, ctx: TrpcContext) -> ServerStream:
@@ -418,10 +418,10 @@ class StreamDispatcher:
         pass
 
     async def start_stream_handler(
-            self,
-            ctx: TrpcContext,
-            server_stream: ServerStream,
-            stream_handle: ServerStreamHandle,
+        self,
+        ctx: TrpcContext,
+        server_stream: ServerStream,
+        stream_handle: ServerStreamHandle,
     ) -> None:
         """Run the business handler, then CLOSE or RESET the stream.
 
@@ -561,10 +561,10 @@ class StreamDispatcher:
             server_stream.s_control.update_window(msg.stream_frame.window_size_increment)
 
     async def handle_by_stream_frame_type(
-            self,
-            ctx: TrpcContext,
-            stream_handle: ServerStreamHandle,
-            body: bytes,
+        self,
+        ctx: TrpcContext,
+        stream_handle: ServerStreamHandle,
+        body: bytes,
     ) -> bytes:
         """Switch on ``frame_state`` and handle INIT / DATA / CLOSE / FEEDBACK.
 

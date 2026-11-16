@@ -100,9 +100,9 @@ def setup_line_checker() -> LineCheckerFactory:
 
 On the client receive path, bytes first pass the cell labeled **Framer**, which is `BaseClientProtocolParser`, then `decode_data` and deserialization.
 
-Unlike the server, a client checker subclasses `BaseClientProtocolParser` (itself a `BasePlugin`) and is registered directly as a class, so the registry holds one instance. Implement `async def read_frame(self, connection) -> bytes`. The client TCP transport `await`s that method to read one complete response frame from a pooled connection (`PooledConnection`).
+Unlike the server, a client checker subclasses `BaseClientProtocolParser` (itself a `BasePlugin`) and is registered directly as a class, so the registry holds one instance. Implement `async def read_frame(self, connection) -> bytes`. The client TCP transport `await`s that method to read one complete response frame from a pooled connection (`Connection`).
 
-`PooledConnection.read(n)` asynchronously reads exactly `n` bytes. The snippet below reads 1 byte at a time until `b"\n"`, to show the idea. When the connection closes or the read fails, the exception is turned into `ClientDecodeError`:
+`Connection.read(n)` asynchronously reads exactly `n` bytes. The snippet below reads 1 byte at a time until `b"\n"`, to show the idea. When the connection closes or the read fails, the exception is turned into `ClientDecodeError`:
 
 ```python
 from trpc_sdk.abc import BaseClientProtocolParser
@@ -151,7 +151,7 @@ The `line` frame is simple:
 Server `decode_data` also sets two fields on `message`:
 
 1. **The routed method name (`server_rpc_name`)**. `Service.handle` looks up the registered RPC handler with `message.get_server_rpc_name()`. The name looks like `/service/method`. If the service was registered with `fix_rpc_name=True`, the `service` span is replaced by the service `name` from YAML. A `line` frame carries no method name, so the example below fixes it as `"/trpc.app.server.Greeter/SayHello"`. A real protocol can put the method name in the frame header and parse it in `decode_data`.
-2. **The serialization type (`serialization_type`)**. A new `message` defaults to serialization type `0`, which is protobuf. To send and receive raw bytes without protobuf, call `message.set_serialization_type(SerializationType.Noop)` in `decode_data`.
+2. **The serialization type (`serialization_type`)**. A new `message` defaults to serialization type `0`, which is protobuf. To send and receive raw bytes without protobuf, call `message.set_serialization_type(SerializationType.NOOP)` in `decode_data`.
 
 ```python
 from typing import Optional
@@ -174,7 +174,7 @@ class LineServerCodec(BaseCodec):
     async def decode_data(self, context: TrpcContext, buffer: Optional[bytes]) -> bytes:
         message = get_message(context)
         message.set_server_rpc_name("/trpc.app.server.Greeter/SayHello")
-        message.set_serialization_type(SerializationType.Noop)
+        message.set_serialization_type(SerializationType.NOOP)
         return (buffer or b"").rstrip(b"\n")
 
 
@@ -191,20 +191,20 @@ class LineClientCodec(BaseCodec):
 
 > A few more notes:
 >
-> - **How the HTTP codec works**: The built-in `ServerHttpCodec` does not assemble a TCP frame. It takes the `aiohttp` request and response from `message`. `decode_data` reads the body from the request and ignores `buffer`. `encode_data` writes the status code and response headers onto the response and returns the body.
+> - **How the HTTP codec works**: The built-in `HttpServerCodec` does not assemble a TCP frame. It takes the `aiohttp` request and response from `message`. `decode_data` reads the body from the request and ignores `buffer`. `encode_data` writes the status code and response headers onto the response and returns the body.
 > - **Streaming codecs**: `encode_stream` / `decode_stream` on `BaseCodec` are for the tRPC streaming protocol. An ordinary unary protocol does not implement them.
 
 ## 4. Serialization and Compression (Optional)
 
 Serialization and compression are two plugin slots independent of the protocol:
 
-- **Serialization (`PluginType.SERIALIZATION`)**: Subclass `BaseSerializer` and implement `serialize` and `deserialize`. The registered name is the integer value of `SerializationType` (`PB = 0`, `JCE = 1`, `JSON = 2`, `FlatBuffer = 3`, `Noop = 4`).
-- **Compression (`PluginType.COMPRESS`)**: Subclass `BaseCompress` and implement `compress` and `decompress`. The registered name is the integer value of `CompressType`. The default, no compression, is `CompressType.Noop = 0`.
+- **Serialization (`PluginType.SERIALIZATION`)**: Subclass `BaseSerializer` and implement `serialize` and `deserialize`. The registered name is the integer value of `SerializationType` (`PB = 0`, `JSON = 2`, `FLATBUFFER = 3`, `NOOP = 4`).
+- **Compression (`PluginType.COMPRESS`)**: Subclass `BaseCompress` and implement `compress` and `decompress`. The registered name is the integer value of `CompressType`. The default, no compression, is `CompressType.NOOP = 0`.
 
-The `line` example has no serialization-type field in the header, so both sides agree on `SerializationType.Noop` (value `4`) and exchange raw bytes:
+The `line` example has no serialization-type field in the header, so both sides agree on `SerializationType.NOOP` (value `4`) and exchange raw bytes:
 
-- **Server**: `LineServerCodec.decode_data` above already sets `SerializationType.Noop`. The `Noop` deserializer writes the raw bytes into the `data` attribute of a `trpc_sdk.serialization.Body`.
-- **Client**: Set `serialization: 4` in YAML, or call `Options().set_serialization_type(SerializationType.Noop)` on the call.
+- **Server**: `LineServerCodec.decode_data` above already sets `SerializationType.NOOP`. The `NOOP` deserializer writes the raw bytes into the `data` attribute of a `trpc_sdk.serialization.Body`.
+- **Client**: Set `serialization: 4` in YAML, or call `Options().set_serialization_type(SerializationType.NOOP)` on the call.
 
 ## 5. A Custom Transport or a Custom Listener (Optional)
 
@@ -231,7 +231,7 @@ server:
 
 ### Client
 
-Besides `protocol: line`, the client needs a target address `target` (`ip://` is a naming-service selector; see [Naming Plugin](naming.md)) and `serialization: 4` (`SerializationType.Noop`):
+Besides `protocol: line`, the client needs a target address `target` (`ip://` is a naming-service selector; see [Naming Plugin](naming.md)) and `serialization: 4` (`SerializationType.NOOP`):
 
 ```yaml
 client:

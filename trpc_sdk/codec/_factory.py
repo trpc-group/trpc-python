@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Plugin factories, protocol parsers, and codec lookups for tRPC.
 
 Importing this module registers the ``"trpc"`` entries for
@@ -38,7 +37,7 @@ from ._constants import FRAME_HEAD_LEN
 from ._cython import TrpcServerProtocolParser
 
 if TYPE_CHECKING:
-    from trpc_sdk.transport import PooledConnection
+    from trpc_sdk.transport import Connection
 
 
 class TrpcServerParserFactory(BasePluginFactory):
@@ -77,7 +76,7 @@ def get_server_parser(name: str) -> Optional[TrpcServerParserFactory]:
 class TrpcClientParser(BaseClientProtocolParser):
     """Read one complete tRPC frame off a pooled client connection."""
 
-    async def read_frame(self, conn: PooledConnection) -> bytes:
+    async def read_frame(self, conn: Connection) -> bytes:
         """Read the 16-byte head, then the rest of the frame.
 
         Args:
@@ -87,7 +86,7 @@ class TrpcClientParser(BaseClientProtocolParser):
             The complete frame, head included.
 
         Raises:
-            ClientDecodeError: ``stx`` is not ``trpc_pb2.TRPC_MAGIC_VALUE``. The
+            ClientDecodeError: ``magic`` is not ``trpc_pb2.TRPC_MAGIC_VALUE``. The
                 connection is closed first because the stream can no
                 longer be resynchronized.
         """
@@ -95,7 +94,7 @@ class TrpcClientParser(BaseClientProtocolParser):
 
         frame_head: TrpcFrameHead = parse_frame_head(frame_head_buff)
 
-        if frame_head.stx != trpc_pb2.TRPC_MAGIC_VALUE:
+        if frame_head.magic != trpc_pb2.TRPC_MAGIC_VALUE:
             conn.close(True)
             report_attr("trpc_codec_invalid_magic_number", 1)
             raise ClientDecodeError("invalid magic number")

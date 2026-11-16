@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Startup wait shared by the modes that fork serving children (separate, peer).
 
 Before forking, the parent creates one shared-memory byte per child
@@ -31,6 +30,7 @@ from typing import Optional
 from trpc_sdk.log import logger
 from trpc_sdk.utils import TimerScope
 from trpc_sdk.utils import registered_timer_tasks
+
 from .._constants import CHILD_EXIT_POLL_INTERVAL
 from .._types import ChildProcessInfo
 
@@ -56,13 +56,12 @@ def warn_unnamed_timers(owner: str, copies: int, unit: str) -> None:
         unit: What those processes are called ("rpc tasks", "peer workers").
     """
     unnamed = [
-        info.cls.__name__
-        for info in registered_timer_tasks()
-        if not info.name and info.scope is TimerScope.PROCESS
+        info.cls.__name__ for info in registered_timer_tasks() if not info.name and info.scope is TimerScope.PROCESS
     ]
     if unnamed and copies > 1:
-        logger.warning("[%s] timers %s have no name, so each of the %s %s runs them; "
-                       "name one 'worker:<index>' to run it once", owner, unnamed, copies, unit)
+        logger.warning(
+            "[%s] timers %s have no name, so each of the %s %s runs them; "
+            "name one 'worker:<index>' to run it once", owner, unnamed, copies, unit)
 
 
 class ChildReadiness:

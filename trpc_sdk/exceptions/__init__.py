@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """tRPC-Python exception definitions."""
 
 from ._trpc_exception import TrpcErrorCode
@@ -49,5 +48,5 @@ __all__ = [
     "ClientInvokeError",
     "ClientPoolLimitError",
     "ClientPoolClosedError",
-    "ClientPoolConnClosedError"
+    "ClientPoolConnClosedError",
 ]

@@ -10,9 +10,9 @@
 
 默认情况下，客户端通过连接池管理下游连接。每个事件循环（Event Loop）维护独立的连接池管理器，并按目标下游地址存取连接：请求执行期间独占该连接，请求完成后将其归还至空闲队列供后续请求复用。
 
-连接池参数封装在 `ConnPoolOptions` 中，可通过 YAML 配置文件或代码中的 `Options.set_pool_opts` 设置（两者的字段对应关系如下）：
+连接池参数封装在 `KeepLiveConnPoolOptions` 中，可通过 YAML 配置文件或代码中的 `Options.set_pool_opts` 设置（两者的字段对应关系如下）：
 
-| YAML 配置字段 | `ConnPoolOptions` 参数名 | 默认值 | 含义说明 |
+| YAML 配置字段 | `KeepLiveConnPoolOptions` 参数名 | 默认值 | 含义说明 |
 | --- | --- | --- | --- |
 | `dial_timeout` | `dial_timeout` | `200` | 建立连接的超时时间（毫秒） |
 | `idle_time` | `idle_timeout` | `60` | 空闲连接在池中的最大保留时间（秒）；`0` 表示不按空闲时间回收 |
@@ -25,13 +25,13 @@
 
 ```python
 from trpc_sdk.client import Options
-from trpc_sdk.transport import ConnPoolOptions
+from trpc_sdk.transport import KeepLiveConnPoolOptions
 
 options = (
     Options()
     .set_target("ip://127.0.0.1:8000")
     .set_protocol("trpc")
-    .set_pool_opts(ConnPoolOptions(max_idle=8, idle_timeout=30, max_active=32, wait=True))
+    .set_pool_opts(KeepLiveConnPoolOptions(max_idle=8, idle_timeout=30, max_active=32, wait=True))
 )
 ```
 
@@ -54,7 +54,7 @@ client:
 
 ## 2. 短连接模式
 
-当 `short_conn` 设为 `True` 时，该次请求会使用 `ShortConnFactory`：每次请求前新建一条 TCP 连接，收到响应后立即关闭连接，不会将其放入空闲队列。适用于低频单次调用，或下游服务不支持在单条连接上连续处理多个请求的场景。
+当 `short_conn` 设为 `True` 时，该次请求会使用 `ShortConnPool`：每次请求前新建一条 TCP 连接，收到响应后立即关闭连接，不会将其放入空闲队列。适用于低频单次调用，或下游服务不支持在单条连接上连续处理多个请求的场景。
 
 通过代码开启短连接（优先级高于 YAML）：
 

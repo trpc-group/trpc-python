@@ -3,18 +3,18 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Service registry extension interfaces.
 
 This module defines the abstract contract used by pluggable registry backends
 that publish and withdraw service endpoint addresses.
 """
+
 from __future__ import annotations
 
 from abc import abstractmethod
 from typing import Tuple
 
-from ._plugin import BasePlugin
+from .._plugin import BasePlugin
 
 
 class BaseServiceRegistry(BasePlugin):

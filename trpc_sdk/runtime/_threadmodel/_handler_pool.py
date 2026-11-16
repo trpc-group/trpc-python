@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Hand requests from I/O loops to handle threads under ``io_handle_type: separate``.
 
 The loop that reads a request is not the one that runs it. One
@@ -184,8 +183,10 @@ class SharedHandlerPool:
         """
         slots = self.slots
         count = len(slots)
-        start = get_next_worker(SchedulerParams(worker_conn_num=count, remote_ip="", session_id=0, stream_id=0,
-                                                target=SCHEDULE_TARGET_HANDLE_REQ)) % count
+        start = get_next_worker(
+            SchedulerParams(
+                worker_conn_num=count, remote_ip="", session_id=0, stream_id=0,
+                target=SCHEDULE_TARGET_HANDLE_REQ)) % count
         if self.max_concurrency <= 0:
             self._post(slots[start], self._start, run)
             return

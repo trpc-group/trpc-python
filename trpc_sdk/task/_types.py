@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Shared types and process-wide registries for the task feature.
 
 A task is a child process forked by the server before its event loop starts.

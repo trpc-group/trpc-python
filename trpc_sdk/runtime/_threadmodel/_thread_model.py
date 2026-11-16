@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Thread model of one serving process: which loops a server transport serves on.
 
 A server transport is created before fork, but the loops it serves on only
@@ -56,6 +55,7 @@ from typing import Tuple
 
 from trpc_sdk.log import logger
 
+
 class BaseReactor(Protocol):
     """One event loop a server transport can serve on; owned by the runtime.
 
@@ -87,11 +87,13 @@ class BaseReactor(Protocol):
         """Serve an accepted socket on the reactor's loop, without blocking."""
 
 
+# yapf: disable
 def connect_accepted(loop: asyncio.AbstractEventLoop,
                      sock: socket.socket,
                      protocol_factory: Callable[[], asyncio.BaseProtocol],
                      ssl_context: Optional[Any],
                      label: str) -> None:
+    # yapf: enable
     """Wrap an accepted socket in a transport on ``loop``; runs on ``loop``'s thread.
 
     ``connect_accepted_socket`` is a coroutine (it may have to perform a TLS
@@ -121,13 +123,9 @@ def connect_accepted(loop: asyncio.AbstractEventLoop,
     task.add_done_callback(_on_attached)
 
 
-def attach_on_loop(loop: Optional[asyncio.AbstractEventLoop],
-                   sock: socket.socket,
-                   protocol_factory: Callable[[], asyncio.BaseProtocol],
-                   ssl_context: Optional[Any],
-                   *,
-                   in_loop_thread: bool,
-                   label: str) -> None:
+def attach_on_loop(loop: Optional[asyncio.AbstractEventLoop], sock: socket.socket,
+                   protocol_factory: Callable[[], asyncio.BaseProtocol], ssl_context: Optional[Any], *,
+                   in_loop_thread: bool, label: str) -> None:
     """Serve an accepted socket on ``loop``, directly or by posting it there; never blocks.
 
     A loop that does not exist or is closed (the worker is shutting down)
@@ -182,12 +180,8 @@ def schedule_on_loop(loop: Optional[asyncio.AbstractEventLoop], func: Callable[[
     return asyncio.run_coroutine_threadsafe(_call(), loop)
 
 
-def call_on_loop(loop: Optional[asyncio.AbstractEventLoop],
-                 func: Callable[[], Any],
-                 timeout: Optional[float],
-                 *,
-                 in_loop_thread: bool,
-                 label: str) -> Any:
+def call_on_loop(loop: Optional[asyncio.AbstractEventLoop], func: Callable[[], Any], timeout: Optional[float], *,
+                 in_loop_thread: bool, label: str) -> Any:
     """Run ``func`` on ``loop`` and return its result, awaiting an awaitable one.
 
     On the loop's own thread there is nothing to post to: posting would wait
@@ -368,11 +362,7 @@ class ThreadModel:
     _resources: Dict[int, List[Tuple[ResourceKind, Any]]] = field(default_factory=dict, repr=False)
 
     @classmethod
-    def single(cls,
-               loop: asyncio.AbstractEventLoop,
-               *,
-               worker: Any = None,
-               reuse_port: bool = False) -> ThreadModel:
+    def single(cls, loop: asyncio.AbstractEventLoop, *, worker: Any = None, reuse_port: bool = False) -> ThreadModel:
         """Serve everything on ``loop``, owned by the calling thread.
 
         Args:

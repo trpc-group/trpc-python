@@ -17,10 +17,10 @@ from trpc_sdk import client
 from trpc_sdk import codec
 from trpc_sdk import server
 from trpc_sdk.abc import TrpcContext
-from trpc_sdk.stream import ClientStreamDesc
+from trpc_sdk.abc import ClientStreamDesc
 from trpc_sdk.stream import ServerStream
 from trpc_sdk.stream import create_stream_dispatcher
-from trpc_sdk.stream import default_stream_client
+from trpc_sdk.stream import get_default_client_stream_factory
 from trpc_sdk.utils import get_or_create_event_loop
 
 from . import rpc_stream
@@ -252,7 +252,7 @@ class GreeterClientProxyImpl(GreeterClientProxy):
     def __init__(self, service_name: str = None, fix_rpc_name: bool = True):
         self.client = client.get_client()
         self.options = {}
-        self.stream_client = default_stream_client
+        self.stream_factory = get_default_client_stream_factory()
         self.service_name = service_name
         self.fix_rpc_name = fix_rpc_name
 
@@ -316,9 +316,9 @@ class GreeterClientProxyImpl(GreeterClientProxy):
         options = options or []
         ctx, _ = self._clone_client_message(ctx, '/trpc.py_stream.helloworld.Greeter/SayHelloReq', 'SayHelloReqStream')
 
-        desc = ClientStreamDesc('/trpc.py_stream.helloworld.Greeter/SayHelloReq', True)
+        desc = ClientStreamDesc(name='/trpc.py_stream.helloworld.Greeter/SayHelloReq')
         loop = get_or_create_event_loop()
-        task = loop.create_task(self.stream_client.create_client_stream(ctx, desc, desc.stream_name, options))
+        task = loop.create_task(self.stream_factory.create_client_stream(ctx, desc, options))
         loop.run_until_complete(task)
 
         rsp = rpc_stream.GreeterClientStream.SayHelloReq(task.result())
@@ -336,8 +336,8 @@ class GreeterClientProxyImpl(GreeterClientProxy):
         options = options or []
         ctx, _ = self._clone_client_message(ctx, '/trpc.py_stream.helloworld.Greeter/SayHelloReq', 'SayHelloReqStream')
 
-        desc = ClientStreamDesc('/trpc.py_stream.helloworld.Greeter/SayHelloReq', True)
-        stream = await self.stream_client.create_client_stream(ctx, desc, desc.stream_name, options)
+        desc = ClientStreamDesc(name='/trpc.py_stream.helloworld.Greeter/SayHelloReq')
+        stream = await self.stream_factory.create_client_stream(ctx, desc, options)
 
         rsp = rpc_stream.GreeterClientStream.SayHelloReq(stream)
         return rsp
@@ -355,8 +355,8 @@ class GreeterClientProxyImpl(GreeterClientProxy):
         options = options or []
         ctx, _ = self._clone_client_message(ctx, '/trpc.py_stream.helloworld.Greeter/SayHelloRsp', 'SayHelloRspStream')
 
-        desc = ClientStreamDesc('/trpc.py_stream.helloworld.Greeter/SayHelloRsp', True)
-        stream = self.stream_client.create_client_stream(ctx, desc, desc.stream_name, options)
+        desc = ClientStreamDesc(name='/trpc.py_stream.helloworld.Greeter/SayHelloRsp')
+        stream = self.stream_factory.create_client_stream(ctx, desc, options)
 
         rsp = rpc_stream.GreeterClientStream.SayHelloRsp(stream)
         loop = get_or_create_event_loop()
@@ -377,8 +377,8 @@ class GreeterClientProxyImpl(GreeterClientProxy):
         options = options or []
         ctx, _ = self._clone_client_message(ctx, '/trpc.py_stream.helloworld.Greeter/SayHelloRsp', 'SayHelloRspStream')
 
-        desc = ClientStreamDesc('/trpc.py_stream.helloworld.Greeter/SayHelloRsp', True)
-        stream = await self.stream_client.create_client_stream(ctx, desc, desc.stream_name, options)
+        desc = ClientStreamDesc(name='/trpc.py_stream.helloworld.Greeter/SayHelloRsp')
+        stream = await self.stream_factory.create_client_stream(ctx, desc, options)
 
         rsp = rpc_stream.GreeterClientStream.SayHelloRsp(stream)
         await rsp.client_stream.send_msg(request)
@@ -396,9 +396,9 @@ class GreeterClientProxyImpl(GreeterClientProxy):
         options = options or []
         ctx, _ = self._clone_client_message(ctx, '/trpc.py_stream.helloworld.Greeter/SayHelloAll', 'SayHelloAllStream')
 
-        desc = ClientStreamDesc('/trpc.py_stream.helloworld.Greeter/SayHelloAll', True)
+        desc = ClientStreamDesc(name='/trpc.py_stream.helloworld.Greeter/SayHelloAll')
         loop = get_or_create_event_loop()
-        task = loop.create_task(self.stream_client.create_client_stream(ctx, desc, desc.stream_name, options))
+        task = loop.create_task(self.stream_factory.create_client_stream(ctx, desc, options))
         loop.run_until_complete(task)
 
         rsp = rpc_stream.GreeterClientStream.SayHelloAll(task.result())
@@ -416,8 +416,8 @@ class GreeterClientProxyImpl(GreeterClientProxy):
         options = options or []
         ctx, _ = self._clone_client_message(ctx, '/trpc.py_stream.helloworld.Greeter/SayHelloAll', 'SayHelloAllStream')
 
-        desc = ClientStreamDesc('/trpc.py_stream.helloworld.Greeter/SayHelloAll', True)
-        stream = await self.stream_client.create_client_stream(ctx, desc, desc.stream_name, options)
+        desc = ClientStreamDesc(name='/trpc.py_stream.helloworld.Greeter/SayHelloAll')
+        stream = await self.stream_factory.create_client_stream(ctx, desc, options)
 
         rsp = rpc_stream.GreeterClientStream.SayHelloAll(stream)
         return rsp

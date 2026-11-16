@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """tRPC-over-HTTP codec: encode and decode between TrpcMessage and HTTP.
 
 The codec never talks to a socket. On the server it reads the aiohttp
@@ -22,6 +21,7 @@ import json
 import os
 import sys
 from typing import Any
+from typing import List
 
 from aiohttp import hdrs
 from aiohttp.web_request import CIMultiDictProxy
@@ -43,11 +43,12 @@ from trpc_sdk.exceptions import TrpcErrorType
 from trpc_sdk.exceptions import TrpcException
 from trpc_sdk.plugin import register_plugin
 from trpc_sdk.serialization import SerializationType
+
 from ._constants import HTTP
 from ._constants import TRANS_INFO_BASE64_KEY
-from ._context import pop_http_ok_codes
 from ._http_request import HttpClientReqHeader
 from ._http_response import HttpClientRspHeader
+from ._utils import pop_http_ok_codes
 from ._types import HTTP_TRPC_HEADER
 from ._types import find_compress_type
 from ._types import find_http_status
@@ -56,16 +57,28 @@ from ._types import get_trpc_error_code
 
 
 @register_plugin(PluginType.SERVER_PARSER, HTTP, init_pos=PluginInitPos.WORKER)
-class ServerHttpParser(BaseServerProtocolParser):
+class HttpServerParser(BaseServerProtocolParser):
     """HTTP server frame parser.
 
     HTTP framing is handled by aiohttp, so this parser is a no-op
     plugin registration that occupies the ``http`` parser slot.
     """
 
+    def feed_data(self, data: bytes) -> None:
+        """Feed data to the parser."""
+        raise NotImplementedError("HTTP frames are read by aiohttp, not by HttpServerParser")
+
+    def read(self) -> List[bytes]:
+        """Return every complete frame currently buffered."""
+        raise NotImplementedError("HTTP frames are read by aiohttp, not by HttpServerParser")
+
+    def reset(self) -> None:
+        """Reset the parser."""
+        raise NotImplementedError("HTTP frames are read by aiohttp, not by HttpServerParser")
+
 
 @register_plugin(PluginType.SERVER_CODEC, HTTP, init_pos=PluginInitPos.WORKER)
-class ServerHttpCodec(BaseCodec):
+class HttpServerCodec(BaseCodec):
     """Server codec: pack RPC results into an aiohttp response.
 
     ``encode_data`` / ``decode_data`` read the aiohttp request / response
@@ -184,8 +197,8 @@ class ServerHttpCodec(BaseCodec):
 
         if request.method == hdrs.METH_GET:
             req_body = request.query_string.encode("utf-8")
-            message.set_serialization_type(SerializationType.Form)
-            trpc_req.content_type = SerializationType.Form
+            message.set_serialization_type(SerializationType.FORM)
+            trpc_req.content_type = SerializationType.FORM
             return req_body
 
         req_body = await request.read()
@@ -275,7 +288,7 @@ class ServerHttpCodec(BaseCodec):
 
 
 @register_plugin(PluginType.CLIENT_PARSER, HTTP, init_pos=PluginInitPos.WORKER)
-class ClientHttpParser(BaseClientProtocolParser):
+class HttpClientParser(BaseClientProtocolParser):
     """HTTP client frame parser.
 
     HTTP framing is handled by aiohttp, so this parser is a no-op
@@ -292,11 +305,11 @@ class ClientHttpParser(BaseClientProtocolParser):
             NotImplementedError: Always; the HTTP client transport reads
                 the response through aiohttp instead of framing bytes.
         """
-        raise NotImplementedError("HTTP frames are read by aiohttp, not by ClientHttpParser")
+        raise NotImplementedError("HTTP frames are read by aiohttp, not by HttpClientParser")
 
 
 @register_plugin(PluginType.CLIENT_CODEC, HTTP, init_pos=PluginInitPos.WORKER)
-class ClientHttpCodec(BaseCodec):
+class HttpClientCodec(BaseCodec):
     """Client codec: fill method/caller defaults and decode HTTP errors.
 
     ``encode_data`` does not build an HTTP packet: it only creates a
@@ -375,8 +388,7 @@ class ClientHttpCodec(BaseCodec):
         codec_ok = pop_http_ok_codes(context)
         codec_ok.add(http.HTTPStatus.OK)
         if rsp_header.status_code not in codec_ok:
-            message.set_client_rsp_err(
-                ClientInvokeError(f"http client codec StatusCode: {rsp_header.status_code}"))
+            message.set_client_rsp_err(ClientInvokeError(f"http client codec StatusCode: {rsp_header.status_code}"))
 
         body = b""
         if not rsp_header.stream:

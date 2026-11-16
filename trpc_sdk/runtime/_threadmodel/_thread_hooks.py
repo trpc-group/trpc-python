@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Per-serving-loop start/stop hooks, and which serving loop this thread runs.
 
 A *serving loop* is an event loop that runs user code (handlers, filters,

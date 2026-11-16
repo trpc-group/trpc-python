@@ -1,8 +1,8 @@
-# Tencent is pleased to support the open source community by making tRPC-Agent-Python available.
+# Tencent is pleased to support the open source community by making tRPC-Python available.
 #
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
-# tRPC-Agent-Python is licensed under Apache-2.0.
+# tRPC-Python is licensed under Apache-2.0.
 """Plugin abstract base class"""
 
 from __future__ import annotations
@@ -78,7 +78,6 @@ class PluginType(IntEnum):
 
     LOG_COMPONENT = 53
 
-
     # plugin - trace
     TRACE = 60
 
@@ -119,22 +118,22 @@ class BasePlugin(ABC):
         self._version: str = ""
         self._type: PluginType = PluginType.UNKNOWN
         self._init_pos: PluginInitPos = PluginInitPos.UNKNOWN
-    
+
     @property
     def name(self) -> str:
         """Get plugin name"""
         return self._name
-    
+
     @property
     def version(self) -> str:
         """Get plugin version"""
         return self._version
-    
+
     @property
     def type(self) -> PluginType:
         """Get plugin type"""
         return self._type
-    
+
     @property
     def type_name(self) -> str:
         """Get plugin type name"""
@@ -144,7 +143,7 @@ class BasePlugin(ABC):
     def init_pos(self) -> PluginInitPos:
         """Get plugin init position"""
         return self._init_pos
-    
+
     def init(self):
         """Initialize plugin"""
         return
@@ -152,7 +151,7 @@ class BasePlugin(ABC):
     def start(self):
         """Start plugin"""
         return
-    
+
     def stop(self):
         """Stop plugin"""
         return

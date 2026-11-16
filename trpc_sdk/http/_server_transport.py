@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """HTTP server transport: serve an aiohttp application on the endpoint.
 
 :class:`HttpServerTransport` records the options before fork and serves the
@@ -36,16 +35,16 @@ from trpc_sdk.transport import TrpcServerTransport
 from trpc_sdk.transport import ssl_context_from_opts
 from trpc_sdk.utils import now_ms
 from trpc_sdk.utils import set_addr_to_ctx_from_transport
-from ._codec import ServerHttpCodec
+from ._codec import HttpServerCodec
 from ._constants import HTTP
 from ._constants import LOCAL_ADDR
 from ._constants import TRANS_INFO_BASE64_KEY
 from ._constants import USER_ROUTE_KEY
-from ._context import pop_http_rsp_header
 from ._routes import HttpRoute
-from ._routes import RegisteredRoutes
-from ._routes import StaticFileRouters
+from ._routes import get_registered_routes
+from ._routes import get_static_file_routers
 from ._routes import get_user_http_decode_func
+from ._utils import pop_http_rsp_header
 
 
 class HttpServerTransport(TrpcServerTransport):
@@ -86,8 +85,7 @@ class HttpServerTransport(TrpcServerTransport):
             runner = reactor.submit(self._setup_runner, timeout=model.ready_timeout)
             model.keep_resource(reactor, runner, ResourceKind.RUNNER)
             runners[id(reactor)] = runner
-        self._serve_stream(model, group, lambda reactor: runners[id(reactor)].server,
-                           ssl_context_from_opts(self.opts))
+        self._serve_stream(model, group, lambda reactor: runners[id(reactor)].server, ssl_context_from_opts(self.opts))
 
     async def _setup_runner(self) -> web.AppRunner:
         """Build and start an aiohttp runner on the loop that will serve it.
@@ -116,14 +114,14 @@ class HttpServerTransport(TrpcServerTransport):
         app = web.Application(client_max_size=TrpcConfig.server_config().max_rbuf_size)
 
         service_name = self.opts.service_adapter.opt.service_name
-        for user_route in RegisteredRoutes.values():
+        for user_route in get_registered_routes().values():
             if user_route.service_name and user_route.service_name != service_name:
                 continue
             resource = app.router.add_resource(user_route.path)
             method = user_route.method if user_route.method else hdrs.METH_ANY
             resource.add_route(method, partial(self._handle_route, user_route))
 
-        for prefix, path_to_file in StaticFileRouters.items():
+        for prefix, path_to_file in get_static_file_routers().items():
             app.router.add_static(prefix, path_to_file)
 
         resource = app.router.add_resource(r'/{name:.*}')
@@ -160,7 +158,7 @@ class HttpServerTransport(TrpcServerTransport):
     async def _handle_rpc(self, request: Request) -> Response:
         """RPC catch-all: run the tRPC handler and fill the HTTP response.
 
-        Body is not passed as bytes; :class:`ServerHttpCodec` reads it
+        Body is not passed as bytes; :class:`HttpServerCodec` reads it
         from the request on ``ctx``. The handler return value becomes
         ``response.body``.
 
@@ -222,7 +220,7 @@ class HttpServerTransport(TrpcServerTransport):
         """
         message = get_message(ctx)
         message.set_server_rpc_name(request.path)
-        ServerHttpCodec.decode_trpc_req_header(ctx, message, request)
+        HttpServerCodec.decode_trpc_req_header(ctx, message, request)
 
 
 @register_plugin(PluginType.SERVER_TRANSPORT, HTTP, init_pos=PluginInitPos.WORKER)

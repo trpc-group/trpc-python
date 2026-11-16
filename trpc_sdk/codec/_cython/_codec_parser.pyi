@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Type hints for the length-only tRPC frame splitter.
 
 ``TrpcServerProtocolParser`` checks magic ``2352`` and ``package_len``

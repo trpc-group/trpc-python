@@ -8,9 +8,9 @@
 Providers load raw config bytes from a data source. They are registered as
 ``CONFIG_PROVIDER`` plugins and are selected by name through
 :class:`~trpc_sdk.config._parser.TrpcConfigParser` or
-:func:`~trpc_sdk.config._options.with_provider`.
+:func:`~trpc_sdk.config.ConfigLoaderFactory.sync_load`.
 
-Named providers used by :func:`~trpc_sdk.config._options.with_provider` are kept in
+Named providers used by :func:`~trpc_sdk.config.ConfigLoaderFactory.sync_load` are kept in
 this module's registry via :func:`set_provider` / :func:`get_provider`.
 """
 
@@ -33,7 +33,7 @@ class FileConfigProvider(BaseConfigProvider):
 
     This provider is reachable under three different names: the class itself,
     the ``'FileConfigProvider'`` plugin name used by :class:`TrpcConfigParser`, and the
-    ``'file'`` key via ``set_provider`` used by ``with_provider('file')``.
+    ``'file'`` key via ``set_provider`` used by ``ConfigLoaderFactory.sync_load(provider='file')``.
     """
 
     def __init__(self):

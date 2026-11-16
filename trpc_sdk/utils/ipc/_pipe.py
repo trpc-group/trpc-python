@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Unix-domain socketpairs used as IPC pipes between processes.
 
 :func:`create_pipe` makes the pair; :class:`PipeConnection` wraps one end of it

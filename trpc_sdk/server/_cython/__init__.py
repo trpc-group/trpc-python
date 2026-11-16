@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Cython per-service handler path and service factory."""
 
 from ._service import ServiceAdapter  # pyright: ignore[reportMissingModuleSource]

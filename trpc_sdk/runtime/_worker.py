@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """The worker role: the process that runs user handlers.
 
 In ``merge`` mode the worker binds the public addresses and runs handlers
@@ -49,7 +48,6 @@ from trpc_sdk.abc import BaseServerTransportOption
 from trpc_sdk.abc import ProcessType
 from trpc_sdk.common import bind_lifetime_to_parent
 from trpc_sdk.common import execute_after_in_child
-from trpc_sdk.common import execute_before_loop_run_in_child
 from trpc_sdk.common import set_current_process_var
 from trpc_sdk.config import TrpcConfig
 from trpc_sdk.log import logger
@@ -248,7 +246,7 @@ class BaseWorker(WorkerExit):
         """
         from ._process import worker_sender_name
         # baseworker only have one sender to create pipe
-        # subclass will override this method and 
+        # subclass will override this method and
         return [worker_sender_name(0)]
 
     def _task_pipe_owners(self) -> List[str]:
@@ -308,9 +306,9 @@ class BaseWorker(WorkerExit):
         fork, so the warning would repeat once per child.
         """
         if TrpcConfig.server_config().reboot_child:
-            logger.warning("[%s] server.reboot_child is not supported in this version and is treated as false: "
-                           "a child that dies takes the whole worker down, for the supervisor to restart",
-                           self.name)
+            logger.warning(
+                "[%s] server.reboot_child is not supported in this version and is treated as false: "
+                "a child that dies takes the whole worker down, for the supervisor to restart", self.name)
 
     def _warn_threads_before_fork(self) -> None:
         """Warn when other threads are running before fork.
@@ -511,8 +509,9 @@ class BaseWorker(WorkerExit):
         previous = signal.signal(signal.SIGTERM, _raise_system_exit) if in_main_thread else None
         try:
             while not io_ready_reached(self.io_wait_count):
-                dead = [child.name for child in self.children
-                        if child.process is not None and not child.process.is_alive()]
+                dead = [
+                    child.name for child in self.children if child.process is not None and not child.process.is_alive()
+                ]
                 if dead:
                     logger.error("[%s] child %s exited before the tasks were ready", self.name, dead)
                     self._exit_code = 1
@@ -789,7 +788,8 @@ class BaseWorker(WorkerExit):
             self.loop.add_signal_handler(signal.SIGUSR2, self.memory_inspector.dump_to_file)
         self._watch_children()
 
-    def _listen_on(self, transport: BaseServerTransport,
+    def _listen_on(self,
+                   transport: BaseServerTransport,
                    loop: Optional[asyncio.AbstractEventLoop] = None) -> BaseServerTransport:
         """Call ``listen`` on ``transport`` and remember it.
 

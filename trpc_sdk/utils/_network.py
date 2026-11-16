@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """IP, port, and socket helpers used by the server adapter and connection pool.
 
 Port probes here are *availability* checks, not format-only validators:
@@ -38,7 +37,6 @@ from ._constants import TcpState
 from ._constants import UNIX_TYPE
 from ._types import IpType
 from ._types import PortType
-
 
 # Maps ``ipaddress.IPv*Address.version`` (4 / 6) onto ``socket.AF_*``.
 # Used only by :func:`create_probe_socket` for short-lived port probes;
@@ -220,13 +218,11 @@ def _probe_port_available(ip: IpType, port: PortType, is_udp: bool) -> bool:
             socket_tmp.bind((ip, port))
             return True
         if socket_tmp.connect_ex((ip, port)) == 0:
-            logger.error(
-                f"tcp port valid check failed, (ip:{ip} port:{port}) has been occupied")
+            logger.error(f"tcp port valid check failed, (ip:{ip} port:{port}) has been occupied")
             return False
         return True
     except Exception as err:  # pylint: disable=broad-except
-        logger.error(
-            f"{protocol} port valid check failed, (ip:{ip} port:{port}) appear err: {err}")
+        logger.error(f"{protocol} port valid check failed, (ip:{ip} port:{port}) appear err: {err}")
         return False
     finally:
         if socket_tmp:

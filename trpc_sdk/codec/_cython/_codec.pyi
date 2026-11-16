@@ -3,11 +3,11 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Type hints for the unary Cython client / server codec.
 
 Python :class:`~trpc_sdk.codec.TrpcClientCodec` / ``TrpcServerCodec`` hold one
-instance each as ``self.codec`` and dispatch unary frames here. Stream frames use :mod:`trpc_sdk.codec._cython._codec_stream`.
+instance each as ``self.codec`` and dispatch unary frames here. Stream
+frames use :mod:`trpc_sdk.codec._cython._codec_stream`.
 """
 
 from __future__ import annotations

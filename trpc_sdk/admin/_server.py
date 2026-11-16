@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Admin HTTP server.
 
 Runs in the root process on its own thread and event loop. It serves the

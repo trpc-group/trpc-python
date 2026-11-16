@@ -37,8 +37,7 @@ def _task_info(**extra):
 
 
 def test_task_process_keeps_the_python_handler():
-    """``use_c_task`` is stored, but the child is still a Python ``TaskProcess``."""
-    info = _task_info(use_c_task=True, c_task_driver_params={"log_level": 4, "log_file": "./test.log"})
+    info = _task_info()
     process = TaskProcess(info, _adapter())
 
     assert process.__class__ is TaskProcess
@@ -47,12 +46,6 @@ def test_task_process_keeps_the_python_handler():
     assert process.task_initializer is None
     assert process.block is True
     assert process._controlled is False
-    assert process.task_info.c_task_driver_params["log_level"] == 4
-    assert process.task_info.use_c_task is True
-
-    info.c_task_driver_params = {}
-    again = TaskProcess(info, _adapter())
-    assert again.task_info.c_task_driver_params == {}
 
 
 def test_separate_mode_task_is_a_controlled_child():

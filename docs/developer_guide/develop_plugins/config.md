@@ -16,13 +16,7 @@ Business configuration uses `ConfigLoader`: first call `provider.load(path)` to 
 
 ## Decoder
 
-A decoder turns bytes into a dict. The registration type is `PluginType.CONFIG_DECODER`. The built-in registered names are `yaml`, `json`, and `noop`. What `with_codec` takes is that registered name:
-
-```python
-from trpc_sdk.config import with_codec
-
-with_codec("yaml")
-```
+A decoder turns bytes into a dict. The registration type is `PluginType.CONFIG_DECODER`. The built-in registered names are `yaml`, `json`, and `noop`.:
 
 `noop` returns the bytes unchanged. That result has no interface for reading by key, so `loader.get` cannot be used with it.
 
@@ -59,7 +53,7 @@ class MyDecoder(BaseConfigDecoder):
         self._options = options
 ```
 
-Use it as `with_codec("my_decoder")`.
+Use it as `ConfigLoaderFactory.sync_load(..., decoder="my_decoder",)`.
 
 ## Data Source
 
@@ -114,13 +108,11 @@ To read a local file, replace `"memory"` with `"file"`. `FileConfigProvider` is 
 
 ```python
 from trpc_sdk.config import ConfigLoaderFactory
-from trpc_sdk.config import with_codec
-from trpc_sdk.config import with_provider
 
 loader = ConfigLoaderFactory.sync_load(
     "application.yaml",
-    with_provider("file"),
-    with_codec("yaml"),
+    decoder="yaml",
+    provider="file"
 )
 server = loader.get("server", {})
 ```

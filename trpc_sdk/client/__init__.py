@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """tRPC-Python client package: how one outbound call is assembled.
 
 Public symbols are re-exported here. Callers should
@@ -21,14 +20,14 @@ from __future__ import annotations
 from ._options import Options
 from ._options import get_options
 from ._options import normalize_options
-from ._client import Client
+from ._client import TrpcClient
 from ._client import get_client
-from ._client import select_node
-from ._client import set_timeout
-from ._client import update_message
+from ._utils import select_node
+from ._utils import set_timeout
+from ._utils import update_message
 
 __all__ = [
-    "Client",
+    "TrpcClient",
     "Options",
     "get_client",
     "get_options",

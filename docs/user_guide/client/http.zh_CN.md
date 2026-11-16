@@ -11,11 +11,11 @@
 ```python
 from trpc_sdk.abc import TrpcContext
 from trpc_sdk.client import Options
-from trpc_sdk.http import Client
+from trpc_sdk.http import HttpClient
 
 async def post_json() -> None:
     """POST a body and read the response as text."""
-    cli = Client()
+    cli = HttpClient()
     ctx = TrpcContext()
     options = [Options().set_timeout(3000)]
     async with cli.post(ctx, "http://127.0.0.1:8001/test", options, data=b"hello") as rsp:
@@ -37,7 +37,7 @@ async with cli.request(ctx, "PUT", "http://127.0.0.1:8001/item", data=b"{}") as 
 
 ## URL 解析与配置匹配规则
 
-发起请求时，`Client` 会先根据传入的 URL 自动生成一组基础 `Options`，随后将调用方传入的 `options` 列表追加在后面依次执行（因此调用方在 `options` 中设置的 `set_*` 项会覆盖从 URL 推导出的默认值）。在 HTTP 客户端中，协议固定设为 `"http"`，序列化类型固定为 `SerializationType.Noop`（请求体按原始字节发送）。
+发起请求时，`Client` 会先根据传入的 URL 自动生成一组基础 `Options`，随后将调用方传入的 `options` 列表追加在后面依次执行（因此调用方在 `options` 中设置的 `set_*` 项会覆盖从 URL 推导出的默认值）。在 HTTP 客户端中，协议固定设为 `"http"`，序列化类型固定为 `SerializationType.NOOP`（请求体按原始字节发送）。
 
 ### 1. URL Scheme 与寻址推导
 
@@ -53,10 +53,10 @@ async with cli.get(ctx, "trpc://trpc.test.helloworld.Greeter/SayHello") as rsp:
 
 ### 2. 匹配 YAML 中的客户端配置
 
-构造 `Client(name)` 时传入的 `name` 参数用于作为查找键，去 `trpc_python.yaml` 的 `client.service[]` 中匹配配置（若不传或传入空字符串 `""`，则默认使用 URL 中的 `host:port` 作为查找键）：
+构造 `HttpClient(name)` 时传入的 `name` 参数用于作为查找键，去 `trpc_python.yaml` 的 `client.service[]` 中匹配配置（若不传或传入空字符串 `""`，则默认使用 URL 中的 `host:port` 作为查找键）：
 
 ```python
-cli = Client("example.http")
+cli = HttpClient("example.http")
 ```
 
 对应的 YAML 配置示例：
@@ -69,7 +69,7 @@ client:
       protocol: http
 ```
 
-当显式指定了 `Client("example.http")` 时，即使请求 URL 写为 `"http://127.0.0.1:8001/..."`，框架依然会按 `"example.http"` 查找并加载上述 YAML 配置，而目标地址 `target` 仍由 URL 自身的 `scheme://host` 决定。
+当显式指定了 `HttpClient("example.http")` 时，即使请求 URL 写为 `"http://127.0.0.1:8001/..."`，框架依然会按 `"example.http"` 查找并加载上述 YAML 配置，而目标地址 `target` 仍由 URL 自身的 `scheme://host` 决定。
 
 ## 读取响应内容
 

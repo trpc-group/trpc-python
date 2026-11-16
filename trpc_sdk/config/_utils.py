@@ -3,13 +3,16 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-"""Config utils"""
+"""Configuration utilities."""
+
+from __future__ import annotations
 
 import netifaces
 
 
 def join_host_port(host: str, port: int) -> str:
     """Build ip port.
+
     Args:
         host: host of type str
         port: port of type int
@@ -22,8 +25,8 @@ def join_host_port(host: str, port: int) -> str:
 
 
 def get_ip_with_nic(nic: str) -> str:
-    """
-    Get ip with nic.
+    """Get ip with nic.
+
     Args:
         nic: nic of type str
     Returns:

@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Constants for the tRPC streaming protocol.
 
 Window bounds are the legal range of ``trpc_pb2.TrpcStreamInitMeta.init_window_size``.

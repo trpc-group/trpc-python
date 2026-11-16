@@ -13,11 +13,11 @@ If you already have a protobuf stub and only want the transport protocol to be H
 ```python
 from trpc_sdk.abc import TrpcContext
 from trpc_sdk.client import Options
-from trpc_sdk.http import Client
+from trpc_sdk.http import HttpClient
 
 async def post_json() -> None:
     """POST a body and read the response as text."""
-    cli = Client()
+    cli = HttpClient()
     ctx = TrpcContext()
     options = [Options().set_timeout(3000)]
     async with cli.post(ctx, "http://127.0.0.1:8001/test", options, data=b"hello") as rsp:
@@ -39,7 +39,7 @@ The URL must include a scheme and a host, for example `"http://127.0.0.1:8001/te
 
 ## How the URL Is Parsed and Matched
 
-On each request, `Client` first builds a base `Options` from the URL, then appends the caller's `options` list and applies that list in order. A `set_*` in the caller's list therefore overrides the value derived from the URL. For this client the protocol is fixed as `"http"`, and the serialization type is fixed as `SerializationType.Noop`. The body is sent as raw bytes.
+On each request, `Client` first builds a base `Options` from the URL, then appends the caller's `options` list and applies that list in order. A `set_*` in the caller's list therefore overrides the value derived from the URL. For this client the protocol is fixed as `"http"`, and the serialization type is fixed as `SerializationType.NOOP`. The body is sent as raw bytes.
 
 ### 1. Scheme and Addressing
 
@@ -53,10 +53,10 @@ async with cli.get(ctx, "trpc://trpc.test.helloworld.Greeter/SayHello") as rsp:
 
 ### 2. Matching a YAML Client Entry
 
-The `name` passed to `Client(name)` is the lookup key in `client.service[]` of `trpc_python.yaml`. When it is omitted or `""`, the key is the URL's `host:port`:
+The `name` passed to `HttpClient(name)` is the lookup key in `client.service[]` of `trpc_python.yaml`. When it is omitted or `""`, the key is the URL's `host:port`:
 
 ```python
-cli = Client("example.http")
+cli = HttpClient("example.http")
 ```
 
 The matching configuration:
@@ -69,7 +69,7 @@ client:
       protocol: http
 ```
 
-With `Client("example.http")`, a URL of `"http://127.0.0.1:8001/..."` still loads the YAML entry named `"example.http"`. The `target` is still `scheme://host` from the URL itself.
+With `HttpClient("example.http")`, a URL of `"http://127.0.0.1:8001/..."` still loads the YAML entry named `"example.http"`. The `target` is still `scheme://host` from the URL itself.
 
 ## Reading the Response
 

@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Circuit breaker extension interfaces.
 
 This module defines the abstract contract used by pluggable circuit breaker
@@ -16,8 +15,8 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import NoReturn
 
-from ._node import Node
-from ._plugin import BasePlugin
+from .._plugin import BasePlugin
+from ._types import Node
 
 
 class BaseCircuitBreaker(BasePlugin):

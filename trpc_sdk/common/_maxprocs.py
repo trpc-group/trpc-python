@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Container-aware CPU count.
 
 On Linux the CPU quota is read from the cgroup the current process belongs

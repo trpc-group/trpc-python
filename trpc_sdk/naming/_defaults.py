@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Process-wide default plugin names used by :class:`TrpcSelector`.
 
 Each value starts as the matching literal in
@@ -20,15 +19,15 @@ working.
 
 from __future__ import annotations
 
-from ._constants import DEFAULT_CIRCUITBREAKER_NAME
+from ._constants import DEFAULT_CIRCUIT_BREAKER_NAME
 from ._constants import DEFAULT_DISCOVERY_NAME
 from ._constants import DEFAULT_LOADBALANCE_NAME
-from ._constants import DEFAULT_SERVICEROUTER_NAME
+from ._constants import DEFAULT_SERVICE_ROUTER_NAME
 
 _default_discovery: str = DEFAULT_DISCOVERY_NAME
 _default_loadbalance: str = DEFAULT_LOADBALANCE_NAME
-_default_circuitbreaker: str = DEFAULT_CIRCUITBREAKER_NAME
-_default_servicerouter: str = DEFAULT_SERVICEROUTER_NAME
+_default_circuit_breaker: str = DEFAULT_CIRCUIT_BREAKER_NAME
+_default_service_router: str = DEFAULT_SERVICE_ROUTER_NAME
 
 
 def get_default_discovery() -> str:
@@ -61,31 +60,31 @@ def set_default_loadbalance(lb: str) -> None:
     _default_loadbalance = lb
 
 
-def get_default_circuitbreaker() -> str:
+def get_default_circuit_breaker() -> str:
     """Return the circuit-breaker plugin name :class:`TrpcSelector` uses by default."""
-    return _default_circuitbreaker
+    return _default_circuit_breaker
 
 
-def set_default_circuitbreaker(cb: str) -> None:
+def set_default_circuit_breaker(cb: str) -> None:
     """Replace the process-wide default circuit-breaker plugin name.
 
     Args:
         cb: Registered name under ``PluginType.NAMING_CIRCUIT_BREAKER``.
     """
-    global _default_circuitbreaker
-    _default_circuitbreaker = cb
+    global _default_circuit_breaker
+    _default_circuit_breaker = cb
 
 
-def get_default_servicerouter() -> str:
+def get_default_service_router() -> str:
     """Return the service-router plugin name :class:`TrpcSelector` uses by default."""
-    return _default_servicerouter
+    return _default_service_router
 
 
-def set_default_servicerouter(sr: str) -> None:
+def set_default_service_router(sr: str) -> None:
     """Replace the process-wide default service-router plugin name.
 
     Args:
         sr: Registered name under ``PluginType.NAMING_SERVICE_ROUTER``.
     """
-    global _default_servicerouter
-    _default_servicerouter = sr
+    global _default_service_router
+    _default_service_router = sr

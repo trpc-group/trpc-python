@@ -24,13 +24,10 @@ def test_task():
     assert not task.thread_num
     assert not task.model_path
     assert not task.model_info
-    assert task.use_c_task is False
-    assert not task.c_task_driver_params
     assert not task.on_fork
     assert not task.pause_heartbeat
     assert task.task_num == 0
 
     task = TaskInfo(name="worker", handler=handler, task_num=1)
-    assert task.use_c_task is False
     assert task.task_num == 1
     assert task.handler is handler

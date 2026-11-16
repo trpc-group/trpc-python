@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """tRPC-Python stream package: public streaming RPC.
 
 Public symbols are re-exported here. Callers should ``from trpc_sdk.stream
@@ -23,10 +22,10 @@ The package is split by responsibility:
 
 from __future__ import annotations
 
-from ._client import Client
+from ._client import ClientStreamFactory
 from ._client import ClientStream
-from ._client import create_stream_client
-from ._client import default_stream_client
+from ._client import create_client_stream_factory
+from ._client import get_default_client_stream_factory
 from ._constants import DEFAULT_INIT_WINDOW_SIZE
 from ._constants import MAX_INIT_WINDOW_SIZE
 from ._constants import MIN_INIT_WINDOW_SIZE
@@ -38,9 +37,6 @@ from ._server import ServerStreamHandle
 from ._server import StreamDispatcher
 from ._server import create_server_stream
 from ._server import create_stream_dispatcher
-from ._stream import Stream
-from ._stream_factory import create_stream
-from ._types import ClientStreamDesc
 
 __all__ = [
     # Constants
@@ -54,12 +50,9 @@ __all__ = [
     "ReceiveControl",
     # Client
     "ClientStream",
-    "ClientStreamDesc",
-    "Client",
-    "Stream",
-    "create_stream",
-    "create_stream_client",
-    "default_stream_client",
+    "ClientStreamFactory",
+    "create_client_stream_factory",
+    "get_default_client_stream_factory",
     # Server
     "ServerStream",
     "ServerStreamHandle",

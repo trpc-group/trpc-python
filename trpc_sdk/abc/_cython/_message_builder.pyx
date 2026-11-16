@@ -40,7 +40,7 @@ cpdef TrpcFrameHead create_frame_head(
 ):
     """Create a frame header with the supplied routing fields.
 
-    ``stx``, ``package_len``, and ``head_len`` stay 0; the pack paths fill
+    ``magic``, ``package_len``, and ``head_len`` stay 0; the pack paths fill
     them when the frame is serialized.
 
     Args:
@@ -82,7 +82,7 @@ cpdef TrpcFrameHead parse_frame_head(bytes data):
     frame_head = TrpcFrameHead()
 
     memcpy(&value16, data_ptr, sizeof(uint16_t))
-    frame_head.stx = ntohs(value16)
+    frame_head.magic = ntohs(value16)
     frame_head.frame_type = data_ptr[2]
     frame_head.frame_state = data_ptr[3]
 
@@ -103,7 +103,7 @@ cdef inline void _copy_frame_head(
     TrpcFrameHead target,
 ) noexcept:
     """Copy native frame-header fields without sharing mutable state."""
-    target.stx = source.stx
+    target.magic = source.magic
     target.frame_type = source.frame_type
     target.frame_state = source.frame_state
     target.package_len = source.package_len

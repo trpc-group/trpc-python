@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Shared types for runtime components.
 
 Holds the pre-fork records the worker / server adapter fill before any child exists.
@@ -18,7 +17,6 @@ from dataclasses import field
 from multiprocessing import Process
 from typing import Any
 from typing import Callable
-from typing import Dict
 from typing import List
 from typing import Optional
 from typing import Tuple
@@ -26,6 +24,7 @@ from typing import Type
 
 from trpc_sdk.transport import encode_worker_msg_req
 from trpc_sdk.utils import PipeConnection
+
 
 @dataclass
 class ChildProcessInfo:

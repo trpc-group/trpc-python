@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Shared lookup helpers for naming selector plugins.
 
 :func:`get_selector` used to be copied in ``ip_selector``,

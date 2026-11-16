@@ -54,7 +54,7 @@ async def test_task_frame_round_trip_and_server_stream_recv():
 
     opts = ServiceOption()
     opts.set_protocol("trpc")
-    opts.current_serialization_type = SerializationType.Noop
+    opts.current_serialization_type = SerializationType.NOOP
     ctx = TrpcContext()
     get_message(ctx).stream_id = 1
     server_stream = ServerStream(ctx, 1, opts)

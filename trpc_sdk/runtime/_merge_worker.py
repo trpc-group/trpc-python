@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Worker of ``merge`` mode: one process accepts, decodes and runs handlers.
 
 There is no dispatcher and no worker child process here. This worker *is* the
@@ -66,6 +65,7 @@ from trpc_sdk.abc import BaseServerTransport
 from trpc_sdk.abc import ProcessType
 from trpc_sdk.log import logger
 from trpc_sdk.transport import UserProtocolTransport
+
 from ._constants import LOOP_THREAD_STOP_TIMEOUT
 from ._threadmodel import HandlerThreadInfo
 from ._threadmodel import LoopThread
@@ -232,8 +232,7 @@ class MergeWorker(BaseWorker):
         that fails to listen aborts startup with status 1 rather than
         leaving the process half-listening.
         """
-        logger.info("[merge worker] %s start_worker_process(), serving loops: %s", type(self).__name__,
-                    self.thread_num)
+        logger.info("[merge worker] %s start_worker_process(), serving loops: %s", type(self).__name__, self.thread_num)
         for transport in self.transports:
             try:
                 if isinstance(transport, UserProtocolTransport):

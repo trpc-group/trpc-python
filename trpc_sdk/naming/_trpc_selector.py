@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Composite selector that chains discovery, routing, load balancing, and breaking.
 
 :class:`TrpcSelector` is the default client selector constructed in
@@ -45,11 +44,10 @@ from trpc_sdk.abc import SelectorOption
 from trpc_sdk.plugin import get_plugin
 
 from ._constants import TRPC_SELECTOR_NAME
-from ._defaults import get_default_circuitbreaker
+from ._defaults import get_default_circuit_breaker
 from ._defaults import get_default_discovery
 from ._defaults import get_default_loadbalance
-from ._defaults import get_default_servicerouter
-from ._selector_lookup import get_selector
+from ._defaults import get_default_service_router
 
 
 class TrpcSelector(BaseSelector):
@@ -64,8 +62,8 @@ class TrpcSelector(BaseSelector):
         self.selector_plugin_name = TRPC_SELECTOR_NAME
         self.discovery = ""
         self.loadbalance = ""
-        self.circuitbreaker = ""
-        self.servicerouter = ""
+        self.circuit_breaker = ""
+        self.service_router = ""
 
     async def select(self, service_name: str, opt: SelectorOption) -> Node:
         """Resolve one node for ``service_name`` through the naming plugins.
@@ -84,63 +82,51 @@ class TrpcSelector(BaseSelector):
                 registered; or no node remains after discovery/routing.
         """
         if service_name == "":
-            raise Exception(
-                "TrpcSelector.select received an empty service_name; "
-                "pass a non-empty target or callee service name"
-            )
+            raise Exception("TrpcSelector.select received an empty service_name; "
+                            "pass a non-empty target or callee service name")
 
         namespace = opt.namespace
 
         self.discovery = get_default_discovery()
         self.loadbalance = get_default_loadbalance()
-        self.circuitbreaker = get_default_circuitbreaker()
-        self.servicerouter = get_default_servicerouter()
+        self.circuit_breaker = get_default_circuit_breaker()
+        self.service_router = get_default_service_router()
         if opt.discovery != "":
             self.discovery = opt.discovery
         if opt.loadbalance != "":
             self.loadbalance = opt.loadbalance
         if opt.circuit_breaker != "":
-            self.circuitbreaker = opt.circuit_breaker
+            self.circuit_breaker = opt.circuit_breaker
         if opt.service_router != "":
-            self.servicerouter = opt.service_router
+            self.service_router = opt.service_router
 
-        discovery_instance: Optional[BaseDiscovery] = get_plugin(
-            PluginType.NAMING_DISCOVERY, self.discovery)
-        loadbalance_instance: Optional[BaseLoadBalance] = get_plugin(
-            PluginType.NAMING_LOADBALANCE, self.loadbalance)
-        circuitbreaker_instance: Optional[BaseCircuitBreaker] = get_plugin(
-            PluginType.NAMING_CIRCUIT_BREAKER, self.circuitbreaker)
-        servicerouter_instance: Optional[BaseServiceRouter] = get_plugin(
-            PluginType.NAMING_SERVICE_ROUTER, self.servicerouter)
+        discovery_instance: Optional[BaseDiscovery] = get_plugin(PluginType.NAMING_DISCOVERY, self.discovery)
+        loadbalance_instance: Optional[BaseLoadBalance] = get_plugin(PluginType.NAMING_LOADBALANCE, self.loadbalance)
+        circuit_breaker_instance: Optional[BaseCircuitBreaker] = get_plugin(PluginType.NAMING_CIRCUIT_BREAKER,
+                                                                            self.circuit_breaker)
+        service_router_instance: Optional[BaseServiceRouter] = get_plugin(PluginType.NAMING_SERVICE_ROUTER,
+                                                                          self.service_router)
 
         if discovery_instance is None:
-            raise Exception(
-                f"TrpcSelector.select cannot resolve service {service_name!r}: "
-                f"discovery plugin {self.discovery!r} is not registered under "
-                f"PluginType.NAMING_DISCOVERY; register the plugin before calling "
-                f"select()"
-            )
+            raise Exception(f"TrpcSelector.select cannot resolve service {service_name!r}: "
+                            f"discovery plugin {self.discovery!r} is not registered under "
+                            f"PluginType.NAMING_DISCOVERY; register the plugin before calling "
+                            f"select()")
         if loadbalance_instance is None:
-            raise Exception(
-                f"TrpcSelector.select cannot resolve service {service_name!r}: "
-                f"load-balance plugin {self.loadbalance!r} is not registered under "
-                f"PluginType.NAMING_LOADBALANCE; register the plugin before calling "
-                f"select()"
-            )
-        if circuitbreaker_instance is None:
-            raise Exception(
-                f"TrpcSelector.select cannot resolve service {service_name!r}: "
-                f"circuit-breaker plugin {self.circuitbreaker!r} is not registered "
-                f"under PluginType.NAMING_CIRCUIT_BREAKER; register the plugin "
-                f"before calling select()"
-            )
-        if servicerouter_instance is None:
-            raise Exception(
-                f"TrpcSelector.select cannot resolve service {service_name!r}: "
-                f"service-router plugin {self.servicerouter!r} is not registered "
-                f"under PluginType.NAMING_SERVICE_ROUTER; register the plugin "
-                f"before calling select()"
-            )
+            raise Exception(f"TrpcSelector.select cannot resolve service {service_name!r}: "
+                            f"load-balance plugin {self.loadbalance!r} is not registered under "
+                            f"PluginType.NAMING_LOADBALANCE; register the plugin before calling "
+                            f"select()")
+        if circuit_breaker_instance is None:
+            raise Exception(f"TrpcSelector.select cannot resolve service {service_name!r}: "
+                            f"circuit-breaker plugin {self.circuit_breaker!r} is not registered "
+                            f"under PluginType.NAMING_CIRCUIT_BREAKER; register the plugin "
+                            f"before calling select()")
+        if service_router_instance is None:
+            raise Exception(f"TrpcSelector.select cannot resolve service {service_name!r}: "
+                            f"service-router plugin {self.service_router!r} is not registered "
+                            f"under PluginType.NAMING_SERVICE_ROUTER; register the plugin "
+                            f"before calling select()")
 
         node = await discovery_instance.select_node(service_name, opt)
         discovered_count: Optional[int] = None
@@ -150,8 +136,7 @@ class TrpcSelector(BaseSelector):
         if node is None:
             node_list: List[Node] = await discovery_instance.list(service_name, namespace)
             discovered_count = len(node_list)
-            node_list = await servicerouter_instance.filter(
-                service_name, node_list, opt.service_router_opt)
+            node_list = await service_router_instance.filter(service_name, node_list, opt.service_router_opt)
             filtered_count = len(node_list)
             node = await loadbalance_instance.select(service_name, node_list, namespace)
 
@@ -163,20 +148,16 @@ class TrpcSelector(BaseSelector):
             elif filtered_count == 0:
                 reason = "service router filtered out every discovered node"
             else:
-                reason = (
-                    f"load balancer returned no node "
-                    f"(discovery returned {discovered_count} node(s), "
-                    f"service router kept {filtered_count})"
-                )
-            raise Exception(
-                f"TrpcSelector.select found no usable node for service "
-                f"{service_name!r} in namespace {namespace!r}: {reason}"
-            )
+                reason = (f"load balancer returned no node "
+                          f"(discovery returned {discovered_count} node(s), "
+                          f"service router kept {filtered_count})")
+            raise Exception(f"TrpcSelector.select found no usable node for service "
+                            f"{service_name!r} in namespace {namespace!r}: {reason}")
 
         if node.metadata is None:
             node.metadata = {}
 
-        node.metadata["circuitbreaker"] = circuitbreaker_instance
+        node.metadata["circuit_breaker"] = circuit_breaker_instance
         return node
 
     async def report(self, node: Node, cost: int, success: int) -> NoReturn:
@@ -184,7 +165,7 @@ class TrpcSelector(BaseSelector):
 
         Args:
             node: The node :meth:`select` returned. Must carry
-                ``metadata['circuitbreaker']``.
+                ``metadata['circuit_breaker']``.
             cost: Call duration passed to the breaker.
             success: Call result passed to the breaker.
 
@@ -193,16 +174,12 @@ class TrpcSelector(BaseSelector):
                 missing (the node did not come from :meth:`select`).
         """
         if node is None:
-            raise Exception(
-                "TrpcSelector.report requires the Node returned by select(); "
-                "got None"
-            )
+            raise Exception("TrpcSelector.report requires the Node returned by select(); "
+                            "got None")
         if node.metadata is None:
-            raise Exception(
-                "TrpcSelector.report requires node.metadata populated by "
-                "select() with a 'circuitbreaker' entry; got None"
-            )
-        breaker: BaseCircuitBreaker = node.metadata["circuitbreaker"]
+            raise Exception("TrpcSelector.report requires node.metadata populated by "
+                            "select() with a 'circuit_breaker' entry; got None")
+        breaker: BaseCircuitBreaker = node.metadata["circuit_breaker"]
         await breaker.report(node, cost, success)
 
     def get_selector_name(self) -> str:

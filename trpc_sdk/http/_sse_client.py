@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Server-Sent Events client."""
 
 from __future__ import annotations
@@ -11,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 from typing import AsyncIterator
 
-from ._client import Client
+from ._client import HttpClient
 from ._constants import HTTP_ARG_STREAM_KEY
 from ._http_response import TrpcHttpResponse
 from ._sse_event import SSEEvent
@@ -115,10 +114,10 @@ class SSEClient:
         """Create the underlying HTTP client.
 
         Args:
-            name: Name passed to :class:`Client` for config lookup.
+            name: Name passed to :class:`HttpClient` for config lookup.
             encoding: Text encoding of event stream bodies.
         """
-        self.http_client = Client(name)
+        self.http_client = HttpClient(name)
         self._encoding = encoding
 
     async def sse_iter_events(self,

@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Shared HTTP records: header names, URL parsing, session and lookups.
 
 This module holds the data types that codec, client transport and
@@ -26,6 +25,8 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Dict
 from typing import Optional
+from typing import TypeVar
+from typing import Mapping
 from urllib.parse import ParseResult
 from urllib.parse import urlparse
 from urllib.parse import urlunparse
@@ -39,8 +40,51 @@ from trpc_sdk.exceptions import TrpcErrorType
 from trpc_sdk.serialization import SerializationType
 
 from ._exceptions import InvalidURL
-from ._utils import find_from_dict
-from ._utils import reverse_dict
+
+_KT = TypeVar("_KT")
+_VT = TypeVar("_VT")
+
+
+def _reverse_dict(origin: Mapping[_KT, _VT]) -> Mapping[_VT, _KT]:
+    """Return a new mapping with keys and values swapped.
+
+    Duplicate values keep the last key that mapped to them, matching
+    the historical ``defines._reverse_dict`` behaviour. That is why
+    ``application/protobuf`` (and not ``application/x-protobuf``) is
+    the content type returned for :attr:`~trpc_sdk.serialization.SerializationType.PB`.
+
+    Args:
+        origin: Mapping to invert.
+
+    Returns:
+        A new mapping from values to keys.
+    """
+    reversed_map: dict[_VT, _KT] = {}
+    for key, value in origin.items():
+        reversed_map[value] = key
+    return reversed_map
+
+
+def _find_from_dict(
+    origin: Mapping[_KT, _VT],
+    key: _KT,
+    default: Optional[_VT] = None,
+) -> Optional[_VT]:
+    """Look ``key`` up in ``origin``, returning ``default`` if missing.
+
+    The HTTP lookup helpers in :mod:`trpc_sdk.http._types` bind ``origin``
+    with :func:`functools.partial`, so callers pass only ``key`` and
+    an optional ``default``.
+
+    Args:
+        origin: Mapping to search.
+        key: Key to look up.
+        default: Value returned when ``key`` is absent.
+
+    Returns:
+        The mapped value, or ``default``.
+    """
+    return origin.get(key, default)
 
 
 class HttpSession(threading.local):
@@ -92,7 +136,7 @@ _trpc_err_type_to_http_header: Dict[int, str] = {
     TrpcErrorType.BUSINESS: HTTP_TRPC_HEADER.trpc_user_func_error_code,
 }
 
-get_trpc_error_code = partial(find_from_dict, _trpc_err_type_to_http_header)
+get_trpc_error_code = partial(_find_from_dict, _trpc_err_type_to_http_header)
 
 _content_type_to_serialization_type: Dict[str, SerializationType] = {
     "application/json": SerializationType.JSON,
@@ -100,21 +144,20 @@ _content_type_to_serialization_type: Dict[str, SerializationType] = {
     "application/x-protobuf": SerializationType.PB,
     "application/pb": SerializationType.PB,
     "application/proto": SerializationType.PB,
-    "application/jce": SerializationType.JCE,
-    "application/flatbuffer": SerializationType.FlatBuffer,
-    "application/octet-stream": SerializationType.Noop,
-    "application/x-www-form-urlencoded": SerializationType.Form,
+    "application/flatbuffer": SerializationType.FLATBUFFER,
+    "application/octet-stream": SerializationType.NOOP,
+    "application/x-www-form-urlencoded": SerializationType.FORM,
 }
-_serialization_type_to_content_type = reverse_dict(_content_type_to_serialization_type)
+_serialization_type_to_content_type = _reverse_dict(_content_type_to_serialization_type)
 
-find_serialization_type = partial(find_from_dict, _content_type_to_serialization_type)
-find_content_type = partial(find_from_dict, _serialization_type_to_content_type)
+find_serialization_type = partial(_find_from_dict, _content_type_to_serialization_type)
+find_content_type = partial(_find_from_dict, _serialization_type_to_content_type)
 
-_content_encoding_to_compress_type: Dict[str, int] = {"gzip": CompressType.Gzip}
-_compress_type_to_content_encoding = reverse_dict(_content_encoding_to_compress_type)
+_content_encoding_to_compress_type: Dict[str, int] = {"gzip": CompressType.GZIP}
+_compress_type_to_content_encoding = _reverse_dict(_content_encoding_to_compress_type)
 
-find_compress_type = partial(find_from_dict, _content_encoding_to_compress_type)
-find_content_encoding = partial(find_from_dict, _compress_type_to_content_encoding)
+find_compress_type = partial(_find_from_dict, _content_encoding_to_compress_type)
+find_content_encoding = partial(_find_from_dict, _compress_type_to_content_encoding)
 
 _trpc_err_code_to_http_status: Dict[int, http.HTTPStatus] = {
     TrpcErrorCode.TRPC_INVOKE_SUCCESS: http.HTTPStatus.OK,
@@ -130,7 +173,7 @@ _trpc_err_code_to_http_status: Dict[int, http.HTTPStatus] = {
     TrpcErrorCode.TRPC_INVOKE_UNKNOWN_ERR: http.HTTPStatus.INTERNAL_SERVER_ERROR,
 }
 
-find_http_status = partial(find_from_dict, _trpc_err_code_to_http_status)
+find_http_status = partial(_find_from_dict, _trpc_err_code_to_http_status)
 
 
 class UrlParser:

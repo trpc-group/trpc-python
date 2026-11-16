@@ -12,11 +12,9 @@ from trpc_sdk.common import ProcessType
 from trpc_sdk.common import execute_after_in_child
 from trpc_sdk.common import execute_after_in_parent
 from trpc_sdk.common import execute_before_in_parent
-from trpc_sdk.common import execute_before_loop_run_in_child
 from trpc_sdk.common import register_at_fork
 from trpc_sdk.common import register_child_callback
 from trpc_sdk.common import set_current_process_var
-from trpc_sdk.common._process_hook import register_before_loop_run_in_child
 
 
 def _func(var: ProcessType = None):
@@ -24,7 +22,6 @@ def _func(var: ProcessType = None):
     if var:
         set_current_process_var('type', var)
     execute_after_in_child()
-    execute_before_loop_run_in_child()
 
 
 def _create_child_process(var: ProcessType = None):
@@ -62,7 +59,6 @@ def test_fork_hook():
             test_val.value += 1
 
     register_at_fork(before=_before, after_in_parent=_after, after_in_child=_after_in_child)
-    register_before_loop_run_in_child(_before_loop_in_child)
 
     print(f"master pid: {os.getpid()}")
     multiprocessing.set_start_method("fork", force=True)

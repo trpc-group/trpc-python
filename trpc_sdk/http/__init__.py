@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """tRPC-Python HTTP package: tRPC over aiohttp, plus a plain HTTP client.
 
 Public symbols are re-exported here. Callers should ``from trpc_sdk.http
@@ -31,13 +30,13 @@ The package is split by responsibility:
 
 from __future__ import annotations
 
-from ._client import Client
+from ._client import HttpClient
 from ._client_transport import HttpClientTransport
 from ._client_transport import register_http_session_params
-from ._codec import ClientHttpCodec
-from ._codec import ClientHttpParser
-from ._codec import ServerHttpCodec
-from ._codec import ServerHttpParser
+from ._codec import HttpClientCodec
+from ._codec import HttpClientParser
+from ._codec import HttpServerCodec
+from ._codec import HttpServerParser
 from ._constants import DEFAULT_SESSION_NAME
 from ._constants import HTTP
 from ._constants import HTTP_ARG_JSON
@@ -52,16 +51,6 @@ from ._constants import HTTPS
 from ._constants import LOCAL_ADDR
 from ._constants import TRANS_INFO_BASE64_KEY
 from ._constants import USER_ROUTE_KEY
-from ._context import get_http_header_in_client
-from ._context import get_http_ok_codes
-from ._context import get_http_request
-from ._context import get_http_response
-from ._context import get_http_rsp_header
-from ._context import get_http_status_in_client
-from ._context import pop_http_ok_codes
-from ._context import pop_http_rsp_header
-from ._context import set_http_ok_codes
-from ._context import set_http_rsp_header
 from ._ctx_manager import BaseRequestContextManager
 from ._ctx_manager import RequestContextManager
 from ._exceptions import InvalidURL
@@ -69,17 +58,27 @@ from ._http_request import HttpClientReqHeader
 from ._http_response import HttpClientRspHeader
 from ._http_response import TrpcHttpResponse
 from ._http_response import create_rsp_object
-from ._http_transport import HttpServerTransport
-from ._http_transport import HttpServerTransportFactory
 from ._options import get_options
+from ._utils import get_http_header_in_client
+from ._utils import get_http_ok_codes
+from ._utils import get_http_request
+from ._utils import get_http_response
+from ._utils import get_http_rsp_header
+from ._utils import get_http_status_in_client
+from ._utils import pop_http_ok_codes
+from ._utils import pop_http_rsp_header
+from ._utils import set_http_ok_codes
+from ._utils import set_http_rsp_header
 from ._routes import HttpDecodeCallback
 from ._routes import HttpRoute
-from ._routes import RegisteredRoutes
-from ._routes import StaticFileRouters
+from ._routes import get_registered_routes
+from ._routes import get_static_file_routers
 from ._routes import register_static
 from ._routes import register_user_http_decode_func
 from ._routes import route
 from ._serialization_form import FormSerializer
+from ._server_transport import HttpServerTransport
+from ._server_transport import HttpServerTransportFactory
 from ._sse_client import SSEClient
 from ._sse_client import SSEEventSource
 from ._sse_event import SSEEvent
@@ -93,17 +92,13 @@ from ._types import find_content_type
 from ._types import find_http_status
 from ._types import find_serialization_type
 from ._types import get_trpc_error_code
-from ._utils import check_url
-from ._utils import find_from_dict
-from ._utils import get_host
-from ._utils import reverse_dict
 
 __all__ = [
     # Codec
-    "ServerHttpCodec",
-    "ServerHttpParser",
-    "ClientHttpCodec",
-    "ClientHttpParser",
+    "HttpServerCodec",
+    "HttpServerParser",
+    "HttpClientCodec",
+    "HttpClientParser",
     # Server transport
     "HttpServerTransport",
     "HttpServerTransportFactory",
@@ -114,9 +109,7 @@ __all__ = [
     "register_http_session_params",
     "HttpSession",
     # HTTP client
-    "Client",
-    "check_url",
-    "get_host",
+    "HttpClient",
     "get_options",
     "BaseRequestContextManager",
     "RequestContextManager",
@@ -125,8 +118,8 @@ __all__ = [
     "SSEEventSource",
     # Routes
     "HttpRoute",
-    "RegisteredRoutes",
-    "StaticFileRouters",
+    "get_registered_routes",
+    "get_static_file_routers",
     "route",
     "register_static",
     # Context helpers
@@ -170,8 +163,6 @@ __all__ = [
     "find_compress_type",
     "find_content_encoding",
     "find_http_status",
-    "reverse_dict",
-    "find_from_dict",
     # Exceptions
     "InvalidURL",
     # Serialization

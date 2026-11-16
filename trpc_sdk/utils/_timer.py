@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Timer tasks, their registration records, and per-process / per-thread executors.
 
 Decorators run at import time in the parent. The executor instantiates
@@ -185,8 +184,8 @@ class TimerExecutor:
             the process executor.
     """
 
-    __slots__ = ("loop", "name", "thread_index", "_timers", "_handles", "_tasks", "_built", "_started",
-                 "_owner_pid", "_owner_tid")
+    __slots__ = ("loop", "name", "thread_index", "_timers", "_handles", "_tasks", "_built", "_started", "_owner_pid",
+                 "_owner_tid")
 
     def __init__(self,
                  loop: Optional[asyncio.AbstractEventLoop] = None,

@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Background naming-service registration for one :class:`~trpc_sdk.server._cython._service.ServiceAdapter`.
 
 :func:`start_service_registry` gives every service with a configured
@@ -81,8 +80,7 @@ class RegistryThread(threading.Thread):
         self._running: bool = True
         self.deregister_done: threading.Semaphore = deregister_done
         self.daemon = daemon
-        self._loop: asyncio.AbstractEventLoop = get_async_lib(
-            TrpcConfig.global_config().enable_uvloop).new_event_loop()
+        self._loop: asyncio.AbstractEventLoop = get_async_lib(TrpcConfig.global_config().enable_uvloop).new_event_loop()
 
     def terminate(self) -> None:
         """Ask the retry loop to stop and cancel the in-flight register task.
@@ -144,9 +142,7 @@ class ServiceRegister:
         """
         if self.opt.registry_option == 1:
             warm_up()
-        self.thread = RegistryThread(self._register,
-                                     self._deregister,
-                                     self.opt.app.server_adapter.registry_semaphore)
+        self.thread = RegistryThread(self._register, self._deregister, self.opt.app.server_adapter.registry_semaphore)
         self.thread.start()
 
     def stop(self) -> None:

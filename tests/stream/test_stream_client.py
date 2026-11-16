@@ -14,16 +14,16 @@ import pytest
 from trpc_sdk._inner import trpc_pb2
 from trpc_sdk.abc import TrpcContext
 from trpc_sdk.abc import get_message
+from trpc_sdk.abc import ClientStreamDesc
 from trpc_sdk.client import Options
 from trpc_sdk.codec import FrameHead
 from trpc_sdk.exceptions import ClientDecodeError
 from trpc_sdk.exceptions import ClientTimeoutError
 from trpc_sdk.exceptions import ServerSystemError
 from trpc_sdk.stream import ClientStream
-from trpc_sdk.stream import ClientStreamDesc
 from trpc_sdk.stream import ReceiveControl
 from trpc_sdk.stream import SendControl
-from trpc_sdk.stream import create_stream_client
+from trpc_sdk.stream import create_client_stream_factory
 from trpc_sdk.stream import get_window_size
 from trpc_sdk.stream._constants import MAX_INIT_WINDOW_SIZE
 from trpc_sdk.stream._constants import STREAM_ID
@@ -33,7 +33,7 @@ from trpc_sdk.stream import _client as stream_mod
 def _client_stream():
     ctx = TrpcContext()
     get_message(ctx)
-    stream = ClientStream(ctx, ClientStreamDesc(stream_name="/method", client_streams=True), 101, "/method")
+    stream = ClientStream(ctx, ClientStreamDesc(name="/method"), 101)
     stream.stream = SimpleNamespace(send=AsyncMock(), recv=AsyncMock(), close=MagicMock(), start=AsyncMock())
     stream.opts = Options()
     stream.opts.r_control = None
@@ -44,8 +44,8 @@ def _client_stream():
 
 
 def test_create_stream_client_starts_after_reserved_ids():
-    client = create_stream_client()
-    assert client.stream_id == STREAM_ID
+    factory = create_client_stream_factory()
+    assert factory.stream_id == STREAM_ID
 
 
 @pytest.mark.asyncio

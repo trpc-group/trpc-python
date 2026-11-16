@@ -35,8 +35,8 @@ def test_message():
     assert 1000 == msg.timeout
     msg.set_serialization_type(SerializationType.PB)
     assert SerializationType.PB == msg.serialization_type
-    msg.set_compress_type(CompressType.Noop)
-    assert CompressType.Noop == msg.compress_type
+    msg.set_compress_type(CompressType.NOOP)
+    assert CompressType.NOOP == msg.compress_type
     msg.set_dyeing(True)
     assert True is msg.dyeing
     msg.set_dyeing_key("hellotrpc")

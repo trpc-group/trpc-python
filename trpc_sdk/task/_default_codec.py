@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Process-wide default task body codec.
 
 The framing between a worker and a task child is fixed, but the body is
@@ -21,7 +20,6 @@ import pickle
 from typing import Optional
 
 from trpc_sdk.abc import TaskCodec
-
 
 DEFAULT_TASK_CODEC: Optional[TaskCodec] = None
 

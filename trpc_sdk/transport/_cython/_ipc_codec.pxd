@@ -15,6 +15,7 @@
 from libc.stdint cimport uint8_t
 from libc.stdint cimport uint16_t
 from libc.stdint cimport uint32_t
+from libc.stdint cimport uint64_t
 
 
 # Datagram-IPC header used on the C dispatcher pipe. Not the stream
@@ -41,10 +42,6 @@ cdef struct DataHeader:
 # A macro in driver.h, so there is no symbol to link against.
 cdef enum:
     GLOBAL_MAX_IPC_SIZE = 8 * 1024
-
-ctypedef unsigned short ushort
-ctypedef unsigned int uint
-ctypedef unsigned long ulong
 
 
 cdef class InnerStreamParser:

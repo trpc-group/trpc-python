@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """UDP round-trip helper used by :class:`ClientTransport`.
 
 Opens a connected datagram endpoint via
@@ -24,6 +23,7 @@ from trpc_sdk.rpcz import RPCZ_CLIENT_RSP_SIZE_CTX_KEY
 from trpc_sdk.utils import now_ms
 from trpc_sdk.utils import now_us
 from trpc_sdk.utils import set_addr_to_ctx_from_transport
+
 from .._constants import RequestType
 from ._udp_connection import open_datagram_endpoint
 from ._options import RoundTripOptions

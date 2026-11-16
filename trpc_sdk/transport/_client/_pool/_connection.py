@@ -3,11 +3,10 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Pooled wrapper around a dialed asyncio stream.
 
-Callers receive a :class:`PooledConnection` from
-:func:`~trpc_sdk.transport._pool.get_pool_connection`. ``close()``
+Callers receive a :class:`Connection` from
+:func:`~trpc_sdk.transport._client._pool.get_pool_connection`. ``close()``
 returns it to the pool; ``force_close()`` tears down the socket.
 ``read`` / ``write`` failures call ``pool.put(self, True)`` before
 re-raising so a broken conn is not reused.
@@ -29,10 +28,11 @@ from trpc_sdk.utils import close_socket
 from trpc_sdk.utils import is_close_wait
 from trpc_sdk.utils import is_valid_socket
 
-from ._base import BasePool
+from ._base import BaseConnection
+from ._base import BaseConnectionPool
 
 
-class PooledConnection:
+class Connection(BaseConnection):
     """One TCP (or Unix) connection borrowed from a client pool.
 
     ``begin_time`` is stamped when the conn is put back idle; the pool
@@ -41,7 +41,7 @@ class PooledConnection:
 
     Args:
         reader: Reader half from
-            :func:`~trpc_sdk.transport._pool._dial.dial_connection`.
+            :func:`~trpc_sdk.transport._client._pool._dial.dial_connection`.
         writer: Writer half of the same stream.
         loop: Event loop the stream was dialed on.
         pool: Pool (or short-conn factory) that will take this conn
@@ -51,14 +51,8 @@ class PooledConnection:
             force-closed on return.
     """
 
-    def __init__(
-            self,
-            reader: StreamReader,
-            writer: StreamWriter,
-            loop: BaseEventLoop,
-            pool: BasePool,
-            address: AddrType,
-            is_short: bool):
+    def __init__(self, reader: StreamReader, writer: StreamWriter, loop: BaseEventLoop, pool: BaseConnectionPool,
+                 address: AddrType, is_short: bool):
         self._reader = reader
         self._writer = writer
         self._created_time = time.time()

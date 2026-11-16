@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Filter-chain half of rpcz: sampling and span creation.
 
 Importing this package registers ``RpczServerFilter`` and

@@ -19,7 +19,7 @@ from trpc_sdk.compressor import CompressType
 from trpc_sdk.config import ClientServiceConfig
 from trpc_sdk.serialization import SerializationType
 from trpc_sdk.transport import ClientTransport
-from trpc_sdk.transport import ConnPoolOptions
+from trpc_sdk.transport import KeepLiveConnPoolOptions
 
 
 def test_options():
@@ -56,17 +56,14 @@ def test_options():
     opts.set_timeout(1000)
     assert opts.timeout == 1000
 
-    opts.set_current_serialization_type(SerializationType.JCE)
-    assert opts.current_serialization_type == SerializationType.JCE
-
     opts.set_serialization_type(SerializationType.JSON)
     assert opts.serialization_type == SerializationType.JSON
 
-    opts.set_current_compress_type(CompressType.Snappy)
-    assert opts.current_compress_type == CompressType.Snappy
+    opts.set_current_compress_type(CompressType.SNAPPY)
+    assert opts.current_compress_type == CompressType.SNAPPY
 
-    opts.set_compress_type(CompressType.ZLib)
-    assert opts.compress_type == CompressType.ZLib
+    opts.set_compress_type(CompressType.ZLIB)
+    assert opts.compress_type == CompressType.ZLIB
 
     opts.set_transport(ClientTransport())
     assert isinstance(opts.transport, ClientTransport)
@@ -107,16 +104,16 @@ def test_options():
     opts.set_callee_setname('test_callee_setname')
     assert opts.selector_options.dst_setname == 'test_callee_setname'
 
-    opts.set_caller_envname('test_caller_envname')
+    opts.set_caller_env_name('test_caller_envname')
     assert opts.selector_options.src_env_name == 'test_caller_envname'
 
-    opts.set_callee_envname('test_callee_envname')
+    opts.set_callee_env_name('test_callee_envname')
     assert opts.selector_options.dst_env_name == 'test_callee_envname'
 
     opts.set_max_window_size(65536)
     assert opts.max_window_size == 65536
 
-    conn_pool_opts = ConnPoolOptions(dial_timeout=100)
+    conn_pool_opts = KeepLiveConnPoolOptions(dial_timeout=100)
     opts.set_pool_opts(conn_pool_opts)
     assert opts.call_options.pool_opts == conn_pool_opts
     assert opts.call_options.pool_opts.dial_timeout == 100
@@ -221,7 +218,7 @@ def test_load_client_config_discovery_and_connection_flags(monkeypatch):
         ("set_caller_namespace", "source-ns", lambda o: o.selector_options.src_namespace == "source-ns"),
         ("set_disable_service_router", True, lambda o: o.selector_options.disable_service_router is True),
         ("set_env_key", "env-key", lambda o: o.selector_options.env_key == "env-key"),
-        ("set_servicerouter_name", "router", lambda o: o.selector_options.service_router == "router"),
+        ("set_service_router_name", "router", lambda o: o.selector_options.service_router == "router"),
         ("set_key", "hash-key", lambda o: o.selector_options.key == "hash-key"),
         ("set_socket_type", "unix", lambda o: o.socket_type == "unix"),
         ("set_unix_path", "/tmp/service.sock", lambda o: o.unix_path == "/tmp/service.sock"),

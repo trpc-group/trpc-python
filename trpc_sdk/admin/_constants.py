@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Constants shared by the admin HTTP server and the worker WS client."""
 
 from __future__ import annotations

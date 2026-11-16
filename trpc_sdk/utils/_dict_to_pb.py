@@ -9,7 +9,6 @@
 # https://github.com/kaporzhu/protobuf-to-dict). That work is dedicated
 # to the public domain under the Unlicense. This file keeps only the
 # dict-to-protobuf direction.
-
 """Fill a protobuf message from a dict (form / query-string path).
 """
 
@@ -53,11 +52,11 @@ TYPE_CALLABLE_MAP = {
 
 
 def dict_to_protobuf(
-        pb_class_or_instance: PbMessage,
-        values: Dict[str, Any],
-        type_callable_map: Optional[Dict[Any, Any]] = None,
-        strict: bool = True,
-        ignore_none: bool = False,
+    pb_class_or_instance: PbMessage,
+    values: Dict[str, Any],
+    type_callable_map: Optional[Dict[Any, Any]] = None,
+    strict: bool = True,
+    ignore_none: bool = False,
 ) -> PbMessage:
     """Populate a protobuf message from a dictionary.
 
@@ -85,9 +84,9 @@ def dict_to_protobuf(
 
 
 def _collect_field_entries(
-        pb_msg: PbMessage,
-        values: Dict[str, Any],
-        strict: bool,
+    pb_msg: PbMessage,
+    values: Dict[str, Any],
+    strict: bool,
 ) -> List[Tuple[FieldDescriptor, Any, object]]:
     """Resolve dict keys to ``(descriptor, input_value, target)`` entries.
 
@@ -133,11 +132,11 @@ def _collect_field_entries(
 
 
 def _fill_message(
-        pb_msg: PbMessage,
-        values: Dict[str, Any],
-        type_callable_map: Dict[Any, Any],
-        strict: bool,
-        ignore_none: bool,
+    pb_msg: PbMessage,
+    values: Dict[str, Any],
+    type_callable_map: Dict[Any, Any],
+    strict: bool,
+    ignore_none: bool,
 ) -> PbMessage:
     """Write every resolved entry of ``values`` onto ``pb_msg``.
 
@@ -191,11 +190,11 @@ def _fill_message(
 
 
 def _extend_repeated_field(
-        field: FieldDescriptor,
-        items: Iterable,
-        target: object,
-        type_callable_map: Dict[Any, Any],
-        strict: bool,
+    field: FieldDescriptor,
+    items: Iterable,
+    target: object,
+    type_callable_map: Dict[Any, Any],
+    strict: bool,
 ) -> None:
     """Append coerced scalar ``items`` to the repeated container ``target``.
 
@@ -224,10 +223,10 @@ def _extend_repeated_field(
 
 
 def _coerce_scalar(
-        field: FieldDescriptor,
-        input_value: Any,
-        type_callable_map: Dict[Any, Any],
-        strict: bool,
+    field: FieldDescriptor,
+    input_value: Any,
+    type_callable_map: Dict[Any, Any],
+    strict: bool,
 ) -> Optional[Any]:
     """Convert one raw value to the Python type expected by ``field``.
 

@@ -279,4 +279,3 @@ When each callback runs:
 - `after_in_parent`: in the parent, **after** `fork`.
 - `after_in_child`: in each child, immediately after that child is forked.
 - `register_child_callback(func, process_type)`: immediately after `after_in_child`, filtered by child role. `ProcessType.WORKER` runs only in a business worker child. `ProcessType.TASK` runs only in a task child.
-- `register_before_loop_run_in_child(func)`: after the child has finished plugin initialization, and before it enters `loop.run_forever()`.

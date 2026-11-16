@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Cython framing and queues of the worker/task IPC protocol."""
 
 from ._task_frame import inner_decode_task_req  # pyright: ignore[reportMissingModuleSource]

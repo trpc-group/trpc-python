@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """HTTP client transport: turn a TrpcMessage into an aiohttp round trip.
 
 :class:`HttpClientTransport.round_trip` is the plugin behind protocol
@@ -35,6 +34,7 @@ from trpc_sdk.plugin import register_plugin
 from trpc_sdk.serialization import SerializationType
 from trpc_sdk.transport import RoundTripOptions
 from trpc_sdk.utils import now_ms
+
 from ._constants import DEFAULT_SESSION_NAME
 from ._constants import HTTP
 from ._constants import HTTP_ARG_JSON
@@ -50,7 +50,6 @@ from ._types import UrlParser
 from ._types import find_content_encoding
 from ._types import find_content_type
 
-
 _http_session_params: Dict[str, Dict[str, Any]] = {}
 
 
@@ -61,7 +60,7 @@ def register_http_session_params(params: dict, name: str = DEFAULT_SESSION_NAME)
         params: Keyword arguments forwarded to ``ClientSession``.
         name: Session name; ``DEFAULT_SESSION_NAME`` is the shared one.
     """
-    global _http_session_params
+    global _http_session_params  # noqa: F824
     _http_session_params[name] = params
 
 
@@ -139,7 +138,7 @@ class HttpClientTransport(BaseClientTransport):
         headers[HTTP_TRPC_HEADER.trpc_callee] = msg.callee_service_name
         headers[HTTP_TRPC_HEADER.trpc_timeout] = str(msg.timeout)
 
-        if msg.serialization_type != SerializationType.Noop:
+        if msg.serialization_type != SerializationType.NOOP:
             headers[hdrs.CONTENT_TYPE] = find_content_type(msg.serialization_type, "")
         if msg.compress_type:
             headers[hdrs.CONTENT_ENCODING] = find_content_encoding(msg.compress_type, "")

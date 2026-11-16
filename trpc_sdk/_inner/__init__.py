@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Private inner symbols re-exported for the rest of the SDK.
 
 :class:`MemoryInspector` is resolved lazily: it pulls in tracemalloc,

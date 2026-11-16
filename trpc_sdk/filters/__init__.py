@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Unary filter chain helpers."""
 
 from ._cython import FilterChain  # pyright: ignore[reportMissingModuleSource]

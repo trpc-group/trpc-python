@@ -3,13 +3,10 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
+"""Types used by the tRPC naming module."""
 
-"""Service node data model.
-
-This module defines the ``Node`` dataclass used by naming, load balancing, and
-circuit breaker components to describe one selectable service endpoint.
-"""
 from __future__ import annotations
+
 from dataclasses import dataclass
 
 

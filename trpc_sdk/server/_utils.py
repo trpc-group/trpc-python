@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Bind-info file writer used by :func:`~trpc_sdk.server.create_server`."""
 
 from __future__ import annotations

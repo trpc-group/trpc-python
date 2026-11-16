@@ -3,14 +3,13 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Built-in no-op circuit breaker.
 
 :class:`NoopCircuitBreaker` is registered as
-:data:`~trpc_sdk.naming._constants.DEFAULT_CIRCUITBREAKER_NAME`. It reports
+:data:`~trpc_sdk.naming._constants.DEFAULT_CIRCUIT_BREAKER_NAME`. It reports
 every node as available and ignores :meth:`report`. Real breakers
 (Polar, and so on) replace it through
-:func:`~trpc_sdk.naming.set_default_circuitbreaker` or
+:func:`~trpc_sdk.naming.set_default_circuit_breaker` or
 :meth:`~trpc_sdk.abc.SelectorOption.set_circuit_breaker`.
 """
 
@@ -22,10 +21,11 @@ from trpc_sdk.abc import BaseCircuitBreaker
 from trpc_sdk.abc import Node
 from trpc_sdk.abc import PluginType
 from trpc_sdk.plugin import register_plugin
-from ._constants import DEFAULT_CIRCUITBREAKER_NAME
+
+from ._constants import DEFAULT_CIRCUIT_BREAKER_NAME
 
 
-@register_plugin(PluginType.NAMING_CIRCUIT_BREAKER, DEFAULT_CIRCUITBREAKER_NAME)
+@register_plugin(PluginType.NAMING_CIRCUIT_BREAKER, DEFAULT_CIRCUIT_BREAKER_NAME)
 class NoopCircuitBreaker(BaseCircuitBreaker):
     """Circuit breaker that never trips.
 

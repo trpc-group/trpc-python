@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Server-side descriptors and extension interfaces.
 
 This module defines service method descriptors, streaming interfaces, process
@@ -69,7 +68,7 @@ class StreamDesc:
 
     name: str
     impl_func: Callable[..., Any]
-    server_stream: Any
+    server_stream: "BaseServerStream"
 
 
 @dataclass

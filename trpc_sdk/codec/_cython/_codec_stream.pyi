@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Type hints for the stream-frame Cython client / server codec.
 
 Python :class:`~trpc_sdk.codec.TrpcClientCodec` / ``TrpcServerCodec`` hold one

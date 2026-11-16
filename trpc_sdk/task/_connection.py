@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """asyncio protocols for both ends of the worker <-> task IPC pipe.
 
 The worker forks each task child before its event loop starts; the socketpair
@@ -26,6 +25,7 @@ from trpc_sdk.exceptions import ServerDecodeError
 from trpc_sdk.log import logger
 from trpc_sdk.telemetry import report_attr
 from trpc_sdk.transport import InnerStreamParser
+
 from ._cython import inner_decode_task_rsp
 from ._cython import receive_pkg_from_worker
 from ._utils import receive_from_task

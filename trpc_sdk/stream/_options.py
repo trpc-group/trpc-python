@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Option helpers for the streaming protocol.
 
 Window size is the one stream-level option that needs clamping before it

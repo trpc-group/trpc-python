@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Worker-side helpers for talking to task child processes.
 
 The worker never runs a task handler inline: it encodes the request, writes
@@ -18,6 +17,7 @@ from typing import Optional
 
 from trpc_sdk.abc import TrpcContext
 from trpc_sdk.exceptions import TaskHandleError
+
 from ._cython import inner_encode_task_req
 from ._types import TaskRegistry
 from ._types import TaskStatusCode

@@ -53,14 +53,14 @@ if _ROOT_S not in sys.path:
 
 from trpc_sdk.abc import TrpcContext  # noqa: E402
 from trpc_sdk.abc import get_message  # noqa: E402
+from trpc_sdk.abc import ClientStreamDesc  # noqa: E402
 from trpc_sdk.client import Options  # noqa: E402
 from trpc_sdk.config import TrpcConfig  # noqa: E402
 from trpc_sdk.plugin import init_plugins  # noqa: E402
 from trpc_sdk.serialization import SerializationType  # noqa: E402
-from trpc_sdk.stream import ClientStreamDesc  # noqa: E402
-from trpc_sdk.stream import default_stream_client  # noqa: E402
+from trpc_sdk.stream import get_default_client_stream_factory  # noqa: E402
 from trpc_sdk.transport import get_default_client_transport  # noqa: E402
-from trpc_sdk.transport import ClientConn  # noqa: E402
+from trpc_sdk.transport import ClientStreamConn  # noqa: E402
 
 from features.separate._servicer import HTTP_PATH  # noqa: E402
 from features.separate._servicer import STREAM_METHOD  # noqa: E402
@@ -794,7 +794,7 @@ async def _open_two_streams(port: int, service: str) -> List[Tuple[int, int]]:
 
     async def _start_stream(ctx, options) -> None:
         stream_id = get_message(ctx).stream_id
-        transport.stream_id_to_conn[stream_id] = ClientConn(shared.conn(stream_id), options)
+        transport.stream_id_to_conn[stream_id] = ClientStreamConn(shared.conn(stream_id), options)
 
     transport.start_stream = _start_stream
     try:
@@ -807,8 +807,9 @@ async def _open_two_streams(port: int, service: str) -> List[Tuple[int, int]]:
             msg.set_serialization_type(SerializationType.PB)
             options = (Options().set_target(f"ip://127.0.0.1:{port}").set_network("tcp").set_protocol("trpc").
                        set_serialization_type(SerializationType.PB).set_namespace("Development").set_timeout(8000))
-            desc = ClientStreamDesc(method, False)
-            stream = await default_stream_client.create_client_stream(ctx, desc, method, [options])
+            desc = ClientStreamDesc(name=method)
+            stream_factory = get_default_client_stream_factory()
+            stream = await stream_factory.create_client_stream(ctx, desc, [options])
             reply = pb.HelloReply()
             await stream.recv_msg(reply)
             match = _STREAM_RE.search(reply.msg)

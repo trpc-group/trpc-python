@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Shared type aliases for :mod:`trpc_sdk.utils`.
 
 Address, IP, and port aliases are used by :mod:`trpc_sdk.utils._address`

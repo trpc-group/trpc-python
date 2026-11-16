@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Unary/stream dispatch layer for the ``"trpc"`` codec plugins.
 
 ``TrpcClientCodec`` and ``TrpcServerCodec`` own no packing logic of their own.

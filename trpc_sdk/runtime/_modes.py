@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Internal ``server.mode`` name -> worker class lookup.
 
 Three modes ship with the framework: ``merge``, where one process accepts and

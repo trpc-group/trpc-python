@@ -1,10 +1,10 @@
 # 怎么开发数据库插件
 
-在 tRPC-Python 中，如果希望访问 Redis、MySQL 等存储时，能够复用 RPC 客户端的名字服务路由（`Selector`）、超时控制以及客户端拦截器（如监控上报、调用链追踪），可以通过自定义 `protocol` 将第三方数据库 SDK 接入 `Client.invoke` 调用链路。tRPC-Python 提供了 Redis、MySQL、Kafka 插件，可以参考生态仓库 [python-database](https://github.com/trpc-ecosystem/python-database)。
+在 tRPC-Python 中，如果希望访问 Redis、MySQL 等存储时，能够复用 RPC 客户端的名字服务路由（`Selector`）、超时控制以及客户端拦截器（如监控上报、调用链追踪），可以通过自定义 `protocol` 将第三方数据库 SDK 接入 `TrpcClient.invoke` 调用链路。tRPC-Python 提供了 Redis、MySQL、Kafka 插件，可以参考生态仓库 [python-database](https://github.com/trpc-ecosystem/python-database)。
 
 整体思路如下：
 
-1. **命令传递**：数据库 SDK 通常接收结构化的命令或参数，而非序列化后的字节流。调用方将请求体设为空字节 `b""`（配合 `SerializationType.Noop`），把真正的命令对象放进 `Options().set_req_head(command)`，通过消息头 `msg.client_req_head` 传给传输层。
+1. **命令传递**：数据库 SDK 通常接收结构化的命令或参数，而非序列化后的字节流。调用方将请求体设为空字节 `b""`（配合 `SerializationType.NOOP`），把真正的命令对象放进 `Options().set_req_head(command)`，通过消息头 `msg.client_req_head` 传给传输层。
 2. **协议占槽（`CLIENT_CODEC`）**：注册一个直通（pass-through）的客户端编解码器，对字节流原样透传。
 3. **执行调用（`CLIENT_TRANSPORT`）**：在客户端过滤器链末端的 `round_trip` 中，从 `options.address` 拿到路由解析出的 `(host, port)`，从 `msg.client_req_head` 拿到命令对象，调用第三方数据库 SDK 完成读写，并将结果写回命令对象。
 
@@ -18,7 +18,7 @@
 
 在 `trpc_python.yaml` 或调用参数中指定 `protocol: store` 时，`Options.set_protocol("store")` 会按以下顺序查找并挂载插件：
 
-1. **查找 `CLIENT_CODEC`**：调用 `get_client_codec(protocol)`。**如果未找到同名 codec，`set_protocol` 会直接返回**，不会继续替换后续的 checker 和 transport。此时 options 仍保留默认的 `trpc` transport，且 `opts.codec` 为 `None`，后续调用 `Client.invoke` 会在进入传输层前抛出 `ClientEncodeError("client codec empty")`。
+1. **查找 `CLIENT_CODEC`**：调用 `get_client_codec(protocol)`。**如果未找到同名 codec，`set_protocol` 会直接返回**，不会继续替换后续的 checker 和 transport。此时 options 仍保留默认的 `trpc` transport，且 `opts.codec` 为 `None`，后续调用 `TrpcClient.invoke` 会在进入传输层前抛出 `ClientEncodeError("client codec empty")`。
 2. **查找 `CLIENT_CHECKER`**：找到 codec 后，继续调用 `get_client_parser(protocol)` 设置分包器。数据库调用由第三方 SDK 自行管理连接与协议解析，不需要框架做 TCP 切帧，因此无需注册同名 checker（`set_parser(None)` 不会影响自定义 `round_trip`）。
 3. **查找 `CLIENT_TRANSPORT`**：调用 `get_client_transport(protocol)`。若存在同名实例，则用它替换 `_create_client_options` 默认设置的 `trpc` transport。
 
@@ -98,15 +98,15 @@ client:
 
 ## 4. 业务侧调用
 
-业务代码通过 `Client().invoke()` 发起调用时，有三个细节需要注意：
+业务代码通过 `TrpcClient().invoke()` 发起调用时，有三个细节需要注意：
 
 1. **先在 `message` 上设置被调服务名**：`get_options` 会先用调用时刻 `msg.callee_service_name` 的值去匹配 YAML 配置（`load_client_config`），随后才执行本次传入的 `Options` 覆盖项。因此必须在 `invoke` 之前调用 `msg.set_callee_service_name("trpc.app.server.store")`。如果只在 `Options().set_service_name(...)` 中设置名字，加载 YAML 的阶段已经结束，配置里的 `protocol` 和 `target` 将无法生效。
-2. **使用 `SerializationType.Noop` 与空字节请求体**：`NoopSerializer.serialize` 仅接受 `bytes` 或 `Body` 实例，不能直接把自定义的 `StoreCommand` 当作请求体 `req` 传入。正确做法是请求体传 `b""`、响应类型传 `Body`，并将 `command` 放到 `Options().set_req_head(command)` 中（`update_message` 会将其复制到 `msg.client_req_head`）。
+2. **使用 `SerializationType.NOOP` 与空字节请求体**：`NoopSerializer.serialize` 仅接受 `bytes` 或 `Body` 实例，不能直接把自定义的 `StoreCommand` 当作请求体 `req` 传入。正确做法是请求体传 `b""`、响应类型传 `Body`，并将 `command` 放到 `Options().set_req_head(command)` 中（`update_message` 会将其复制到 `msg.client_req_head`）。
 3. **确保插件模块已被导入**：服务启动时必须先 `import` 定义了 `StoreCodec` 和 `StoreTransport` 的模块，触发 `@register_plugin` 完成注册。
 
 ```python
 from trpc_sdk.abc import clone_client_message
-from trpc_sdk.client import Client
+from trpc_sdk.client import TrpcClient
 from trpc_sdk.client import Options
 from trpc_sdk.serialization import Body
 from trpc_sdk.serialization import SerializationType
@@ -122,14 +122,14 @@ async def execute(ctx, statement: str):
     ctx, _ = clone_client_message(ctx)
     ctx.get_message().set_callee_service_name("trpc.app.server.store")
     command = StoreCommand(statement)
-    await Client().invoke(
+    await TrpcClient().invoke(
         ctx,
         b"",
         Body,
         [
             Options()
             .set_req_head(command)
-            .set_serialization_type(SerializationType.Noop),
+            .set_serialization_type(SerializationType.NOOP),
         ],
     )
     return command.result

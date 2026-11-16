@@ -112,9 +112,9 @@ class TrpcServerTransport(BaseServerTransport):
     default. A subclass serving another protocol over the same listen
     machinery calls :meth:`set_io_connection`, overrides :meth:`_msg_handler`
     and, when the framing differs, sets another ``opts.parser``; its
-    connections are then :class:`DefaultIoConnection` objects. Datagrams
-    are always served by :class:`DefaultDatagramConnection`, which
-    hands every frame to :meth:`_msg_handler`.
+    connections are then :class:`DefaultIoConnection` objects. Datagrams are
+    always served by :class:`DefaultDatagramConnection`, which hands every
+    frame to :meth:`_msg_handler`.
 
     Attributes:
         opts: Options recorded by :meth:`bind`.

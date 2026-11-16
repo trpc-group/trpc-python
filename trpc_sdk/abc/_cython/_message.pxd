@@ -15,7 +15,7 @@ cimport cython
 
 cdef class TrpcFrameHead:
     cdef:
-        public uint16_t stx             # Protocol magic number identifying a tRPC frame.
+        public uint16_t magic             # Protocol magic number identifying a tRPC frame.
         public uint8_t frame_type       # Payload type encoded by this frame.
         public uint8_t frame_state      # Streaming lifecycle state represented by the frame.
         public uint32_t package_len     # Total frame size in bytes, including the header.
@@ -26,7 +26,7 @@ cdef class TrpcFrameHead:
     # Setters mirror the public fields one for one. They exist so Python
     # callers and statically typed Cython callers share a single spelling;
     # every one of them stores the host-endian value unchanged.
-    cpdef void set_stx(self, uint16_t stx) except *
+    cpdef void set_magic(self, uint16_t magic) except *
     cpdef void set_frame_type(self, uint8_t frame_type) except *
     cpdef void set_frame_state(self, uint8_t frame_state) except *
     cpdef void set_package_len(self, uint32_t package_len) except *

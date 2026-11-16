@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Business callbacks run when a server process receives SIGTERM.
 
 Master and worker processes keep separate callback lists because they shut down

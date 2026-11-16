@@ -3,11 +3,10 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """User-registered HTTP routes, static-file prefixes and the ``@route`` decode callback.
 
-``@route`` writes into :data:`RegisteredRoutes`; :func:`register_static`
-fills :data:`StaticFileRouters`. :class:`~trpc_sdk.http.HttpServerTransport`
+``@route`` writes into :data:`get_registered_routes`; :func:`register_static`
+fills :data:`get_static_file_routers`. :class:`~trpc_sdk.http.HttpServerTransport`
 reads both when it builds the aiohttp app, after fork: precise user routes
 first, then static prefixes, then the RPC catch-all.
 :func:`register_user_http_decode_func` replaces how a ``@route`` request is
@@ -29,17 +28,17 @@ from trpc_sdk.abc import TrpcContext
 class HttpRoute:
     """One user-registered HTTP callback.
 
-    Stored in :data:`RegisteredRoutes` and later bound onto aiohttp by
+    Stored in :data:`get_registered_routes` and later bound onto aiohttp by
     :class:`~trpc_sdk.http.HttpServerTransport`.
     ``service_name`` limits the route to one HTTP service when set.
     """
 
     def __init__(
-            self,
-            handler: Callable[[TrpcContext, Request], bytes],
-            method: str,
-            path: str,
-            service_name: Optional[str] = None,
+        self,
+        handler: Callable[[TrpcContext, Request], bytes],
+        method: str,
+        path: str,
+        service_name: Optional[str] = None,
     ) -> None:
         self.handler = handler
         self.method = method
@@ -47,8 +46,8 @@ class HttpRoute:
         self.service_name = service_name
 
 
-RegisteredRoutes: Dict[str, HttpRoute] = {}
-StaticFileRouters = {}
+_registered_routes: Dict[str, HttpRoute] = {}
+_static_file_routers: Dict[str, str] = {}
 
 HttpDecodeCallback = Callable[[TrpcContext], None]
 _user_http_decode_cb: Optional[HttpDecodeCallback] = None
@@ -75,7 +74,7 @@ def get_user_http_decode_func() -> Optional[HttpDecodeCallback]:
 def route(path: str, method: str = hdrs.METH_ANY, service_name: Optional[str] = None):
     """Register a custom HTTP handler on ``path``.
 
-    The decorator records the function into :data:`RegisteredRoutes`
+    The decorator records the function into :data:`get_registered_routes`
     keyed by ``path_method`` (plus ``_service_name`` when given). It
     does not wrap the function; the worker looks the record up later.
 
@@ -89,12 +88,12 @@ def route(path: str, method: str = hdrs.METH_ANY, service_name: Optional[str] = 
     """
 
     def decorator(f):
-        global RegisteredRoutes
+        global _registered_routes  # noqa: F824
         handler = HttpRoute(f, method, path, service_name)
         prefix = f"{path}_{method}"
         if service_name:
             prefix = f"{prefix}_{service_name}"
-        RegisteredRoutes[prefix] = handler
+        _registered_routes[prefix] = handler
 
     return decorator
 
@@ -106,5 +105,13 @@ def register_static(prefix: str, path_to_folder: str) -> None:
         prefix: HTTP path prefix, for example ``/static``.
         path_to_folder: Local directory that aiohttp should serve.
     """
-    global StaticFileRouters
-    StaticFileRouters[prefix] = path_to_folder
+    global _static_file_routers  # noqa: F824
+    _static_file_routers[prefix] = path_to_folder
+
+
+def get_registered_routes() -> Dict[str, HttpRoute]:
+    return _registered_routes
+
+
+def get_static_file_routers() -> Dict[str, str]:
+    return _static_file_routers

@@ -9,7 +9,7 @@ The package holds both halves of the wire path.
 
 The **client half** turns an encoded request into a round trip over a pooled
 connection: :class:`ClientTransport` picks TCP or UDP from
-:class:`RoundTripOptions`, and :class:`ClientConn` keeps the frame
+:class:`RoundTripOptions`, and :class:`ClientStreamConn` keeps the frame
 queue for streaming calls.
 
 The **server half** never accepts connections itself. It tells
@@ -31,9 +31,9 @@ The package is split by responsibility:
   and the plugin lookups, the TCP / UDP / stream round trips, the datagram
   endpoint helpers the UDP round trip uses, and the ``RoundTripOptions``
   the client fills per call
-- :mod:`~trpc_sdk.transport._pool` — client connection pools the TCP round
-  trip dials through; a tRPC-Python extension with no cross-language
-  counterpart, so it is scoped to the client transport half
+- :mod:`~trpc_sdk.transport._client._pool` — client connection pools the
+  TCP round trip dials through; a tRPC-Python extension with no
+  cross-language counterpart, so it is scoped to the client transport half
 - :mod:`~trpc_sdk.transport._server` — the server half's listen transports:
   ``TrpcServerTransport`` (bind before fork, listen after it; its private
   acceptor picks ``create_server`` or a main-thread accept loop from the
@@ -76,11 +76,6 @@ from ._constants import ClientTimeoutReason
 from ._constants import FRAME_HEAD_LEN
 from ._constants import INNER_MAGIC_VALUE
 from ._constants import RequestType
-from ._pool import ConnAddress
-from ._pool import ConnPoolOptions
-from ._pool import ConnectionPoolManager
-from ._pool import PooledConnection
-from ._pool import get_pool_connection
 from ._scheduler import get_next_worker
 from ._scheduler import has_custom_scheduler
 from ._scheduler import register_dispatcher_worker_func
@@ -91,7 +86,7 @@ from ._separate import SeparateRpcTaskConnection
 from ._separate import SeparateRpczConnection
 from ._types import ClientConnectionInfo
 from ._types import SchedulerParams
-from ._client import ClientConn
+from ._client import ClientStreamConn
 from ._client import ClientTransport
 from ._client import PacketConnection
 from ._client import PacketReader
@@ -101,6 +96,11 @@ from ._client import RoundTripOptions
 from ._client import get_client_transport
 from ._client import get_default_client_transport
 from ._client import open_datagram_endpoint
+from ._client._pool import ConnAddress
+from ._client._pool import Connection
+from ._client._pool import KeepLiveConnPoolManager
+from ._client._pool import KeepLiveConnPoolOptions
+from ._client._pool import get_pool_connection
 from ._server import ConnWriter
 from ._server import ConnectionCloseHandler
 from ._server import ConnectionIdleCleanHandler
@@ -131,15 +131,15 @@ __all__ = [
     "ClientTransport",
     "get_client_transport",
     "get_default_client_transport",
-    "ClientConn",
+    "ClientStreamConn",
     "RequestType",
     "ClientTimeoutReason",
     "RoundTripOptions",
     # Client connection pool
     "ConnAddress",
-    "ConnPoolOptions",
-    "ConnectionPoolManager",
-    "PooledConnection",
+    "Connection",
+    "KeepLiveConnPoolManager",
+    "KeepLiveConnPoolOptions",
     "get_pool_connection",
     # Datagram endpoint helpers
     "open_datagram_endpoint",

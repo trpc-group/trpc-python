@@ -105,7 +105,7 @@ async def test_send_request_compress_snappy():
     pytest.importorskip("snappy")
     ctx, request = _hello_context()
     reply = await get_client().invoke(
-        ctx, request, helloworld_pb2.HelloReply, _invoke_options(CompressType.Snappy))
+        ctx, request, helloworld_pb2.HelloReply, _invoke_options(CompressType.SNAPPY))
     assert reply.msg == "hi: hello: "
 
 
@@ -114,7 +114,7 @@ async def test_send_request_compress_gzip():
     """Test compress gzip"""
     ctx, request = _hello_context()
     reply = await get_client().invoke(
-        ctx, request, helloworld_pb2.HelloReply, _invoke_options(CompressType.Gzip))
+        ctx, request, helloworld_pb2.HelloReply, _invoke_options(CompressType.GZIP))
     assert reply.msg == "hi: hello: "
 
 
@@ -123,7 +123,7 @@ async def test_send_request_compress_zlib():
     """Test compress zlib"""
     ctx, request = _hello_context()
     reply = await get_client().invoke(
-        ctx, request, helloworld_pb2.HelloReply, _invoke_options(CompressType.ZLib))
+        ctx, request, helloworld_pb2.HelloReply, _invoke_options(CompressType.ZLIB))
     assert reply.msg == "hi: hello: "
 
 

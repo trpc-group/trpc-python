@@ -42,13 +42,11 @@ can use :class:`ConfigLoaderFactory` with the option helpers from
 :mod:`trpc_sdk.config._options`::
 
     from trpc_sdk.config import ConfigLoaderFactory
-    from trpc_sdk.config import with_codec
-    from trpc_sdk.config import with_provider
 
     loader = ConfigLoaderFactory.sync_load(
         "application.yaml",
-        with_provider("file"),
-        with_codec("YamlDecoder"),
+        provider="file",
+        decoder="YamlDecoder",
     )
     server_config = loader.get("server", {})
 
@@ -67,9 +65,12 @@ from typing import Optional
 
 from trpc_sdk.abc import BaseConfigProvider
 from trpc_sdk.abc import BaseConfigDecoder
+from trpc_sdk.abc import PluginType
 from trpc_sdk.common import get_or_create_event_loop
+from trpc_sdk.plugin import get_plugin
 
-from ._exceptions import ConfigError
+from ._exceptions import ConfigDecoderError
+from ._exceptions import ProviderNotExist
 
 
 class ConfigLoader:
@@ -185,15 +186,14 @@ class ConfigLoaderFactory:
     """Build configured loaders through composable option functions.
 
     The factory has no instance state. Use its class methods with options such
-    as :func:`~trpc_sdk.config.with_provider` and
-    :func:`~trpc_sdk.config.with_codec`.
+    as :func:`~trpc_sdk.config.ConfigLoaderFactory.sync_load`.
     """
 
     def __init__(self) -> None:
         raise TypeError("ConfigLoaderFactory only exposes classmethod; call it on the class.")
 
     @classmethod
-    def create(cls, path: str, *options: Callable) -> ConfigLoader:
+    def create(cls, path: str, decoder: str = "", provider: str = "") -> ConfigLoader:
         """Create a configured loader without reading the resource.
 
         Options are applied in the order provided. A valid loader requires
@@ -203,46 +203,51 @@ class ConfigLoaderFactory:
         Args:
             path: Path (or key) identifying the config within the provider.
             options: Options such as
-                :func:`~trpc_sdk.config._options.with_provider` /
-                :func:`~trpc_sdk.config._options.with_codec`.
+                :func:`~trpc_sdk.config.ConfigLoaderFactory.sync_load`.
 
         Returns:
             A ready-to-load config loader.
-
-        Raises:
-            ConfigError: If no decoder or no provider was selected.
         """
         config = ConfigLoader(path)
-        for option in options:
-            option(config)
-
-        if config._decoder is None:
-            raise ConfigError(f'No decoder selected for config {path}')
-
-        if config._provider is None:
-            raise ConfigError(f'No data provider selected for config {path}')
+        decoder_instance = cls._get_decoder(decoder)
+        config.set_decoder(decoder_instance)
+        provider_instance = cls._get_provider(provider)
+        config.set_provider(provider_instance)
 
         return config
 
     @classmethod
-    async def load(cls, path: str, *options: Callable) -> ConfigLoader:
+    def _get_decoder(cls, decoder: str) -> BaseConfigDecoder:
+        decoder_instance = get_plugin(PluginType.CONFIG_DECODER, decoder)
+        if decoder_instance is None:
+            raise ConfigDecoderError(decoder)
+        return decoder_instance
+
+    @classmethod
+    def _get_provider(cls, provider: str) -> BaseConfigProvider:
+        provider_instance = get_plugin(PluginType.CONFIG_PROVIDER, provider)
+        if provider_instance is None:
+            raise ProviderNotExist(provider)
+        return provider_instance
+
+    @classmethod
+    async def load(cls, path: str, decoder: str = "", provider: str = "") -> ConfigLoader:
         """Create a loader and asynchronously load its configuration.
 
         Args:
             path: Path (or key) identifying the config within the provider.
-            options: Options such as
-                :func:`~trpc_sdk.config._options.with_provider` /
-                :func:`~trpc_sdk.config._options.with_codec`.
+            decoder: Registered ``CONFIG_DECODER`` plugin name.
+            provider: Registered ``CONFIG_PROVIDER`` plugin name.
 
         Returns:
             The loaded config loader.
         """
-        config_loader = cls.create(path, *options)
+        config_loader = cls.create(path, decoder, provider)
         await config_loader.load()
         return config_loader
 
     @classmethod
-    def sync_load(cls, path: str, *options: Callable) -> ConfigLoader:
+    def sync_load(cls, path: str, decoder: str = "", provider: str = "") -> ConfigLoader:
         """Create and load a configuration from synchronous application code.
 
         This method runs :meth:`load` on the current event loop and returns the
@@ -251,11 +256,10 @@ class ConfigLoaderFactory:
 
         Args:
             path: Path (or key) identifying the config within the provider.
-            options: Options such as
-                :func:`~trpc_sdk.config._options.with_provider` /
-                :func:`~trpc_sdk.config._options.with_codec`.
+            decoder: Registered ``CONFIG_DECODER`` plugin name.
+            provider: Registered ``CONFIG_PROVIDER`` plugin name.
 
         Returns:
             The loaded config loader.
         """
-        return get_or_create_event_loop().run_until_complete(cls.load(path, *options))
+        return get_or_create_event_loop().run_until_complete(cls.load(path, decoder, provider))

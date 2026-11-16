@@ -3,13 +3,13 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Service selector extension interfaces and routing options.
 
 This module defines routing option models and the abstract selector,
 service-router, and DSN extractor contracts used to choose a service
 node and report call outcomes.
 """
+
 from __future__ import annotations
 
 from abc import ABC
@@ -21,9 +21,9 @@ from typing import List
 from typing import Optional
 from typing import Tuple
 
-from ._cython import TrpcContext  # pyright: ignore[reportMissingModuleSource]
-from ._node import Node
-from ._plugin import BasePlugin
+from .._cython import TrpcContext  # pyright: ignore[reportMissingModuleSource]
+from .._plugin import BasePlugin
+from ._types import Node
 
 
 @dataclass
@@ -290,11 +290,7 @@ class BaseServiceRouter(BasePlugin):
     """
 
     @abstractmethod
-    async def filter(
-            self,
-            service_name: str,
-            nodes: List[Node],
-            opt: ServerRouterOption) -> List[Node]:
+    async def filter(self, service_name: str, nodes: List[Node], opt: ServerRouterOption) -> List[Node]:
         """Return the nodes that are legal for this call.
 
         Args:

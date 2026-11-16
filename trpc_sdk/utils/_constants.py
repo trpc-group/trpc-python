@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Shared constants for :mod:`trpc_sdk.utils`.
 
 This module is the bottom of the utils import graph: it must not import

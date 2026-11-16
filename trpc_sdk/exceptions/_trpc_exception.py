@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """tRPC exception types and error codes."""
 
 from __future__ import annotations
@@ -26,30 +25,24 @@ class TrpcErrorType(IntEnum):
 
 def _build_exception_code() -> type[IntEnum]:
     """Build ``TrpcErrorCode`` from ``TrpcRetCode`` plus Python extensions."""
-    members = {
-        name: int(value) for name, value in trpc_pb2.TrpcRetCode.items()
-    }
+    members = {name: int(value) for name, value in trpc_pb2.TrpcRetCode.items()}
 
     # Python-only extensions. Values stay above the protocol reserved range so
     # they never collide with newly added TrpcRetCode members.
-    members.update(
-        {
-            "TRPC_CLIENT_POOL_CLOSED": 152,
-            "TRPC_CLIENT_POOL_CONN_CLOSED": 153,
-            "TRPC_TASK_HANDLE_ERR": 200,
-            "TRPC_PLUGIN_INIT_ERR": 202,
-            "TRPC_CONFIG_ERR": 203,
-        }
-    )
+    members.update({
+        "TRPC_CLIENT_POOL_CLOSED": 152,
+        "TRPC_CLIENT_POOL_CONN_CLOSED": 153,
+        "TRPC_TASK_HANDLE_ERR": 200,
+        "TRPC_PLUGIN_INIT_ERR": 202,
+        "TRPC_CONFIG_ERR": 203,
+    })
 
     exception_code = IntEnum("TrpcErrorCode", members)
-    exception_code.__doc__ = (
-        "Protocol and Python-framework error codes.\n\n"
-        "Protocol members are imported from ``trpc.TrpcRetCode`` at runtime, so "
-        "new protobuf retcodes become available without code changes. "
-        "Python-only extensions use values starting at 1001. Legacy name aliases "
-        "are intentionally omitted here and should be added by dependent packages."
-    )
+    exception_code.__doc__ = ("Protocol and Python-framework error codes.\n\n"
+                              "Protocol members are imported from ``trpc.TrpcRetCode`` at runtime, so "
+                              "new protobuf retcodes become available without code changes. "
+                              "Python-only extensions use values starting at 1001. Legacy name aliases "
+                              "are intentionally omitted here and should be added by dependent packages.")
     return exception_code
 
 
@@ -98,9 +91,8 @@ class UnknownError(TrpcException):
     """Exception raised for unclassified/unrecognized errors"""
 
     def __init__(self, msg: str):
-        """
-        Initialize the unknown error
-        
+        """Initialize the unknown error.
+
         Args:
             msg: Description of the unknown error condition
         """

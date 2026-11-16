@@ -67,8 +67,7 @@ class TrpcConfig:
         Returns:
             The configuration that was just loaded.
         """
-        cls._config_parser = TrpcConfigParser('file', 'yaml', {'file_path': config_path},
-                                              {'code': file_code})
+        cls._config_parser = TrpcConfigParser('file', 'yaml', {'file_path': config_path}, {'code': file_code})
         # The parser retains the decoded dictionary for lookup and deserializing.
         cls._config_parser.load()
         if cls._config_parser.get('client') is not None:
@@ -103,7 +102,7 @@ class TrpcConfig:
 
         cls.set_client_service_configs(client_service_config)
 
-        if client_config.filters is not None:
+        if client_config.filters:
             cls._fallback_client_config.filters = client_config.filters
 
         if client_config.timeout > 0:

@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """tRPC-Python server module: the service layer.
 
 The application parses the YAML config into a :class:`Server`, which builds

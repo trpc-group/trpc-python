@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Async hand-off queue used by stream transports.
 
 Unlike :class:`asyncio.Queue`, this type is a single-waiter rendezvous

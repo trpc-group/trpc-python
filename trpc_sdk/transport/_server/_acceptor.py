@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Main-thread accept loop that hands connections to serving loop threads.
 
 A threaded worker binds each public address once and accepts on the main
@@ -211,8 +210,8 @@ class Acceptor:
         Args:
             err: The ``OSError`` that made ``accept()`` fail.
         """
-        logger.error("[acceptor] accept on %s out of resources (%s); pausing %.1fs",
-                     self.address, repr(err), ACCEPT_RETRY_DELAY)
+        logger.error("[acceptor] accept on %s out of resources (%s); pausing %.1fs", self.address, repr(err),
+                     ACCEPT_RETRY_DELAY)
         self._disarm_reader()
         self._loop.call_later(ACCEPT_RETRY_DELAY, self._arm_reader)
 
@@ -247,9 +246,7 @@ class StreamListener:
     where it was started.
     """
 
-    def __init__(self,
-                 server: Optional[asyncio.AbstractServer] = None,
-                 acceptor: Optional[Acceptor] = None) -> None:
+    def __init__(self, server: Optional[asyncio.AbstractServer] = None, acceptor: Optional[Acceptor] = None) -> None:
         self.server = server
         self.acceptor = acceptor
         self._closed = False

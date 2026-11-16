@@ -45,8 +45,6 @@ from ._exceptions import ConfigDecoderError
 from ._exceptions import GetConfigKeyError
 from ._loader import ConfigLoader
 from ._loader import ConfigLoaderFactory
-from ._options import with_codec
-from ._options import with_provider
 from ._parser import TrpcConfigParser
 from ._provider import FileConfigProvider
 from ._types import Admin
@@ -90,8 +88,6 @@ __all__ = [
     # config loading
     "ConfigLoader",
     "ConfigLoaderFactory",
-    "with_codec",
-    "with_provider",
     # Exceptions
     "ConfigError",
     "GetConfigKeyError",

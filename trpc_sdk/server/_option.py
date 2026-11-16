@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Process-model and per-service options consumed by Server / TrpcServerAdapter.
 
 ``create_server(yaml)`` copies YAML ``server:`` fields onto :class:`ServerOption`
@@ -35,6 +34,7 @@ from trpc_sdk.naming import get_registry
 from trpc_sdk.stream import StreamDispatcher
 from trpc_sdk.transport import DefaultServerTransport
 from trpc_sdk.transport import DefaultServerTransportOption
+
 from ._constants import DEFAULT_ADDRESS
 from ._constants import DEFAULT_CLOSE_WAIT_TIME
 from ._constants import DEFAULT_COMPRESS_TYPE

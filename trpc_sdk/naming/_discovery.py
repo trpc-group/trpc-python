@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Built-in IP / DNS discovery.
 
 :class:`IpDiscovery` treats ``service_name`` as a ``host:port`` (or
@@ -34,7 +33,6 @@ from trpc_sdk.abc import PluginType
 from trpc_sdk.plugin import register_plugin
 
 from ._constants import DEFAULT_DISCOVERY_NAME
-from ._defaults import set_default_discovery
 
 
 @register_plugin(PluginType.NAMING_DISCOVERY, DEFAULT_DISCOVERY_NAME)
@@ -126,10 +124,8 @@ def resolve_host(host: str, resolve_dns: bool = True) -> Tuple[Optional[str], in
         port = host[host.index(']'):]
         port_arr = port.split(':')
         if len(port_arr) != 2:
-            raise Exception(
-                f"IPv6 address {host!r} is missing ':port' after the closing "
-                f"bracket (expected '[ip]:port')"
-            )
+            raise Exception(f"IPv6 address {host!r} is missing ':port' after the closing "
+                            f"bracket (expected '[ip]:port')")
         return ip, int(port_arr[1])
     else:
         if host.find("?") != -1:

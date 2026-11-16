@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """HTTP protocol constants shared across the package.
 
 Scheme names, aiohttp kwargs keys, and context-meta keys live here so

@@ -3,13 +3,12 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Dial a TCP or Unix stream for the client connection pools.
 
 :func:`dial_connection` is the shared connect path used by
-:class:`~trpc_sdk.transport._pool.ConnectionPoolManager` (as
-``ConnectionPoolManager.dial``) and by
-:class:`~trpc_sdk.transport._pool.ShortConnFactory`. Keeping it
+:class:`~trpc_sdk.transport._client._pool.KeepLiveConnPoolManager` (as
+``KeepLiveConnPoolManager.dial``) and by
+:class:`~trpc_sdk.transport._client._pool.ShortConnPool`. Keeping it
 in this module avoids a cycle between those two files.
 
 The stdlib ``asyncio.open_connection`` / ``open_unix_connection`` do the
@@ -38,10 +37,8 @@ from trpc_sdk.utils import set_tcp_keep_alive
 from ._constants import DEFAULT_STREAM_LIMIT
 
 
-async def dial_connection(
-        options: BaseClientTransportOption,
-        timeout: float,
-        loop: BaseEventLoop) -> Tuple[StreamReader, StreamWriter]:
+async def dial_connection(options: BaseClientTransportOption, timeout: float,
+                          loop: BaseEventLoop) -> Tuple[StreamReader, StreamWriter]:
     """Open a TCP or Unix stream.
 
     A connected ``socket.socket`` is adopted. A ``(host, port)``
@@ -80,10 +77,7 @@ async def dial_connection(
                                               family=socket.AF_INET6,
                                               local_addr=options.local_addr)
         else:
-            co_open = asyncio.open_connection(host,
-                                              port,
-                                              limit=DEFAULT_STREAM_LIMIT,
-                                              local_addr=options.local_addr)
+            co_open = asyncio.open_connection(host, port, limit=DEFAULT_STREAM_LIMIT, local_addr=options.local_addr)
         return await wait_for_by_loop(_open(co_open), timeout, loop=loop)
 
     assert False, f"address is error type {options.address}"

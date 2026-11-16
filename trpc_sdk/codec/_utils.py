@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Attachment accessors for the raw bytes carried after a tRPC body.
 
 The attachment accessors are the public read/write path for the raw

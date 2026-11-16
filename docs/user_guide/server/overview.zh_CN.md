@@ -271,4 +271,3 @@ register_child_callback(after_worker, ProcessType.WORKER)
 - `after_in_parent`：父进程完成 `fork` **之后**在父进程内触发。
 - `after_in_child`：每个子进程被 `fork` 出来后立即在子进程内触发。
 - `register_child_callback(func, process_type)`：紧接在 `after_in_child` 之后触发，但支持按子进程角色过滤——指定 `ProcessType.WORKER` 时仅在业务 Worker 子进程中执行，指定 `ProcessType.TASK` 时仅在 Task 任务子进程中执行。
-- `register_before_loop_run_in_child(func)`：在子进程完成所有插件初始化之后、正式进入事件循环 `loop.run_forever()` 之前触发。

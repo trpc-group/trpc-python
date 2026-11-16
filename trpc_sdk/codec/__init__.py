@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """tRPC-Python codec package: what a frame means, not how it travels.
 
 Public symbols are re-exported here. Implementation lives in ``_``-prefixed
@@ -11,8 +10,10 @@ modules; callers should only ``from trpc_sdk.codec import ...``.
 
 The package is split by responsibility:
 
-- :mod:`~trpc_sdk.codec._codec` — Python ``TrpcClientCodec`` / ``TrpcServerCodec`` plugins (``BaseCodec`` subclasses) that
-  hold a unary and a stream Cython codec and dispatch between them; the server INIT meta cache lives here
+- :mod:`~trpc_sdk.codec._codec` — Python ``TrpcClientCodec`` /
+  ``TrpcServerCodec`` plugins (``BaseCodec`` subclasses) that hold a unary
+  and a stream Cython codec and dispatch between them; the server INIT meta
+  cache lives here
 - :mod:`~trpc_sdk.codec._cython._codec` / :mod:`~trpc_sdk.codec._cython._codec_stream` — private Cython unary /
   stream codecs, both derived from the C-level ``_Codec`` root in :mod:`trpc_sdk.abc`
 - :mod:`~trpc_sdk.codec._cython._codec_parser` — TCP sticky-packet splitter (``TrpcServerProtocolParser``)

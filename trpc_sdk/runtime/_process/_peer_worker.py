@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Worker of ``peer`` mode: N equal processes, each a complete single-loop server.
 
 The process the application started is worker-0. Before its event loop exists
@@ -53,6 +52,7 @@ from trpc_sdk.log import logger
 from trpc_sdk.plugin import get_registered_tasks
 from trpc_sdk.telemetry import report_attr
 from trpc_sdk.transport import has_custom_scheduler
+
 from .._common import ChildReadiness
 from .._common import warn_unnamed_timers
 from .._constants import CHILD_EXIT_GRACE_SECONDS

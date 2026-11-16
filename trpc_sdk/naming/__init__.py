@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """tRPC-Python naming package: discovery, routing, load balancing, selectors.
 
 Public symbols are re-exported here. Callers should ``from trpc_sdk.naming
@@ -32,22 +31,22 @@ The package is split by responsibility:
 from __future__ import annotations
 
 from ._circuit_breaker import NoopCircuitBreaker
-from ._constants import DEFAULT_CIRCUITBREAKER_NAME
+from ._constants import DEFAULT_CIRCUIT_BREAKER_NAME
 from ._constants import DEFAULT_DISCOVERY_NAME
 from ._constants import DEFAULT_LOADBALANCE_NAME
 from ._constants import DEFAULT_SELECTOR_NAME
-from ._constants import DEFAULT_SERVICEROUTER_NAME
+from ._constants import DEFAULT_SERVICE_ROUTER_NAME
 from ._constants import DNS_SELECTOR_NAME
 from ._constants import IP_SELECTOR_NAMES
 from ._constants import TRPC_SELECTOR_NAME
-from ._defaults import get_default_circuitbreaker
+from ._defaults import get_default_circuit_breaker
 from ._defaults import get_default_discovery
 from ._defaults import get_default_loadbalance
-from ._defaults import get_default_servicerouter
-from ._defaults import set_default_circuitbreaker
+from ._defaults import get_default_service_router
+from ._defaults import set_default_circuit_breaker
 from ._defaults import set_default_discovery
 from ._defaults import set_default_loadbalance
-from ._defaults import set_default_servicerouter
+from ._defaults import set_default_service_router
 from ._discovery import IpDiscovery
 from ._discovery import resolve_host
 from ._dsn_selector import DSNSelector
@@ -63,13 +62,12 @@ from ._selector_lookup import get_selector
 from ._service_router import NoopServiceRouter
 from ._trpc_selector import TrpcSelector
 
-
 __all__ = [
     # Constants
     "DEFAULT_DISCOVERY_NAME",
     "DEFAULT_LOADBALANCE_NAME",
-    "DEFAULT_CIRCUITBREAKER_NAME",
-    "DEFAULT_SERVICEROUTER_NAME",
+    "DEFAULT_CIRCUIT_BREAKER_NAME",
+    "DEFAULT_SERVICE_ROUTER_NAME",
     "DEFAULT_SELECTOR_NAME",
     "TRPC_SELECTOR_NAME",
     "DNS_SELECTOR_NAME",
@@ -79,10 +77,10 @@ __all__ = [
     "set_default_discovery",
     "get_default_loadbalance",
     "set_default_loadbalance",
-    "get_default_circuitbreaker",
-    "set_default_circuitbreaker",
-    "get_default_servicerouter",
-    "set_default_servicerouter",
+    "get_default_circuit_breaker",
+    "set_default_circuit_breaker",
+    "get_default_service_router",
+    "set_default_service_router",
     # Discovery
     "IpDiscovery",
     "resolve_host",

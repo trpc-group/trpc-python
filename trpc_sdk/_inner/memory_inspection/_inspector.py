@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Per-process tracemalloc snapshots dumped to files on demand.
 
 Workers construct :class:`MemoryInspecter` only when

@@ -3,7 +3,6 @@
 # Copyright (C) 2026 Tencent. All rights reserved.
 #
 # tRPC-Python is licensed under Apache-2.0.
-
 """Built-in random load balancer.
 
 :class:`RandomLoadBalance` is registered as
@@ -23,7 +22,6 @@ from trpc_sdk.abc import PluginType
 from trpc_sdk.plugin import register_plugin
 
 from ._constants import DEFAULT_LOADBALANCE_NAME
-from ._defaults import set_default_loadbalance
 
 
 @register_plugin(PluginType.NAMING_LOADBALANCE, DEFAULT_LOADBALANCE_NAME)
@@ -35,11 +33,7 @@ class RandomLoadBalance(BaseLoadBalance):
     retry inside this plugin.
     """
 
-    async def select(
-            self,
-            service_name: str,
-            node_list: List[Node],
-            namespace: str) -> Node:
+    async def select(self, service_name: str, node_list: List[Node], namespace: str) -> Node:
         """Return one uniformly chosen node.
 
         Args:
@@ -54,9 +48,7 @@ class RandomLoadBalance(BaseLoadBalance):
             Exception: ``node_list`` is empty.
         """
         if len(node_list) == 0:
-            raise Exception(
-                f"RandomLoadBalance.select has no nodes for service "
-                f"{service_name!r} in namespace {namespace!r}"
-            )
+            raise Exception(f"RandomLoadBalance.select has no nodes for service "
+                            f"{service_name!r} in namespace {namespace!r}")
         n = randint(0, len(node_list) - 1)
         return node_list[n]

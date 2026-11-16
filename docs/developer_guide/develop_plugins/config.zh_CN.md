@@ -14,13 +14,7 @@
 
 ## 解码器
 
-解码器把 bytes 变成 dict，注册类型是 `PluginType.CONFIG_DECODER`。内置注册名是 `yaml`、`json`、`noop`。`with_codec` 传入的是这个注册名：
-
-```python
-from trpc_sdk.config import with_codec
-
-with_codec("yaml")
-```
+解码器把 bytes 变成 dict，注册类型是 `PluginType.CONFIG_DECODER`。内置注册名是 `yaml`、`json`、`noop`。
 
 `noop` 原样返回 bytes。这种结果没有按 key 取值的接口，`loader.get` 不能和它一起用。
 
@@ -57,7 +51,7 @@ class MyDecoder(BaseConfigDecoder):
         self._options = options
 ```
 
-使用时写成 `with_codec("my_decoder")`。
+使用时写成 `ConfigLoaderFactory.sync_load(decoder="my_decoder")`。
 
 ## 数据源
 
@@ -112,13 +106,11 @@ class MemoryConfigProvider(BaseConfigProvider):
 
 ```python
 from trpc_sdk.config import ConfigLoaderFactory
-from trpc_sdk.config import with_codec
-from trpc_sdk.config import with_provider
 
 loader = ConfigLoaderFactory.sync_load(
     "application.yaml",
-    with_provider("file"),
-    with_codec("yaml"),
+    decoder="yaml",
+    provider="file"
 )
 server = loader.get("server", {})
 ```

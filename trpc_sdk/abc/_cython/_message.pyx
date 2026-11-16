@@ -26,7 +26,7 @@ cdef class TrpcFrameHead:
     """
 
     def __cinit__(self):
-        self.stx = 0
+        self.magic = 0
         self.frame_type = 0
         self.frame_state = 0
         self.package_len = 0
@@ -34,13 +34,13 @@ cdef class TrpcFrameHead:
         self.stream_id = 0
         self.frame_reserved = 0
 
-    cpdef void set_stx(self, uint16_t stx) except *:
+    cpdef void set_magic(self, uint16_t magic) except *:
         """Set the protocol magic number.
 
         Args:
-            stx: Host-endian magic; a decode mismatch invalidates the frame.
+            magic: Host-endian magic; a decode mismatch invalidates the frame.
         """
-        self.stx = stx
+        self.magic = magic
 
     cpdef void set_frame_type(self, uint8_t frame_type) except *:
         """Set the payload type carried by this frame.
