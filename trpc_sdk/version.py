@@ -5,4 +5,4 @@
 # tRPC-Python is licensed under Apache-2.0.
 """tRPC-Python package version."""
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
